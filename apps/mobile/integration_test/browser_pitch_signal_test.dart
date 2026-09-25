@@ -1,0 +1,88 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:transpose_mobile/youtube_browser.dart';
+
+import 'fixtures/audio_probe_source.dart';
+
+void main() {
+  final IntegrationTestWidgetsFlutterBinding binding =
+      IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('browser WASM shifts frequency independently of speed', (
+    tester,
+  ) async {
+    final WebViewYouTubeSession session = WebViewYouTubeSession();
+    // Initialize through the public browser to retain real controller settings.
+    await tester.pumpWidget(
+      MaterialApp(home: YouTubeBrowserScreen(session: session)),
+    );
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (session.controller.platform is AndroidWebViewController) {
+      await (session.controller.platform as AndroidWebViewController)
+          .setMediaPlaybackRequiresUserGesture(false);
+    }
+    // Reproduce YouTube's no-blob module restriction using our own test document.
+    await session.controller.loadHtmlString(
+      '''<!doctype html><html><head>
+      <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' 'unsafe-eval'">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      </head><body></body></html>''',
+      baseUrl: 'https://m.youtube.com/watch?v=transpono-probe',
+    );
+    await Future<void>.delayed(const Duration(seconds: 1));
+    // Reload the document's bridge after enabling diagnostics (test-only).
+    await session.controller.runJavaScript(
+      'window.TransponoMedia?.dispose(); delete window.TransponoMedia;',
+    );
+    await session.controller.runJavaScript(audioProbeSource);
+    for (final String asset in <String>[
+      'SignalsmithStretch.js',
+      'transpono_stretch.js',
+      'transpono_media.js',
+    ]) {
+      await session.controller.runJavaScript(
+        await rootBundle.loadString('assets/web/$asset'),
+      );
+    }
+    final List<dynamic> cases = <dynamic>[];
+    for (final (int pitch, double speed) in <(int, double)>[
+      (12, 1),
+      (-5, 0.75),
+      (3, 1.25),
+    ]) {
+      await session.controller.runJavaScript('''
+        window.__probeResult = null;
+        window.TransponoAudioProbe.runCase({pitch:$pitch,speed:$speed})
+          .then(value => window.__probeResult=value)
+          .catch(error => window.__probeResult={error:error.message});
+      ''');
+      dynamic result;
+      final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+      while (result == null && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        await tester.pump();
+        dynamic value = await session.controller.runJavaScriptReturningResult(
+          'JSON.stringify(window.__probeResult)',
+        );
+        for (int i = 0; value is String && i < 2; i++) {
+          value = jsonDecode(value);
+        }
+        result = value;
+      }
+      debugPrint('TRANSPO_PITCH_SIGNAL ${jsonEncode(result)}');
+      cases.add(result);
+      expect(result, isNotNull);
+      expect(result['error'], isNull);
+      expect(result['passed'], isTrue);
+    }
+    binding.reportData = <String, dynamic>{'cases': cases};
+    await session.controller.runJavaScript(
+      'window.TransponoAudioProbe.cleanup()',
+    );
+    await tester.pumpWidget(const SizedBox());
+  }, timeout: const Timeout(Duration(minutes: 3)));
+}

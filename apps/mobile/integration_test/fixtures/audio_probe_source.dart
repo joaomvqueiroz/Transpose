@@ -1,0 +1,141 @@
+// Generated-tone fixture kept outside production assets.
+const audioProbeSource = r'''
+/*
+ * Isolated Android/iOS WebView DSP fixture. Test-only; not a YouTube page.
+ * Load an empty HTML document with baseUrl:
+ *   https://m.youtube.com/watch?v=transpono-probe
+ * Then inject this file, SignalsmithStretch.js and transpono_media.js, in order.
+ * The synthetic 440 Hz tone is generated in memory; no network/media fetches.
+ * window.TransponoAudioProbe.runCase({pitch: 3, speed: 0.75}) returns a JSON-safe
+ * result with measured frequencies, media-clock speed and the final snapshot.
+ * This measures the digital graph, not speaker/headphone acoustic output.
+ */
+(function () {
+  'use strict';
+  if (window.TransponoAudioProbe) throw new Error('The probe fixture is already installed.');
+  if (document.querySelector('video, audio')) throw new Error('Use an empty test document for the audio probe.');
+  window.__transponoAudioProbe = true;
+
+  const sampleRate = 48000;
+  const frequency = 440;
+  const duration = 30;
+  const samples = duration * sampleRate;
+  const data = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(data);
+  const ascii = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, samples * 2, true);
+  for (let i = 0; i < samples; i += 1) {
+    // 10 ms attack/release avoids clicks in the generated test tone itself.
+    const ramp = Math.min(1, i / 480, (samples - 1 - i) / 480);
+    view.setInt16(44 + i * 2, Math.round(Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.15 * ramp * 32767), true);
+  }
+
+  document.title = 'Transpono synthetic audio probe';
+  const video = document.createElement('video');
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.style.cssText = 'display:block;width:100%;min-height:100px;background:#0b1826';
+  const url = URL.createObjectURL(new Blob([data], {type: 'audio/wav'}));
+  const ready = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Synthetic WAV did not load.')), 10000);
+    video.addEventListener('loadedmetadata', () => {
+      clearTimeout(timeout);
+      resolve({frequency, duration, sampleRate});
+    }, {once: true});
+    video.addEventListener('error', () => {
+      clearTimeout(timeout);
+      reject(new Error('Synthetic WAV playback failed.'));
+    }, {once: true});
+  });
+  document.body.appendChild(video);
+  video.src = url;
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const median = values => {
+    const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
+    return finite.length ? finite[Math.floor(finite.length / 2)] : null;
+  };
+  let running = false;
+  async function runCase(parameters = {}) {
+    if (running) throw new Error('A probe case is already running.');
+    running = true;
+    try {
+      await ready;
+      if (!window.TransponoMedia) throw new Error('Inject the media bridge before running a case.');
+      const requestedPitch = parameters.pitch === undefined ? 3 : parameters.pitch;
+      const requestedSpeed = parameters.speed === undefined ? 1 : parameters.speed;
+      if (requestedPitch === 0) throw new Error('Use a nonzero pitch to test the processed graph.');
+      await window.TransponoMedia.command({action: 'clearLoop'});
+      video.currentTime = 2;
+      await video.play();
+      await window.TransponoMedia.command({action: 'pitch', value: requestedPitch});
+      await window.TransponoMedia.command({action: 'speed', value: requestedSpeed});
+      const deadline = performance.now() + 12000;
+      let snapshot;
+      do {
+        await sleep(200);
+        snapshot = window.TransponoMedia.snapshot();
+        if (snapshot.pitchStatus === 'unavailable') throw new Error(snapshot.pitchMessage);
+      } while (snapshot.pitchStatus !== 'active' && performance.now() < deadline);
+      if (snapshot.pitchStatus !== 'active') throw new Error('No processed signal was observed.');
+      // Flush initial analyser history and the browser's speed-change transition.
+      await sleep(1200);
+      const measurements = [];
+      const started = performance.now();
+      const startedPosition = video.currentTime;
+      for (let i = 0; i < 8; i += 1) {
+        await sleep(200);
+        measurements.push(window.TransponoMedia.snapshot());
+      }
+      const ended = performance.now();
+      const actualSpeed = (video.currentTime - startedPosition) / ((ended - started) / 1000);
+      snapshot = measurements.at(-1);
+      const inputHz = median(measurements.map(value => value.probe.inputHz));
+      const outputHz = median(measurements.map(value => value.probe.outputHz));
+      const expectedHz = frequency * Math.pow(2, requestedPitch / 12);
+      const centsError = outputHz ? 1200 * Math.log2(outputHz / expectedHz) : null;
+      return {
+        requestedPitch, requestedSpeed, inputHz, outputHz, expectedHz, centsError,
+        actualSpeed, sampleCount: measurements.length,
+        passed: inputHz !== null && Math.abs(inputHz - frequency) < 4 &&
+          centsError !== null && Math.abs(centsError) < 15 &&
+          Math.abs(actualSpeed - requestedSpeed) < 0.15 &&
+          snapshot.probe.wetGain === 1 && snapshot.probe.dryGain === 0 &&
+          snapshot.probe.sourceCount === 1 && snapshot.pitch === requestedPitch,
+        snapshot,
+      };
+    } finally {
+      video.pause();
+      running = false;
+    }
+  }
+
+  window.TransponoAudioProbe = Object.freeze({
+    ready, runCase,
+    cleanup() {
+      if (running) throw new Error('Wait for the current probe case before cleanup.');
+      video.pause();
+      if (window.TransponoMedia) window.TransponoMedia.dispose();
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+      video.remove();
+    },
+  });
+})();
+''';

@@ -1,0 +1,910 @@
+/* Transpono's page-local controls. No media is captured, fetched or exported. */
+(function () {
+  'use strict';
+
+  const allowedPage = () => window.top === window &&
+    /(^|\.)youtube\.com$/i.test(window.location.hostname) &&
+    window.location.protocol === 'https:';
+  if (!allowedPage()) return;
+  // WebView can reinject after an SPA navigation. Reuse MediaElementAudioSource
+  // ownership: creating a second source for the same element is not supported.
+  if (window.TransponoMedia && window.TransponoMedia._activate) {
+    window.TransponoMedia._activate();
+    return;
+  }
+
+  const graphs = new WeakMap();
+  const preparing = new WeakMap();
+  const allGraphs = new Set();
+  // Enabled only by the isolated generated-tone integration fixture.
+  const probeEnabled = window.__transponoAudioProbe === true;
+  const minLoopSeconds = 0.25;
+  let audioContext = null;
+  let video = null;
+  let videoId = null;
+  let pitch = 0;
+  let speed = 1;
+  let pitchStatus = 'idle';
+  let pitchMessage = '';
+  let loopA = null;
+  let loopB = null;
+  let loopWanted = false;
+  // Completion is an observation, not a seek command acknowledgement. Keep the
+  // counter monotonic and change epoch whenever its playback context changes.
+  let loopCount = 0;
+  let loopEpoch = 0;
+  let cycleArmed = false;
+  let pendingLoopReturn = null;
+  let loopEventElement = null;
+  let loopEventHandlers = null;
+  let observedSource = '';
+  let isAd = false;
+  let revision = 0;
+  let timer = null;
+  let disposed = false;
+  let lastPosted = '';
+  let snapshotRevision = 0;
+  let transportRevision = 0;
+  let playbackIntent = null;
+  let pitchCommandIntent = null;
+  let activeDispatchId = null;
+  const commandResults = new Map();
+  const maxCommandResults = 64;
+
+  const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
+  const now = () => performance.now();
+  const durationOf = (element) => Math.max(0, finite(element && element.duration));
+  const positionOf = (element) => Math.max(0, finite(element && element.currentTime));
+  const sourceOf = (element) => element ? element.currentSrc || element.src || '' : '';
+  const playbackReady = () => !!video && !disposed && !isAd && !video.ended &&
+    video.readyState >= 3 && !video.seeking;
+  const nearLoopStart = () => loopA !== null && loopB !== null &&
+    Math.abs(positionOf(video) - loopA) <= Math.min(0.1, (loopB - loopA) / 4);
+  const selectedId = () => {
+    const url = new URL(window.location.href);
+    if (url.pathname === '/watch') return url.searchParams.get('v');
+    const match = url.pathname.match(/^\/(?:shorts|live|embed)\/([^/?]+)/);
+    return match ? match[1] : null;
+  };
+  const title = () => {
+    const heading = document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title');
+    return ((heading && heading.textContent) || document.title || '')
+      .replace(/\s*[-–]\s*YouTube\s*$/, '').trim();
+  };
+
+  function timeout(promise, milliseconds, message) {
+    let timeoutId;
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]).finally(() => clearTimeout(timeoutId));
+  }
+
+  function setGain(node, value) {
+    node.gain.cancelScheduledValues(audioContext.currentTime);
+    node.gain.setValueAtTime(value, audioContext.currentTime);
+  }
+
+  function dry(graph, stopProcessing = false) {
+    if (!graph) return;
+    // These switches share the audio-context timestamp: never sum two copies.
+    setGain(graph.wet, 0);
+    setGain(graph.dry, 1);
+    graph.audible = false;
+    if (stopProcessing) {
+      graph.acknowledged = false;
+      if (graph.dspConnected) {
+        graph.input.disconnect(graph.stretch);
+        graph.stretch.disconnect();
+        graph.output.disconnect();
+        graph.dspConnected = false;
+      }
+      try {
+        Promise.resolve(graph.stretch.schedule({active: false})).catch(() => {});
+      } catch (_) {
+        // A dead processor must never prevent the dry route from being restored.
+      }
+    }
+  }
+
+  function wet(graph) {
+    setGain(graph.dry, 0);
+    setGain(graph.wet, 1);
+    graph.audible = true;
+  }
+
+  function retire(graph) {
+    if (!graph || graph.retired) return;
+    dry(graph, true);
+    graph.source.disconnect();
+    graph.input.disconnect();
+    graph.dry.disconnect();
+    graph.wet.disconnect();
+    graph.retired = true;
+    allGraphs.delete(graph);
+  }
+
+  function revive(graph) {
+    if (!graph || !graph.retired) return;
+    graph.input.connect(graph.dry).connect(audioContext.destination);
+    graph.wet.connect(audioContext.destination);
+    graph.source.connect(graph.input);
+    graph.retired = false;
+    allGraphs.add(graph);
+  }
+
+  function preservesPitch(element) {
+    if ('preservesPitch' in element) element.preservesPitch = true;
+    else if ('webkitPreservesPitch' in element) element.webkitPreservesPitch = true;
+    else if ('mozPreservesPitch' in element) element.mozPreservesPitch = true;
+    else return false;
+    return true;
+  }
+
+  function safeSource(element) {
+    if (element.mediaKeys) return false;
+    try {
+      const source = new URL(element.currentSrc || element.src, window.location.href);
+      return source.protocol === 'blob:' && source.origin === window.location.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function requireSound(element) {
+    if (element.muted || element.volume === 0) {
+      const error = new Error('Ative o som do vídeo e tente alterar o tom novamente.');
+      error.code = 'sound-muted';
+      throw error;
+    }
+  }
+
+  function unavailable(message, element = video) {
+    dry(element && graphs.get(element), true);
+    pitch = 0;
+    pitchStatus = 'unavailable';
+    pitchMessage = message;
+  }
+
+  function invalidateLoopObservation() {
+    loopEpoch += 1;
+    discardLoopReturn();
+  }
+
+  function discardLoopReturn() {
+    cycleArmed = false;
+    pendingLoopReturn = null;
+  }
+
+  function invalidatePlaybackIntent() {
+    transportRevision += 1;
+    playbackIntent = null;
+  }
+
+  function currentPlaybackIntent(intent) {
+    return intent && playbackIntent === intent && intent.revision === transportRevision &&
+      !disposed && allowedPage() && video === intent.element && videoId === intent.videoId &&
+      sourceOf(video) === intent.source && isAd === intent.isAd;
+  }
+
+  async function playCurrentVideo() {
+    const intent = {
+      revision: ++transportRevision, element: video, videoId,
+      source: sourceOf(video), isAd, commandId: activeDispatchId,
+    };
+    playbackIntent = intent;
+    if (audioContext) {
+      await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio.');
+    }
+    // The page can replace its source while AudioContext.resume is pending,
+    // including when background timers are throttled. Re-read it before play.
+    refresh();
+    if (!currentPlaybackIntent(intent)) return;
+    await intent.element.play();
+    refresh();
+    if (!currentPlaybackIntent(intent)) {
+      // A cancelled old Play cannot resurrect playback, but it must not stop a
+      // newer explicit Play for this same element/context when its promise ends.
+      if (!(currentPlaybackIntent(playbackIntent) &&
+          playbackIntent.element === intent.element)) intent.element.pause();
+    }
+  }
+
+  function armCycleAtStart() {
+    if (loopWanted && !pendingLoopReturn && playbackReady() &&
+        !video.paused && nearLoopStart()) cycleArmed = true;
+  }
+
+  function validLoopReturn(pending) {
+    return pending && pending.element === video && pending.epoch === loopEpoch &&
+      pending.videoId === videoId && pending.source === sourceOf(video) &&
+      loopWanted && !disposed && !isAd && pending.a === loopA && pending.b === loopB;
+  }
+
+  function bindLoopEvents(element) {
+    if (loopEventElement === element) return;
+    if (loopEventHandlers) {
+      for (const [name, handler] of Object.entries(loopEventHandlers)) {
+        loopEventElement.removeEventListener(name, handler);
+      }
+    }
+    loopEventElement = null;
+    loopEventHandlers = null;
+    if (!element || typeof element.addEventListener !== 'function' ||
+        typeof element.removeEventListener !== 'function') return;
+    loopEventElement = element;
+    loopEventHandlers = {
+      seeking() {
+        if (element !== video || disposed) return;
+        refresh();
+        const pending = pendingLoopReturn;
+        // currentTime is changed synchronously, but seeking/seeked are queued.
+        // Only the first seek to our exact A target belongs to this return.
+        if (validLoopReturn(pending) && !pending.sawSeeking && nearLoopStart()) {
+          pending.sawSeeking = true;
+        } else {
+          invalidateLoopObservation();
+          if (loopWanted && (positionOf(video) < loopA || positionOf(video) >= loopB)) {
+            loopWanted = false;
+          }
+        }
+        post();
+      },
+      seeked() {
+        if (element !== video || disposed) return;
+        refresh();
+        const pending = pendingLoopReturn;
+        const confirmed = validLoopReturn(pending) && pending.sawSeeking &&
+          playbackReady() && !video.paused && nearLoopStart();
+        pendingLoopReturn = null;
+        if (confirmed && pending.eligible) loopCount += 1;
+        // An external seek to A can start a new full pass, but cannot finish one.
+        cycleArmed = loopWanted && playbackReady() && !video.paused && nearLoopStart();
+        post();
+      },
+      play() {
+        if (element !== video || disposed) return;
+        refresh();
+        // A paused seek to A must arm before the first 200 ms poll, which can
+        // already be beyond the start tolerance even at 0.6x speed.
+        armCycleAtStart();
+        post();
+      },
+      playing() {
+        if (element !== video || disposed) return;
+        refresh();
+        // play can precede HAVE_FUTURE_DATA. The readiness event also covers
+        // buffering recovery at A, without arming a partial pass in the middle.
+        armCycleAtStart();
+        post();
+      },
+      pause() {
+        if (element !== video || disposed) return;
+        // Native YouTube controls can pause without going through our command
+        // bridge. Ignore an already-stale queued pause event after a newer Play.
+        if (element.paused) invalidatePlaybackIntent();
+        // A normal pause halfway through a pass preserves progress. Pausing a
+        // return before confirmation must never add a completed repetition.
+        if (pendingLoopReturn) discardLoopReturn();
+        post();
+      },
+      emptied() {
+        if (element !== video || disposed) return;
+        invalidateLoopObservation();
+        post();
+      },
+    };
+    for (const [name, handler] of Object.entries(loopEventHandlers)) {
+      element.addEventListener(name, handler);
+    }
+  }
+
+  function returnLoopToStart() {
+    const pending = {
+      element: video, videoId, source: sourceOf(video), epoch: loopEpoch,
+      a: loopA, b: loopB, eligible: cycleArmed, sawSeeking: false, startedAt: now(),
+    };
+    cycleArmed = false;
+    pendingLoopReturn = pending;
+    try {
+      video.currentTime = loopA;
+    } catch (_) {
+      invalidateLoopObservation();
+    }
+  }
+
+  function resetPractice(previous) {
+    revision += 1;
+    invalidatePlaybackIntent();
+    invalidateLoopObservation();
+    dry(previous && graphs.get(previous), true);
+    if (previous) previous.playbackRate = 1;
+    pitch = 0;
+    speed = 1;
+    pitchStatus = 'idle';
+    pitchMessage = '';
+    loopA = null;
+    loopB = null;
+    loopWanted = false;
+  }
+
+  function refresh() {
+    if (disposed || !allowedPage()) return;
+    const id = selectedId();
+    const next = id
+      ? document.querySelector('video.html5-main-video') || document.querySelector('video')
+      : null;
+    if (id !== videoId) {
+      resetPractice(video);
+      videoId = id;
+    }
+    if (next !== video) {
+      invalidatePlaybackIntent();
+      dry(video && graphs.get(video), true);
+      if (video && video.isConnected === false) retire(graphs.get(video));
+      video = next;
+      invalidateLoopObservation();
+      bindLoopEvents(video);
+      revive(video && graphs.get(video));
+      revision += 1;
+      if (pitch !== 0) {
+        pitchStatus = 'idle';
+        pitchMessage = 'O vídeo mudou. Aplique o tom novamente.';
+      }
+    }
+    const nextSource = sourceOf(video);
+    if (nextSource !== observedSource) {
+      observedSource = nextSource;
+      invalidatePlaybackIntent();
+      invalidateLoopObservation();
+    }
+    for (const graph of allGraphs) {
+      if (graph.element !== video && graph.element.isConnected === false) retire(graph);
+    }
+    const nextAd = !!document.querySelector('.ad-showing, .ad-interrupting');
+    if (nextAd !== isAd) {
+      isAd = nextAd;
+      invalidatePlaybackIntent();
+      invalidateLoopObservation();
+      revision += 1;
+      dry(video && graphs.get(video), true);
+      if (isAd) {
+        if (video) video.playbackRate = 1;
+        pitchStatus = 'idle';
+        pitchMessage = 'Os controles de prática retomam depois do anúncio.';
+      } else if (video) {
+        if (preservesPitch(video)) video.playbackRate = speed;
+        pitchMessage = '';
+        if (pitch !== 0) void applyPitch();
+      }
+    }
+    const graph = video && graphs.get(video);
+    if (graph && !safeSource(video)) {
+      unavailable('Este vídeo não permite alterar o tom. Reabra o vídeo se o áudio não voltar.');
+    }
+    const duration = durationOf(video);
+    if (!isAd && loopB !== null && (duration === 0 || loopB > duration)) {
+      loopB = null;
+      loopWanted = false;
+      invalidateLoopObservation();
+    }
+  }
+
+  function snapshot() {
+    refresh();
+    return {
+      snapshotRevision: ++snapshotRevision,
+      videoId,
+      title: video ? title() : '',
+      hasVideo: !!video && !disposed,
+      playing: !!video && !video.paused && !video.ended && !disposed,
+      muted: !!video && (video.muted || video.volume === 0),
+      position: positionOf(video),
+      duration: durationOf(video),
+      speed: video && !isAd ? finite(video.playbackRate, speed) : speed,
+      // The visible value describes confirmed processing, never just intention.
+      pitch: pitchStatus === 'active' ? pitch : 0,
+      pendingPitch: pitchStatus === 'loading' ? pitch : null,
+      pitchStatus,
+      pitchMessage,
+      loopA,
+      loopB,
+      loopEnabled: loopWanted && !isAd && !disposed,
+      loopCount,
+      loopEpoch,
+      loopEventsSupported: !!video && loopEventElement === video &&
+        durationOf(video) > 0 && !disposed &&
+        // At EOF the page can pause/navigate before the 200 ms loop poll. Do
+        // not offer automatic progression where completion is not reliable.
+        (loopB === null || loopB < durationOf(video)),
+      playbackReady: playbackReady(),
+      isAd,
+      ...(probeEnabled ? {probe: probeSnapshot()} : {}),
+    };
+  }
+
+  function post() {
+    const json = JSON.stringify(snapshot());
+    if (json === lastPosted) return;
+    lastPosted = json;
+    if (window.TransponoBridge && typeof window.TransponoBridge.postMessage === 'function') {
+      window.TransponoBridge.postMessage(json);
+    }
+  }
+
+  async function prepareGraph(element) {
+    if (graphs.has(element)) {
+      const graph = graphs.get(element);
+      revive(graph);
+      return graph;
+    }
+    if (preparing.has(element)) return preparing.get(element);
+    const id = videoId;
+    const pending = (async () => {
+      if (!safeSource(element)) throw new Error('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
+      const Context = window.AudioContext || window.webkitAudioContext;
+      const createStretch = window.TransponoCreateStretch || window.SignalsmithStretch;
+      if (!Context || typeof createStretch !== 'function') {
+        throw new Error('A alteração de tom não está disponível neste navegador.');
+      }
+      if (!audioContext) audioContext = new Context({latencyHint: 'interactive'});
+      await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio e tente novamente.');
+      let stretch;
+      let connected = false;
+      try {
+        // Worklet/WASM/CSP failure must happen before rerouting the media element.
+        // The default document policy remains in force; there is no CSP bypass.
+        const creation = Promise.resolve(createStretch(audioContext, {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+        }));
+        let expired = false;
+        creation.then(node => { if (expired) node.disconnect(); }, () => {});
+        try {
+          stretch = await timeout(creation, 8000, 'O processamento de tom não pôde ser iniciado.');
+        } catch (error) {
+          expired = true;
+          throw error;
+        }
+        await timeout(stretch.schedule({active: true, semitones: pitch}), 4000,
+          'O processador de tom não respondeu.');
+        if (disposed || video !== element || videoId !== id || isAd || pitch === 0) {
+          throw new Error('A seleção de vídeo mudou. Aplique o tom novamente.');
+        }
+        if (!safeSource(element)) throw new Error('Esta fonte de áudio não permite alterar o tom.');
+        requireSound(element);
+        const input = audioContext.createAnalyser();
+        const output = audioContext.createAnalyser();
+        input.fftSize = output.fftSize = probeEnabled ? 8192 : 512;
+        if (probeEnabled) input.smoothingTimeConstant = output.smoothingTimeConstant = 0;
+        const dryGain = audioContext.createGain();
+        const wetGain = audioContext.createGain();
+        dryGain.gain.value = 1;
+        wetGain.gain.value = 0;
+        input.connect(dryGain).connect(audioContext.destination);
+        input.connect(stretch).connect(output).connect(wetGain).connect(audioContext.destination);
+        // Last irreversible operation, after the entire output graph is ready.
+        const source = audioContext.createMediaElementSource(element);
+        const graph = {
+          element, source, input, output, stretch, dry: dryGain, wet: wetGain, retired: false,
+          samples: new Float32Array(512), audible: false, failed: false, dspConnected: true,
+          appliedPitch: pitch, acknowledged: false, silentSince: null,
+          ...(probeEnabled ? {
+            probeSpectrum: new Float32Array(4096), probeWave: new Float32Array(8192),
+          } : {}),
+        };
+        graphs.set(element, graph);
+        allGraphs.add(graph);
+        try {
+          source.connect(input);
+        } catch (error) {
+          source.disconnect();
+          source.connect(audioContext.destination);
+          graph.failed = true;
+          throw error;
+        }
+        connected = true;
+        stretch.addEventListener('processorerror', () => {
+          graph.failed = true;
+          dry(graph, true);
+          if (element === video) unavailable('O processamento parou. O áudio original foi mantido. Reabra o vídeo para tentar novamente.');
+          post();
+        });
+        return graph;
+      } finally {
+        if (!connected && stretch) stretch.disconnect();
+      }
+    })();
+    preparing.set(element, pending);
+    try {
+      return await pending;
+    } finally {
+      preparing.delete(element);
+    }
+  }
+
+  async function applyPitch() {
+    const element = video;
+    const token = ++revision;
+    pitchCommandIntent = {commandId: activeDispatchId, token, element};
+    const requested = pitch;
+    if (!element || isAd || disposed) return;
+    if (requested === 0) {
+      dry(graphs.get(element), true);
+      pitchStatus = 'idle';
+      pitchMessage = '';
+      return;
+    }
+    pitchStatus = 'loading';
+    pitchMessage = 'A preparar a alteração de tom…';
+    const previous = graphs.get(element);
+    if (previous) {
+      previous.acknowledged = false;
+      dry(previous);
+    }
+    try {
+      requireSound(element);
+      if (!safeSource(element)) throw new Error('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
+      const graph = await prepareGraph(element);
+      if (token !== revision || disposed || element !== video || isAd) return;
+      if (graph.failed) throw new Error('O processamento parou. Reabra o vídeo para tentar novamente.');
+      await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio e tente novamente.');
+      if (!graph.dspConnected) {
+        graph.input.connect(graph.stretch);
+        graph.stretch.connect(graph.output).connect(graph.wet);
+        graph.dspConnected = true;
+      }
+      const scheduledAt = now();
+      await timeout(graph.stretch.schedule({active: true, semitones: requested}), 4000,
+        'O processador de tom não respondeu.');
+      if (token !== revision || disposed || element !== video || isAd) return;
+      graph.appliedPitch = requested;
+      graph.acknowledged = true;
+      graph.silentSince = null;
+      graph.noSignalPlayingMs = 0;
+      graph.lastConfirmationTick = null;
+      graph.checkAfter = scheduledAt + 250;
+      // An ACK is not evidence of audio. Keep the dry route until output exists.
+      dry(graph);
+      pitchMessage = 'Tom preparado; a aguardar sinal de áudio.';
+    } catch (error) {
+      if (token === revision && !disposed && element === video && !isAd) {
+        unavailable(error.message || 'Não foi possível alterar o tom.');
+        if (error.code === 'sound-muted') pitchStatus = 'idle';
+      }
+    }
+    post();
+  }
+
+  function hasSignal(analyser, samples) {
+    analyser.getFloatTimeDomainData(samples);
+    return samples.some(sample => Number.isFinite(sample) && Math.abs(sample) > 0.00001);
+  }
+
+  function probeMeasurement(analyser, graph) {
+    analyser.getFloatFrequencyData(graph.probeSpectrum);
+    const bins = graph.probeSpectrum;
+    let peak = 1;
+    for (let i = 2; i < bins.length - 1; i += 1) {
+      if (bins[i] > bins[peak]) peak = i;
+    }
+    let hz = null;
+    if (Number.isFinite(bins[peak]) && bins[peak] > -90) {
+      const left = bins[peak - 1];
+      const center = bins[peak];
+      const right = bins[peak + 1];
+      const curvature = left - 2 * center + right;
+      const offset = Number.isFinite(curvature) && curvature < 0
+        ? Math.max(-0.5, Math.min(0.5, 0.5 * (left - right) / curvature)) : 0;
+      hz = (peak + offset) * audioContext.sampleRate / analyser.fftSize;
+    }
+    analyser.getFloatTimeDomainData(graph.probeWave);
+    const energy = graph.probeWave.reduce((total, sample) => total + sample * sample, 0);
+    return {hz, rms: Math.sqrt(energy / graph.probeWave.length)};
+  }
+
+  function probeSnapshot() {
+    const graph = video && graphs.get(video);
+    const input = graph ? probeMeasurement(graph.input, graph) : {hz: null, rms: null};
+    const output = graph ? probeMeasurement(graph.output, graph) : {hz: null, rms: null};
+    return {
+      inputHz: input.hz, outputHz: output.hz, inputRms: input.rms, outputRms: output.rms,
+      sampleRate: audioContext ? audioContext.sampleRate : null,
+      contextState: audioContext ? audioContext.state : 'absent',
+      dryGain: graph ? graph.dry.gain.value : null,
+      wetGain: graph ? graph.wet.gain.value : null,
+      sourceCount: allGraphs.size,
+    };
+  }
+
+  function tick() {
+    refresh();
+    if (disposed || !allowedPage()) return;
+    if (video && !isAd) {
+      const graph = graphs.get(video);
+      if (pitchStatus === 'loading' && (video.muted || video.volume === 0)) {
+        unavailable('Ative o som do vídeo e tente alterar o tom novamente.');
+        pitchStatus = 'idle';
+      }
+      if (graph && (video.paused || audioContext.state !== 'running')) {
+        graph.lastConfirmationTick = null;
+      }
+      if (graph && graph.acknowledged && !graph.failed && pitch !== 0 && graph.appliedPitch === pitch &&
+          safeSource(video) && !video.paused && audioContext.state === 'running' &&
+          now() >= graph.checkAfter && pitchStatus !== 'unavailable') {
+        if (hasSignal(graph.output, graph.samples)) {
+          if (!graph.audible) wet(graph);
+          graph.silentSince = null;
+          graph.noSignalPlayingMs = 0;
+          graph.lastConfirmationTick = null;
+          pitchStatus = 'active';
+          pitchMessage = 'Tom aplicado · processamento experimental';
+        } else if (hasSignal(graph.input, graph.samples)) {
+          if (graph.silentSince === null) graph.silentSince = now();
+          if (now() - graph.silentSince >= 2500) {
+            unavailable('O processador não produziu áudio. O áudio original foi mantido.');
+          }
+        } else {
+          graph.silentSince = null; // Genuine quiet passages are not DSP failures.
+          if (pitchStatus === 'loading') {
+            if (graph.lastConfirmationTick !== null) {
+              // Bound elapsed playable time, excluding pauses/background throttling.
+              graph.noSignalPlayingMs += Math.min(500, now() - graph.lastConfirmationTick);
+            }
+            graph.lastConfirmationTick = now();
+            if (graph.noSignalPlayingMs >= 10000) {
+              unavailable('Não foi possível confirmar áudio processável neste vídeo. Tente novamente durante a reprodução.');
+            }
+          }
+        }
+      }
+      if (pendingLoopReturn && !validLoopReturn(pendingLoopReturn)) invalidateLoopObservation();
+      if (pendingLoopReturn && (video.paused ||
+          now() - pendingLoopReturn.startedAt >= 5000)) {
+        // A long buffer/paused return lacks timely confirmation, but is not a
+        // new source or external seek. Lose this repetition, not the epoch.
+        discardLoopReturn();
+      }
+      if (loopWanted && loopA !== null && loopB !== null && !video.paused &&
+          playbackReady() && !pendingLoopReturn) {
+        if (positionOf(video) >= loopB) returnLoopToStart();
+        else if (nearLoopStart()) cycleArmed = true;
+      }
+    }
+    post();
+  }
+
+  function requireVideo() {
+    if (!video) throw new Error('Escolha e abra um vídeo primeiro.');
+  }
+
+  function requirePractice() {
+    requireVideo();
+    if (isAd) throw new Error('Aguarde o fim do anúncio para usar os controles de prática.');
+  }
+
+  function numberIn(value, min, max, name) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+      throw new RangeError(name + ' fora do intervalo permitido.');
+    }
+    return value;
+  }
+
+  function requireTimeline() {
+    requirePractice();
+    if (!durationOf(video)) throw new Error('Aguarde a duração do vídeo. Este controle não está disponível em transmissões ao vivo.');
+  }
+
+  async function execute(request) {
+    if (disposed || !allowedPage()) throw new Error('O navegador de prática está fechado.');
+    refresh();
+    if (!request || typeof request.action !== 'string') throw new TypeError('Comando inválido.');
+    switch (request.action) {
+      case 'pause':
+        invalidatePlaybackIntent();
+        if (pendingLoopReturn) discardLoopReturn();
+        if (video) video.pause();
+        break;
+      case 'play':
+        requireVideo();
+        // Flutter sends an explicit intent, never a toggle based on a possibly
+        // stale snapshot. Repeated Play preserves playback and the mute state.
+        if (video.paused || video.ended) await playCurrentVideo();
+        break;
+      case 'playPause':
+        requireVideo();
+        if (video.paused || video.ended) {
+          await playCurrentVideo();
+        } else {
+          invalidatePlaybackIntent();
+          video.pause();
+        }
+        break;
+      case 'unmute':
+        requireVideo();
+        video.muted = false;
+        if (video.volume === 0) video.volume = 1;
+        await playCurrentVideo();
+        pitchMessage = '';
+        break;
+      case 'pitch':
+        requirePractice();
+        pitch = numberIn(request.value, -12, 12, 'Tom');
+        await applyPitch();
+        break;
+      case 'speed': {
+        requirePractice();
+        const value = numberIn(request.value, 0.5, 1.5, 'Velocidade');
+        if (value !== 1 && !preservesPitch(video)) throw new Error('Este navegador não consegue preservar o tom ao mudar a velocidade.');
+        preservesPitch(video);
+        video.playbackRate = value;
+        speed = video.playbackRate;
+        break;
+      }
+      case 'seekBy': {
+        requireTimeline();
+        const delta = numberIn(request.value, -86400, 86400, 'Avanço');
+        const target = Math.max(0, Math.min(durationOf(video), positionOf(video) + delta));
+        invalidateLoopObservation();
+        if (loopWanted && (target < loopA || target >= loopB)) loopWanted = false;
+        video.currentTime = target;
+        break;
+      }
+      case 'seekTo': {
+        requireTimeline();
+        const seconds = numberIn(request.value, -Number.MAX_VALUE, Number.MAX_VALUE, 'Posição');
+        const target = Math.max(0, Math.min(durationOf(video), seconds));
+        invalidateLoopObservation();
+        if (loopWanted && (target < loopA || target >= loopB)) loopWanted = false;
+        video.currentTime = target;
+        break;
+      }
+      case 'markA':
+        requireTimeline();
+        invalidateLoopObservation();
+        loopA = Math.min(positionOf(video), durationOf(video));
+        if (loopB !== null && loopB - loopA < minLoopSeconds) {
+          loopB = null;
+          loopWanted = false;
+        }
+        break;
+      case 'markB': {
+        requireTimeline();
+        const candidate = Math.min(positionOf(video), durationOf(video));
+        if (loopA === null || candidate - loopA < minLoopSeconds) {
+          throw new Error('Marque A primeiro e coloque B pelo menos 0,25 s depois de A.');
+        }
+        invalidateLoopObservation();
+        loopB = candidate;
+        loopWanted = true;
+        break;
+      }
+      case 'toggleLoop':
+        requireTimeline();
+        if (loopA === null || loopB === null || loopB - loopA < minLoopSeconds) {
+          throw new Error('Marque A e B antes de ativar o loop.');
+        }
+        invalidateLoopObservation();
+        loopWanted = !loopWanted;
+        if (loopWanted && (positionOf(video) < loopA || positionOf(video) >= loopB)) video.currentTime = loopA;
+        break;
+      case 'clearLoop':
+        invalidateLoopObservation();
+        loopWanted = false;
+        loopA = loopB = null;
+        break;
+      default:
+        throw new Error('Comando não reconhecido.');
+    }
+    post();
+    return snapshot();
+  }
+
+  async function command(request) {
+    try {
+      return await execute(request);
+    } catch (error) {
+      pitchMessage = error.message || 'Não foi possível aplicar este controle.';
+      post();
+      throw error;
+    }
+  }
+
+  // WebView evaluateJavascript does not await returned JS promises. Dart polls
+  // this bounded, page-local acknowledgement instead of treating dispatch as
+  // completion. IDs are idempotent while retained; forgetting never resurrects
+  // an entry when an old asynchronous command eventually finishes.
+  function dispatch(id, request) {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 100) {
+      throw new TypeError('Identificador de comando inválido.');
+    }
+    if (commandResults.has(id)) return true;
+    if (commandResults.size >= maxCommandResults) {
+      for (const [key, result] of commandResults) {
+        if (result.status !== 'pending') {
+          commandResults.delete(key);
+          break;
+        }
+      }
+    }
+    if (commandResults.size >= maxCommandResults) {
+      throw new Error('Demasiados comandos pendentes.');
+    }
+    const pending = {status: 'pending'};
+    commandResults.set(id, pending);
+    // Propagate ownership only through synchronous submission. Keeping this
+    // global set during await would misattribute independent user commands.
+    const previousDispatchId = activeDispatchId;
+    let operation;
+    try {
+      activeDispatchId = id;
+      operation = command(request);
+    } finally {
+      activeDispatchId = previousDispatchId;
+    }
+    void operation.then(() => {
+      if (commandResults.get(id) === pending) commandResults.set(id, {status: 'done'});
+    }, error => {
+      if (commandResults.get(id) === pending) {
+        commandResults.set(id, {
+          status: 'error', error: String(error && error.message || 'Comando falhou.').slice(0, 500),
+        });
+      }
+    });
+    return true;
+  }
+
+  function commandResult(id) {
+    const result = commandResults.get(id);
+    return result ? {...result, snapshot: disposed ? null : snapshot()} : null;
+  }
+
+  function forgetCommand(id) {
+    return commandResults.delete(id);
+  }
+
+  function cancelCommand(id) {
+    if (commandResults.get(id)?.status !== 'pending') return false;
+    commandResults.set(id, {status: 'error', error: 'Comando cancelado.'});
+    if (playbackIntent && playbackIntent.commandId === id) {
+      const element = playbackIntent.element;
+      invalidatePlaybackIntent();
+      element.pause();
+    }
+    if (pitchCommandIntent && pitchCommandIntent.commandId === id &&
+        pitchCommandIntent.token === revision) {
+      revision += 1;
+      dry(graphs.get(pitchCommandIntent.element), true);
+      pitch = 0;
+      pitchStatus = 'idle';
+      pitchMessage = 'Alteração de tom cancelada. O áudio original foi mantido.';
+      pitchCommandIntent = null;
+    }
+    return true;
+  }
+
+  function dispose() {
+    revision += 1;
+    invalidatePlaybackIntent();
+    disposed = true;
+    clearInterval(timer);
+    timer = null;
+    if (video) video.pause();
+    resetPractice(video);
+    allGraphs.forEach(graph => dry(graph, true));
+    // Closing the context would permanently silence already attached elements.
+    // Keep their dry routes until this document is destroyed; no playback starts.
+  }
+
+  function activate() {
+    disposed = false;
+    if (timer === null) timer = setInterval(tick, 200);
+    tick();
+  }
+
+  window.TransponoMedia = Object.freeze({
+    command, dispatch, commandResult, cancelCommand, forgetCommand, snapshot, dispose, _activate: activate,
+  });
+  activate();
+})();

@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(audio_core LANGUAGES CXX)
+
+add_library(audio_core SHARED src/audio_core_c.cpp)
+find_package(oboe REQUIRED CONFIG)
+target_include_directories(audio_core PRIVATE include)
+target_compile_features(audio_core PRIVATE cxx_std_17)
+target_compile_options(audio_core PRIVATE -fvisibility=hidden)
+set_source_files_properties(src/audio_core_c.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+target_link_libraries(audio_core PRIVATE oboe::oboe log)
+
+# Explicit, local-only GPL/commercial-license evaluation. The normal APK must
+# compile without this source until publication licensing is resolved.
+if(TRANSPOSE_RUBBERBAND_SOURCE_DIR)
+    set(RB_SINGLE "${TRANSPOSE_RUBBERBAND_SOURCE_DIR}/single/RubberBandSingle.cpp")
+    if(NOT EXISTS "${RB_SINGLE}")
+        message(FATAL_ERROR "Rubber Band source missing at ${RB_SINGLE}")
+    endif()
+    target_sources(audio_core PRIVATE "${RB_SINGLE}")
+    target_sources(audio_core PRIVATE src/rubberband_processor.cpp)
+    set_source_files_properties("${RB_SINGLE}" PROPERTIES COMPILE_OPTIONS "-w")
+    target_include_directories(audio_core PRIVATE "${TRANSPOSE_RUBBERBAND_SOURCE_DIR}")
+    target_compile_definitions(audio_core PRIVATE TRANSPOSE_RUBBERBAND_INTERNAL_SPIKE=1)
+    set_source_files_properties(src/rubberband_processor.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+endif()

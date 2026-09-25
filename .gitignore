@@ -1,0 +1,19 @@
+# Dart / Flutter generated files
+.dart_tool/
+.packages
+build/
+coverage/
+
+# Reusable packages resolve dependencies locally; applications may commit locks.
+packages/*/pubspec.lock
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local, license-gated DSP evaluation source; never bundled by default.
+.third_party/
+

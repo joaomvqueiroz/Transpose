@@ -1,0 +1,635 @@
+<!DOCTYPE html><html class="dark" lang="pt-BR"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport">
+<meta content="mobile_tab" name="shell-type">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+    @layer base {
+      html, body { width: 100vw; margin: 0; padding: 0; background-color: #051424; }
+      body { overscroll-behavior: none; }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    }
+    ::-webkit-scrollbar { display: none; }
+    input[type=range]::-webkit-slider-thumb {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #00E5FF;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+    }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "midnight": "#051424",
+            "midnight-deep": "#07121F",
+            "card-surface": "#0B1B2F",
+            "card-hover": "#10233B",
+            "card-border": "rgba(255,255,255,0.06)",
+            "primary-cyan": "#00E5FF",
+            "text-primary": "#FFFFFF",
+            "text-muted": "#94A3B8"
+          },
+          fontFamily: {
+            "sans": ["Inter", "sans-serif"],
+            "mono": ["JetBrains Mono", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-midnight text-text-primary flex flex-col min-h-screen font-sans select-none antialiased">
+<!-- Top App Bar -->
+<header class="fixed top-0 w-full z-40 bg-midnight-deep/90 backdrop-blur-xl border-b border-card-border pt-safe">
+<div class="h-14 px-4 flex items-center justify-between">
+<!-- Menu Trigger -->
+<button aria-label="Abrir Menu Principal" class="w-11 h-11 -ml-1.5 flex items-center justify-center text-text-muted hover:text-text-primary active:text-primary-cyan transition-colors rounded-lg" id="btn-sidebar-open">
+<span class="material-symbols-outlined text-[26px]">menu</span>
+</button>
+<!-- Center Title -->
+<h1 class="text-[17px] font-semibold text-text-primary tracking-tight">Player</h1>
+<!-- Context Menu Trigger -->
+<div class="relative">
+<button aria-label="Mais opções" class="w-11 h-11 -mr-1.5 flex items-center justify-center text-text-muted hover:text-text-primary active:text-primary-cyan transition-colors rounded-lg" id="btn-more-options">
+<span class="material-symbols-outlined text-[26px]">more_horiz</span>
+</button>
+<!-- Dropdown Menu -->
+<div class="hidden absolute right-0 top-12 w-52 bg-card-surface/95 backdrop-blur-2xl border border-card-border rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95" id="dropdown-menu">
+<button class="w-full px-4 py-2.5 flex items-center gap-3 text-left text-[14px] text-text-primary hover:bg-card-hover transition-colors" onclick="closeDropdown();">
+<span class="material-symbols-outlined text-[19px] text-text-muted">bookmark_add</span>
+            Guardar Preset
+          </button>
+<button class="w-full px-4 py-2.5 flex items-center gap-3 text-left text-[14px] text-text-primary hover:bg-card-hover transition-colors" onclick="closeDropdown();">
+<span class="material-symbols-outlined text-[19px] text-text-muted">playlist_add</span>
+            Adicionar à Setlist
+          </button>
+<button class="w-full px-4 py-2.5 flex items-center gap-3 text-left text-[14px] text-text-primary hover:bg-card-hover transition-colors" onclick="openFullscreen(); closeDropdown();">
+<span class="material-symbols-outlined text-[19px] text-text-muted">fullscreen</span>
+            Fullscreen
+          </button>
+<div class="my-1 border-t border-card-border"></div>
+<button class="w-full px-4 py-2.5 flex items-center gap-3 text-left text-[14px] text-text-muted hover:text-text-primary hover:bg-card-hover transition-colors" onclick="openDrawer(); closeDropdown();">
+<span class="material-symbols-outlined text-[19px]">tune</span>
+            Mais Ferramentas
+          </button>
+</div>
+</div>
+</div>
+</header>
+<!-- Sidebar Drawer Navigation -->
+<div class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden transition-opacity duration-300" id="sidebar-overlay">
+<div class="w-[82%] max-w-sm h-full bg-midnight-deep border-r border-card-border flex flex-col pt-safe pb-safe transform -translate-x-full transition-transform duration-300 ease-out shadow-2xl" id="sidebar-content">
+<!-- Drawer Header -->
+<div class="h-16 px-5 flex items-center justify-between border-b border-card-border">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-primary-cyan/15 flex items-center justify-center text-primary-cyan">
+<span class="material-symbols-outlined text-[20px]">music_note</span>
+</div>
+<span class="text-[17px] font-bold tracking-tight text-text-primary">Studio Player</span>
+</div>
+<button class="w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary" id="btn-sidebar-close">
+<span class="material-symbols-outlined text-[22px]">close</span>
+</button>
+</div>
+<!-- Drawer Links Container -->
+<div class="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+<!-- Group 1: Conteúdo -->
+<div>
+<span class="px-3 text-[11px] font-semibold text-text-muted tracking-wider uppercase">Conteúdo</span>
+<div class="mt-2 space-y-1">
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg bg-card-surface text-primary-cyan font-medium text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">play_circle</span>
+              Agora a tocar
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">video_library</span>
+              Biblioteca
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">queue_music</span>
+              Setlists
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">repeat</span>
+              Loops Salvos
+            </a>
+</div>
+</div>
+<!-- Group 2: Ferramentas -->
+<div>
+<span class="px-3 text-[11px] font-semibold text-text-muted tracking-wider uppercase">Ferramentas</span>
+<div class="mt-2 space-y-1">
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">bookmark</span>
+              Predefinições
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">mic</span>
+              Gravações
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">speed</span>
+              Afinador &amp; Metrônomo
+            </a>
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">trending_up</span>
+              Progresso
+            </a>
+</div>
+</div>
+<!-- Group 3: Configurações -->
+<div>
+<span class="px-3 text-[11px] font-semibold text-text-muted tracking-wider uppercase">Preferências</span>
+<div class="mt-2 space-y-1">
+<a class="flex items-center gap-3.5 px-3 py-2.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-card-surface transition-colors text-[14px]" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+              Configurações
+            </a>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Content Viewport -->
+<main class="flex flex-col flex-1 pt-14 pb-24 max-w-md mx-auto w-full px-4 gap-4">
+<!-- 1. Sleek 16:9 Video Player -->
+<div class="relative w-full aspect-video rounded-2xl overflow-hidden bg-card-surface border border-card-border shadow-xl mt-2 group">
+<div class="w-full h-full bg-cover bg-center" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAaRlNo0SC2YuHWiH-PtMDkp97llXQA0Sm_zX-i6f2YmGcstD0I1yzGIHMvYkgGIOTNPEXfq1z-wmpxdo6WkGINAt-fZUzlIF16DhdXs3dOU2_UH9qEhoGstrhF2JVejs_FqC_VVLRtyLAR6TUc12l5n2pq64CEMa1h7BVBGwYef6goaTBbq70zCsiTZpufZPkR1TRTFWAfG62W9QNjeLVRFWb_B3VRpLwHRSeuG_gzX49_ZOCaEy4b1A');">
+<!-- Ambient Vignette -->
+<div class="absolute inset-0 bg-gradient-to-t from-midnight-deep/95 via-transparent to-midnight-deep/30 flex flex-col justify-end p-3">
+<!-- Scrubber Timeline -->
+<div class="w-full flex flex-col gap-1.5">
+<div class="relative w-full h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer">
+<div class="absolute left-0 top-0 bottom-0 w-[37.8%] bg-primary-cyan rounded-full"></div>
+<!-- Loop Window Marker -->
+<div class="absolute left-[33.3%] w-[10.8%] top-0 bottom-0 bg-white/50 rounded-full"></div>
+</div>
+<!-- Progress Info & Fullscreen Trigger -->
+<div class="flex items-center justify-between text-[13px] font-mono px-0.5 pt-0.5">
+<div class="flex items-center gap-1.5 font-medium text-text-primary">
+<span class="text-primary-cyan">01:24</span>
+<span class="text-text-muted">/</span>
+<span class="text-text-muted">03:42</span>
+</div>
+<button aria-label="Abrir tela cheia" class="w-8 h-8 flex items-center justify-center text-text-muted hover:text-text-primary active:scale-95 transition-transform" id="btn-fullscreen-trigger" onclick="openFullscreen()">
+<span class="material-symbols-outlined text-[21px]">fullscreen</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Micro-tip banner -->
+<div class="flex items-center justify-between px-3.5 py-2 rounded-xl bg-card-surface/70 border border-card-border text-[13px] text-text-muted shadow-sm" id="quick-tip">
+<div class="flex items-center gap-2 truncate">
+<span class="material-symbols-outlined text-primary-cyan text-[18px] shrink-0">touch_app</span>
+<span class="truncate">Dica: Dê duplo toque para avançar ou voltar 10s</span>
+</div>
+<button aria-label="Fechar dica" class="w-7 h-7 flex items-center justify-center text-text-muted hover:text-text-primary shrink-0" onclick="document.getElementById('quick-tip').style.display='none'">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+<!-- 2. TOM (Pitch Control) -->
+<section class="bg-card-surface border border-card-border rounded-2xl p-4 shadow-md flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="text-[12px] font-semibold text-text-muted tracking-widest uppercase">TOM</span>
+<span class="text-[13px] font-mono text-text-muted">Original: <strong class="text-text-primary font-semibold">C</strong></span>
+</div>
+<div class="flex items-center justify-between gap-4">
+<!-- Down Button (Circle 48px) -->
+<button aria-label="Diminuir semitom" class="w-12 h-12 rounded-full bg-card-hover active:bg-white/10 border border-card-border flex items-center justify-center text-text-primary hover:text-primary-cyan transition-colors active:scale-95 shadow-sm" id="btn-pitch-down">
+<span class="material-symbols-outlined text-[26px]">remove</span>
+</button>
+<!-- Center Key Indicator -->
+<div class="flex flex-col items-center justify-center flex-1">
+<span class="font-mono text-[36px] font-bold text-text-primary leading-none tracking-tight" id="display-key">B♭</span>
+<span class="font-mono text-[13px] text-primary-cyan font-medium mt-1" id="display-semitones">-2 semitons</span>
+</div>
+<!-- Up Button (Circle 48px) -->
+<button aria-label="Aumentar semitom" class="w-12 h-12 rounded-full bg-card-hover active:bg-white/10 border border-card-border flex items-center justify-center text-text-primary hover:text-primary-cyan transition-colors active:scale-95 shadow-sm" id="btn-pitch-up">
+<span class="material-symbols-outlined text-[26px]">add</span>
+</button>
+</div>
+</section>
+<!-- 3. VELOCIDADE (Speed Control) -->
+<section class="bg-card-surface border border-card-border rounded-2xl p-4 shadow-md flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="text-[12px] font-semibold text-text-muted tracking-widest uppercase">VELOCIDADE</span>
+<span class="font-mono text-[24px] font-bold text-text-primary" id="speed-indicator">0.85x</span>
+</div>
+<!-- Continuous Range Slider -->
+<div class="py-1">
+<input aria-label="Controle de velocidade" class="w-full h-2 rounded-full bg-card-hover appearance-none cursor-pointer focus:outline-none" id="speed-slider" max="1.50" min="0.50" step="0.05" type="range" value="0.85">
+</div>
+<!-- Quick Preset Chips -->
+<div class="grid grid-cols-3 gap-2.5 pt-1">
+<button class="speed-chip min-h-[44px] rounded-xl bg-card-hover border border-card-border text-[13px] font-mono text-text-muted hover:text-text-primary flex items-center justify-center transition-colors active:scale-95" onclick="setSpeed(0.75)" type="button">
+          0.75x
+        </button>
+<button class="speed-chip min-h-[44px] rounded-xl bg-card-hover border border-primary-cyan/40 text-[13px] font-mono text-primary-cyan font-semibold flex items-center justify-center transition-colors active:scale-95 shadow-sm" onclick="setSpeed(0.85)" type="button">
+          0.85x
+        </button>
+<button class="speed-chip min-h-[44px] rounded-xl bg-card-hover border border-card-border text-[13px] font-mono text-text-muted hover:text-text-primary flex items-center justify-center transition-colors active:scale-95" onclick="setSpeed(1.00)" type="button">
+          1.00x
+        </button>
+</div>
+</section>
+<!-- 4. REPETIÇÃO A-B (Loop Section) -->
+<section class="bg-card-surface border border-card-border rounded-2xl p-4 shadow-md flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[19px] text-text-muted">repeat</span>
+<span class="text-[12px] font-semibold text-text-muted tracking-widest uppercase">REPETIÇÃO A–B</span>
+</div>
+<!-- Active Cyan Toggle Switch -->
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" id="loop-toggle" type="checkbox">
+<div class="w-12 h-6 bg-card-hover peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-6 peer-checked:after:border-midnight-deep after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-white after:rounded-full after:h-[18px] after:w-[18px] after:transition-all peer-checked:bg-primary-cyan peer-checked:after:bg-midnight-deep"></div>
+</label>
+</div>
+<!-- Markers -->
+<div class="grid grid-cols-2 gap-2.5 pt-0.5">
+<button class="min-h-[46px] px-3.5 rounded-xl bg-card-hover border border-card-border active:border-white/20 flex items-center justify-between text-left transition-colors" type="button">
+<span class="text-[12px] font-bold text-text-muted">PONTO A</span>
+<span class="font-mono text-[14px] text-text-primary font-medium">01:14</span>
+</button>
+<button class="min-h-[46px] px-3.5 rounded-xl bg-card-hover border border-card-border active:border-white/20 flex items-center justify-between text-left transition-colors" type="button">
+<span class="text-[12px] font-bold text-text-muted">PONTO B</span>
+<span class="font-mono text-[14px] text-text-primary font-medium">01:38</span>
+</button>
+</div>
+</section>
+<!-- 5. Ergonomic Playback Controls -->
+<section class="flex items-center justify-center gap-6 py-2">
+<!-- Replay 10s -->
+<button aria-label="Voltar 10 segundos" class="w-13 h-13 p-3.5 rounded-full bg-card-surface border border-card-border text-text-primary hover:text-primary-cyan active:scale-95 transition-all shadow-md">
+<span class="material-symbols-outlined text-[26px]">replay_10</span>
+</button>
+<!-- Prominent 56px Cyan Play/Pause Button -->
+<button aria-label="Tocar ou pausar" class="w-14 h-14 rounded-full bg-primary-cyan text-midnight-deep flex items-center justify-center active:scale-95 shadow-[0_0_20px_rgba(0,229,255,0.4)] hover:brightness-105 transition-all" id="btn-play-pause">
+<span class="material-symbols-outlined text-[32px]" id="play-icon" style="font-variation-settings: 'FILL' 1;">pause</span>
+</button>
+<!-- Forward 10s -->
+<button aria-label="Avançar 10 segundos" class="w-13 h-13 p-3.5 rounded-full bg-card-surface border border-card-border text-text-primary hover:text-primary-cyan active:scale-95 transition-all shadow-md">
+<span class="material-symbols-outlined text-[26px]">forward_10</span>
+</button>
+</section>
+<!-- 6. Progressive Disclosure: Ferramentas de Estudo Accordion -->
+<div class="flex flex-col rounded-2xl bg-card-surface border border-card-border overflow-hidden transition-all duration-300">
+<button class="w-full px-4 py-3.5 flex items-center justify-between text-left hover:bg-card-hover transition-colors" id="btn-toggle-study" type="button">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[20px] text-text-muted">school</span>
+<span class="text-[14px] font-semibold text-text-primary">Ferramentas de Estudo</span>
+</div>
+<span class="material-symbols-outlined text-[20px] text-text-muted transition-transform duration-300" id="study-chevron">expand_more</span>
+</button>
+<!-- Collapsible Grid (Hidden by default) -->
+<div class="hidden px-4 pb-4 pt-1 border-t border-card-border" id="study-tools-panel">
+<div class="grid grid-cols-2 gap-2.5 mt-2">
+<button class="p-3 rounded-xl bg-card-hover border border-card-border flex items-center gap-3 text-text-primary hover:border-primary-cyan/40 transition-all active:scale-98">
+<span class="material-symbols-outlined text-[22px] text-primary-cyan">timer</span>
+<span class="text-[13px] font-medium">Metrônomo</span>
+</button>
+<button class="p-3 rounded-xl bg-card-hover border border-card-border flex items-center gap-3 text-text-primary hover:border-primary-cyan/40 transition-all active:scale-98">
+<span class="material-symbols-outlined text-[22px] text-primary-cyan">music_note</span>
+<span class="text-[13px] font-medium">Acordes</span>
+</button>
+<button class="p-3 rounded-xl bg-card-hover border border-card-border flex items-center gap-3 text-text-primary hover:border-primary-cyan/40 transition-all active:scale-98">
+<span class="material-symbols-outlined text-[22px] text-primary-cyan">tune</span>
+<span class="text-[13px] font-medium">Afinador</span>
+</button>
+<button class="p-3 rounded-xl bg-card-hover border border-card-border flex items-center gap-3 text-text-primary hover:border-primary-cyan/40 transition-all active:scale-98">
+<span class="material-symbols-outlined text-[22px] text-primary-cyan">bookmark</span>
+<span class="text-[13px] font-medium">Guardar</span>
+</button>
+</div>
+</div>
+</div>
+<!-- 7. Progressive Disclosure Secondary: Ferramentas & Áudio Avançado -->
+<div class="flex items-center justify-center pt-1">
+<button class="py-2 px-4 rounded-full text-text-muted hover:text-text-primary text-[13px] flex items-center gap-1.5 transition-colors" id="btn-open-advanced" type="button">
+<span class="material-symbols-outlined text-[18px]">equalizer</span>
+<span>Ferramentas &amp; Áudio Avançado ▾</span>
+</button>
+</div>
+</main>
+<!-- Audio Stems Advanced Drawer -->
+<div class="fixed inset-0 z-50 bg-black/75 backdrop-blur-md hidden flex-col justify-end" id="drawer-advanced">
+<div class="w-full bg-midnight-deep border-t border-card-border rounded-t-3xl p-5 flex flex-col gap-4 shadow-2xl animate-in slide-in-from-bottom duration-300 max-w-md mx-auto">
+<div class="w-12 h-1.5 bg-white/20 rounded-full mx-auto self-center"></div>
+<div class="flex items-center justify-between pb-1">
+<div>
+<h2 class="text-[17px] font-bold text-text-primary">Configurações de Áudio</h2>
+<p class="text-[13px] text-text-muted">Stems isolados e calibragem de pista</p>
+</div>
+<button aria-label="Fechar painel" class="w-9 h-9 rounded-full bg-card-surface flex items-center justify-center text-text-muted hover:text-text-primary" id="btn-close-advanced">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Stems -->
+<div class="space-y-2">
+<span class="text-[11px] font-semibold text-text-muted tracking-wider uppercase">Mixagem de Canais (Stems)</span>
+<div class="grid grid-cols-2 gap-2.5">
+<div class="p-3 rounded-xl bg-card-surface border border-card-border flex items-center justify-between">
+<span class="text-[14px] text-text-primary">Voz</span>
+<span class="material-symbols-outlined text-primary-cyan text-[20px]">volume_up</span>
+</div>
+<div class="p-3 rounded-xl bg-card-surface border border-card-border flex items-center justify-between">
+<span class="text-[14px] text-text-primary">Guitarra</span>
+<span class="material-symbols-outlined text-primary-cyan text-[20px]">volume_up</span>
+</div>
+<div class="p-3 rounded-xl bg-card-surface border border-card-border flex items-center justify-between">
+<span class="text-[14px] text-text-primary">Baixo</span>
+<span class="material-symbols-outlined text-primary-cyan text-[20px]">volume_up</span>
+</div>
+<div class="p-3 rounded-xl bg-card-surface border border-card-border flex items-center justify-between">
+<span class="text-[14px] text-text-primary">Bateria</span>
+<span class="material-symbols-outlined text-primary-cyan text-[20px]">volume_up</span>
+</div>
+</div>
+</div>
+<button class="w-full mt-2 py-3 rounded-xl bg-card-surface hover:bg-card-hover border border-card-border text-text-primary text-[14px] font-semibold transition-colors" id="btn-done-advanced" type="button">
+        Concluir
+      </button>
+</div>
+</div>
+<!-- 8. IMMERSIVE FULLSCREEN OVERLAY MODAL -->
+<div class="fixed inset-0 z-50 bg-black hidden flex-col justify-between overflow-hidden" id="fullscreen-overlay">
+<!-- Video background occupying 100% viewport -->
+<div class="absolute inset-0 bg-cover bg-center" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAaRlNo0SC2YuHWiH-PtMDkp97llXQA0Sm_zX-i6f2YmGcstD0I1yzGIHMvYkgGIOTNPEXfq1z-wmpxdo6WkGINAt-fZUzlIF16DhdXs3dOU2_UH9qEhoGstrhF2JVejs_FqC_VVLRtyLAR6TUc12l5n2pq64CEMa1h7BVBGwYef6goaTBbq70zCsiTZpufZPkR1TRTFWAfG62W9QNjeLVRFWb_B3VRpLwHRSeuG_gzX49_ZOCaEy4b1A');">
+<!-- Dark subtle overlay for contrast -->
+<div class="absolute inset-0 bg-black/40"></div>
+</div>
+<!-- Lock State Indicator Banner (appears when locked) -->
+<div class="hidden absolute top-20 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md border border-white/20 text-white px-4 py-2 rounded-full text-[13px] font-medium flex items-center gap-2 z-30 shadow-lg" id="fs-locked-banner">
+<span class="material-symbols-outlined text-[16px] text-primary-cyan">lock</span>
+      Controles bloqueados (toque no cadeado para liberar)
+    </div>
+<!-- Top Overlay Bar -->
+<div class="relative z-20 pt-safe px-5 py-3 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent">
+<!-- Close Fullscreen -->
+<button aria-label="Sair da tela cheia" class="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white active:scale-95" onclick="closeFullscreen()">
+<span class="material-symbols-outlined text-[22px]">close</span>
+</button>
+<!-- Lock Controls Toggle -->
+<button aria-label="Travar controles" class="w-10 h-10 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white active:scale-95" id="btn-lock-toggle" onclick="toggleScreenLock()">
+<span class="material-symbols-outlined text-[20px]" id="lock-icon">lock_open</span>
+</button>
+</div>
+<!-- Center Playback Controls (Can be locked) -->
+<div class="relative z-20 flex items-center justify-center gap-8 transition-opacity duration-200" id="fs-playback-controls">
+<button aria-label="Voltar 10s" class="w-13 h-13 p-3.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-white active:scale-90">
+<span class="material-symbols-outlined text-[28px]">replay_10</span>
+</button>
+<button aria-label="Reproduzir ou pausar" class="w-16 h-16 rounded-full bg-primary-cyan text-midnight-deep flex items-center justify-center shadow-[0_0_24px_rgba(0,229,255,0.6)] active:scale-90" id="fs-play-btn" onclick="togglePlayState()">
+<span class="material-symbols-outlined text-[36px]" id="fs-play-icon" style="font-variation-settings: 'FILL' 1;">pause</span>
+</button>
+<button aria-label="Avançar 10s" class="w-13 h-13 p-3.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-white active:scale-90">
+<span class="material-symbols-outlined text-[28px]">forward_10</span>
+</button>
+</div>
+<!-- Bottom Timeline Bar & Meta (Can be locked) -->
+<div class="relative z-20 pb-safe px-5 py-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex flex-col gap-2 transition-opacity duration-200" id="fs-bottom-bar">
+<!-- Scrubber -->
+<div class="relative w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-[37.8%] bg-primary-cyan rounded-full"></div>
+</div>
+<!-- Meta Information -->
+<div class="flex items-center justify-between text-[13px] pt-1">
+<div class="flex items-center gap-2 font-mono text-white">
+<span class="text-primary-cyan font-semibold">01:24</span>
+<span class="text-white/60">/</span>
+<span class="text-white/60">03:42</span>
+</div>
+<div class="flex items-center gap-3 font-mono">
+<span class="px-2 py-0.5 rounded-md bg-white/10 text-white font-medium text-[12px]">Tom: <b class="text-primary-cyan">B♭</b></span>
+<span class="px-2 py-0.5 rounded-md bg-white/10 text-white font-medium text-[12px]">Vel: <b class="text-primary-cyan">0.85x</b></span>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Navigation: 4 Essential Tabs -->
+<nav class="fixed bottom-0 w-full z-40 bg-midnight-deep/95 backdrop-blur-xl border-t border-card-border pb-safe">
+<div class="grid grid-cols-4 items-center h-16 px-1 max-w-md mx-auto">
+<!-- 1. Player (Active Cyan) -->
+<a aria-current="page" class="flex flex-col items-center justify-center min-w-[48px] py-1 text-primary-cyan transition-colors" href="#">
+<div class="relative flex flex-col items-center">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">play_circle</span>
+<span class="text-[12px] font-semibold tracking-wider uppercase mt-0.5">Player</span>
+<!-- Active tab dot indicator -->
+<div class="w-1 h-1 bg-primary-cyan rounded-full mt-0.5"></div>
+</div>
+</a>
+<!-- 2. Prática -->
+<a class="flex flex-col items-center justify-center min-w-[48px] py-1 text-text-muted hover:text-text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">graphic_eq</span>
+<span class="text-[12px] font-medium tracking-wider uppercase mt-0.5">Prática</span>
+<div class="w-1 h-1 opacity-0 mt-0.5"></div>
+</a>
+<!-- 3. Acordes -->
+<a class="flex flex-col items-center justify-center min-w-[48px] py-1 text-text-muted hover:text-text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">music_note</span>
+<span class="text-[12px] font-medium tracking-wider uppercase mt-0.5">Acordes</span>
+<div class="w-1 h-1 opacity-0 mt-0.5"></div>
+</a>
+<!-- 4. Palco -->
+<a class="flex flex-col items-center justify-center min-w-[48px] py-1 text-text-muted hover:text-text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">tune</span>
+<span class="text-[12px] font-medium tracking-wider uppercase mt-0.5">Palco</span>
+<div class="w-1 h-1 opacity-0 mt-0.5"></div>
+</a>
+</div>
+</nav>
+<!-- Interactive JavaScript Logic -->
+<script>
+    // Pitch / Key Stepper
+    const chromaticScale = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+    let currentPitchOffset = -2; // Default -2 semitones -> Bb
+    const baseKeyIndex = 0; // C
+
+    function updatePitchUI() {
+      const idx = (baseKeyIndex + currentPitchOffset + 120) % 12;
+      document.getElementById('display-key').innerText = chromaticScale[idx];
+      const semitoneLabel = currentPitchOffset === 0 
+        ? 'Tom Original' 
+        : (currentPitchOffset > 0 ? `+${currentPitchOffset} semitons` : `${currentPitchOffset} semitons`);
+      document.getElementById('display-semitones').innerText = semitoneLabel;
+    }
+
+    document.getElementById('btn-pitch-down').addEventListener('click', () => {
+      currentPitchOffset--;
+      updatePitchUI();
+    });
+
+    document.getElementById('btn-pitch-up').addEventListener('click', () => {
+      currentPitchOffset++;
+      updatePitchUI();
+    });
+
+    // Speed Slider & Preset Chips
+    const speedSlider = document.getElementById('speed-slider');
+    const speedIndicator = document.getElementById('speed-indicator');
+
+    function setSpeed(val) {
+      const formatted = parseFloat(val).toFixed(2);
+      speedSlider.value = formatted;
+      speedIndicator.innerText = `${formatted}x`;
+
+      document.querySelectorAll('.speed-chip').forEach(btn => {
+        if (btn.innerText.trim() === `${formatted}x`) {
+          btn.classList.add('border-primary-cyan/40', 'text-primary-cyan', 'font-semibold');
+          btn.classList.remove('border-card-border', 'text-text-muted');
+        } else {
+          btn.classList.remove('border-primary-cyan/40', 'text-primary-cyan', 'font-semibold');
+          btn.classList.add('border-card-border', 'text-text-muted');
+        }
+      });
+    }
+
+    speedSlider.addEventListener('input', (e) => {
+      setSpeed(e.target.value);
+    });
+
+    // Main Play/Pause state synchronization
+    let isPlaying = true;
+    const playBtn = document.getElementById('btn-play-pause');
+    const playIcon = document.getElementById('play-icon');
+    const fsPlayIcon = document.getElementById('fs-play-icon');
+
+    function togglePlayState() {
+      isPlaying = !isPlaying;
+      const iconName = isPlaying ? 'pause' : 'play_arrow';
+      playIcon.innerText = iconName;
+      if (fsPlayIcon) fsPlayIcon.innerText = iconName;
+    }
+
+    playBtn.addEventListener('click', togglePlayState);
+
+    // Context Dropdown Menu
+    const moreBtn = document.getElementById('btn-more-options');
+    const dropdown = document.getElementById('dropdown-menu');
+
+    moreBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('hidden');
+    });
+
+    function closeDropdown() {
+      dropdown.classList.add('hidden');
+    }
+
+    document.addEventListener('click', () => {
+      closeDropdown();
+    });
+
+    // Sidebar Drawer Controls
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const sidebarContent = document.getElementById('sidebar-content');
+    const openSidebarBtn = document.getElementById('btn-sidebar-open');
+    const closeSidebarBtn = document.getElementById('btn-sidebar-close');
+
+    function openSidebar() {
+      sidebarOverlay.classList.remove('hidden');
+      setTimeout(() => {
+        sidebarContent.classList.remove('-translate-x-full');
+      }, 10);
+    }
+
+    function closeSidebar() {
+      sidebarContent.classList.add('-translate-x-full');
+      setTimeout(() => {
+        sidebarOverlay.classList.add('hidden');
+      }, 300);
+    }
+
+    openSidebarBtn.addEventListener('click', openSidebar);
+    closeSidebarBtn.addEventListener('click', closeSidebar);
+    sidebarOverlay.addEventListener('click', (e) => {
+      if (e.target === sidebarOverlay) closeSidebar();
+    });
+
+    // Study Tools Accordion (Ferramentas de Estudo)
+    const toggleStudyBtn = document.getElementById('btn-toggle-study');
+    const studyPanel = document.getElementById('study-tools-panel');
+    const studyChevron = document.getElementById('study-chevron');
+
+    toggleStudyBtn.addEventListener('click', () => {
+      const isHidden = studyPanel.classList.contains('hidden');
+      if (isHidden) {
+        studyPanel.classList.remove('hidden');
+        studyChevron.classList.add('rotate-180');
+      } else {
+        studyPanel.classList.add('hidden');
+        studyChevron.classList.remove('rotate-180');
+      }
+    });
+
+    // Audio Advanced Drawer
+    const advancedDrawer = document.getElementById('drawer-advanced');
+    function openDrawer() {
+      advancedDrawer.classList.remove('hidden');
+      advancedDrawer.classList.add('flex');
+    }
+    function closeDrawer() {
+      advancedDrawer.classList.add('hidden');
+      advancedDrawer.classList.remove('flex');
+    }
+
+    document.getElementById('btn-open-advanced').addEventListener('click', openDrawer);
+    document.getElementById('btn-close-advanced').addEventListener('click', closeDrawer);
+    document.getElementById('btn-done-advanced').addEventListener('click', closeDrawer);
+
+    // Fullscreen Overlay & Lock Feature
+    const fsOverlay = document.getElementById('fullscreen-overlay');
+    let isControlsLocked = false;
+    const lockIcon = document.getElementById('lock-icon');
+    const lockBanner = document.getElementById('fs-locked-banner');
+    const fsPlaybackControls = document.getElementById('fs-playback-controls');
+    const fsBottomBar = document.getElementById('fs-bottom-bar');
+
+    function openFullscreen() {
+      fsOverlay.classList.remove('hidden');
+      fsOverlay.classList.add('flex');
+      isControlsLocked = false;
+      applyLockState();
+    }
+
+    function closeFullscreen() {
+      fsOverlay.classList.add('hidden');
+      fsOverlay.classList.remove('flex');
+    }
+
+    function toggleScreenLock() {
+      isControlsLocked = !isControlsLocked;
+      applyLockState();
+    }
+
+    function applyLockState() {
+      if (isControlsLocked) {
+        lockIcon.innerText = 'lock';
+        lockIcon.classList.add('text-primary-cyan');
+        lockBanner.classList.remove('hidden');
+        fsPlaybackControls.classList.add('opacity-0', 'pointer-events-none');
+        fsBottomBar.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => {
+          lockBanner.classList.add('hidden');
+        }, 2500);
+      } else {
+        lockIcon.innerText = 'lock_open';
+        lockIcon.classList.remove('text-primary-cyan');
+        lockBanner.classList.add('hidden');
+        fsPlaybackControls.classList.remove('opacity-0', 'pointer-events-none');
+        fsBottomBar.classList.remove('opacity-0', 'pointer-events-none');
+      }
+    }
+  </script>
+</body></html>
