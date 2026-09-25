@@ -44,6 +44,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final ScrollController _scroll = ScrollController();
   StudioTab _tab = StudioTab.player;
   bool _browsing = false, _fullscreen = false;
+  bool _chordActive = false;
+  bool _videoPinned = false;
+  bool _mainControlsExpanded = false;
+  bool _mainSettingsOpen = false;
+  String _chordSource = '';
+  int _chordRevision = 0;
+  bool _choosingChord = false;
   YouTubeBrowserSession? _browserOwner;
   Widget? _browser;
 
@@ -55,10 +62,34 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     // Observe loop events before recovery captures progress at the same tick.
     _practice.addListener(_practiceChanged);
     _recovery?.addListener(_changed);
-    unawaited(_recovery?.initialize());
+    unawaited(_initializeStartPage());
+  }
+
+  Future<void> _initializeStartPage() async {
+    await _recovery?.initialize();
+    final pending = _recovery?.pending;
+    if (!mounted ||
+        !widget.openSearchWhenEmpty ||
+        _player.loaded ||
+        _player.local.loaded ||
+        (pending != null && !pending.media.youtube)) {
+      return;
+    }
+    setState(() => _browsing = true);
+    await _player.openYouTube();
+    if (mounted && _player.youtube == null) {
+      setState(() => _browsing = false);
+    }
   }
 
   void _changed() {
+    if (_chordSource != _player.sourceKey) {
+      _chordSource = _player.sourceKey;
+      _chordRevision++;
+      _chordActive = false;
+      _mainControlsExpanded = false;
+      _mainSettingsOpen = false;
+    }
     if (mounted) setState(() {});
   }
 
@@ -106,8 +137,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     setState(() {
       _tab = tab;
       _browsing = false;
+      _mainSettingsOpen = false;
     });
     _recovery?.presentationChanged();
+  }
+
+  void _toggleMainAdjustments() {
+    setState(() {
+      if (_chordActive) {
+        _mainSettingsOpen = !_mainSettingsOpen;
+      } else {
+        _mainControlsExpanded = !_mainControlsExpanded;
+      }
+    });
+    if (_scroll.hasClients && _scroll.offset > 0) _scroll.jumpTo(0);
+  }
+
+  bool _onMainPlayerScroll(ScrollNotification notification) {
+    if (notification is ScrollUpdateNotification &&
+        notification.depth == 0 &&
+        notification.dragDetails != null &&
+        (notification.scrollDelta ?? 0) > 0 &&
+        _chordActive &&
+        _mainSettingsOpen) {
+      // Reading the chord sheet must not leave transport and pitch controls
+      // pinned over the video. Keep the video pin state; only close Ajustes.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _chordActive && _mainSettingsOpen) {
+          setState(() => _mainSettingsOpen = false);
+        }
+      });
+    }
+    return false;
   }
 
   Future<void> _openYouTubeSearch() async {
@@ -157,6 +218,95 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         _browsing = false;
         _tab = StudioTab.player;
       });
+    }
+  }
+
+  Future<void> _toggleChord() async {
+    if (_choosingChord) return;
+    if (_chordActive) {
+      setState(() {
+        _chordActive = false;
+        _mainSettingsOpen = false;
+        _mainControlsExpanded = false;
+      });
+      return;
+    }
+    final source = _player.sourceKey;
+    final revision = _chordRevision;
+    try {
+      final sheet = source.isEmpty
+          ? _chords.temporarySheet
+          : await _chords.read(source);
+      if (!mounted || revision != _chordRevision) return;
+      if (sheet.notes.trim().isNotEmpty) {
+        setState(() {
+          _chordActive = true;
+          _mainSettingsOpen = false;
+          _mainControlsExpanded = false;
+        });
+      } else {
+        await _searchChord();
+      }
+    } on Object {
+      _notice(
+        'Não foi possível ler a cifra guardada. Os dados foram preservados.',
+      );
+    }
+  }
+
+  Future<void> _searchChord() async {
+    if (_choosingChord) return;
+    _choosingChord = true;
+    final source = _player.sourceKey;
+    final revision = _chordRevision;
+    try {
+      // Browsing a second website must not start a second audible source.
+      await _player.pause();
+      if (!mounted || revision != _chordRevision) return;
+      final selected = await Navigator.of(context).push<ImportedChord>(
+        MaterialPageRoute(
+          builder: (_) => ChordBrowserPage(
+            initialQuery: _player.loaded ? _player.title : '',
+            sessionFactory: widget.chordBrowserFactory,
+          ),
+        ),
+      );
+      if (!mounted || selected == null) return;
+      if (revision != _chordRevision || source != _player.sourceKey) {
+        _notice(
+          'A música mudou. Escolha a cifra novamente para a fonte atual.',
+        );
+        return;
+      }
+      final latest = source.isEmpty
+          ? _chords.temporarySheet
+          : await _chords.read(source);
+      if (!mounted || revision != _chordRevision) return;
+      final sheet = latest.copyWith(
+        notes: selected.text,
+        sourceTitle: selected.title,
+        sourceUrl: selected.url.toString(),
+        transpose: 0,
+        followAudio: true,
+      );
+      if (source.isEmpty) {
+        _chords.temporarySheet = sheet;
+      } else {
+        await _chords.save(source, sheet);
+      }
+      if (!mounted || revision != _chordRevision) return;
+      setState(() {
+        _chordActive = true;
+        _chordRevision++;
+      });
+    } on Object {
+      if (mounted) {
+        _notice(
+          'Não foi possível guardar a cifra. A cifra anterior foi mantida.',
+        );
+      }
+    } finally {
+      _choosingChord = false;
     }
   }
 
@@ -302,8 +452,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     BuildContext sheet,
     IconData icon,
     String title,
-    VoidCallback action,
-  ) => ListTile(
+    VoidCallback action, {
+    Key? key,
+  }) => ListTile(
+    key: key,
     leading: Icon(icon),
     title: Text(title),
     onTap: () {
@@ -506,6 +658,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void _openSidebar() {
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .85,
+      ),
       showDragHandle: true,
       builder: (sheet) => SafeArea(
         child: SingleChildScrollView(
@@ -527,14 +683,49 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _menuItem(
                 sheet,
                 Icons.play_circle_outline,
-                'Em reprodução',
+                'Player',
                 () => _select(StudioTab.player),
+                key: const Key('visualTabplayer'),
+              ),
+              _menuItem(sheet, Icons.fullscreen, 'Tela cheia', _openFullscreen),
+              _menuItem(
+                sheet,
+                Icons.graphic_eq,
+                'Prática',
+                () => _select(StudioTab.practice),
+                key: const Key('visualTabpractice'),
+              ),
+              _menuItem(
+                sheet,
+                Icons.music_note,
+                'Acordes',
+                () => _select(StudioTab.chords),
+                key: const Key('visualTabchords'),
+              ),
+              _menuItem(
+                sheet,
+                Icons.tune,
+                'Palco',
+                () => _select(StudioTab.stage),
+                key: const Key('visualTabstage'),
+              ),
+              _menuItem(
+                sheet,
+                Icons.search,
+                'Pesquisar no YouTube',
+                _openYouTubeSearch,
               ),
               _menuItem(
                 sheet,
                 Icons.folder_open,
                 'Abrir ficheiro local',
                 _pickFile,
+              ),
+              _menuItem(
+                sheet,
+                Icons.bookmark_add_outlined,
+                'Guardar predefinição',
+                () => _save(),
               ),
               _menuItem(
                 sheet,
@@ -583,6 +774,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     final session = _player.youtube;
     return Column(
       children: <Widget>[
+        if (_recovery?.pending?.media.youtube == true) _recoveryBanner(),
         Row(
           children: <Widget>[
             IconButton(
@@ -622,6 +814,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           child: TextField(
             key: const Key('youtubeSearchInput'),
             controller: _query,
+            autofocus: true,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
             decoration: InputDecoration(
@@ -680,22 +873,149 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Widget _mainPanel(Widget media) {
-    Widget controls({required bool showMedia}) => SingleChildScrollView(
-      key: const Key('visualScrollplayer'),
-      controller: _scroll,
-      child: MainPlayerPanel(
-        model: _player,
-        media: media,
-        showMedia: showMedia,
-        onFullscreen: _openFullscreen,
-        onSearch: _openYouTubeSearch,
-        onOpenFile: _pickFile,
-        onTool: _tool,
-      ),
+    final controls = MainPlayerPanel(
+      model: _player,
+      sourceKey: _player.sourceKey,
+      chordStore: _chords,
+      chordActive: _chordActive,
+      onChordToggle: _toggleChord,
+      onChordSearch: _searchChord,
+      chordRevision: _chordRevision,
+      controlsExpanded: false,
+      onControlsToggle: _toggleMainAdjustments,
+      showControlsToggle: false,
+      showTip: false,
+      showSourceButtons: false,
+      showMessage: false,
+      media: media,
+      showMedia: false,
+      mediaExtraHeight: _player.isYouTube ? 48 : 0,
+      videoPinned: _videoPinned,
+      onPinToggle: () => setState(() => _videoPinned = !_videoPinned),
+      onFullscreen: _openFullscreen,
+      onSearch: _openYouTubeSearch,
+      onOpenFile: _pickFile,
+      onTool: _tool,
     );
-    if (!_player.isYouTube) return controls(showMedia: true);
-    return _withPinnedMedia(media, controls(showMedia: false));
+    return LayoutBuilder(
+      builder: (_, box) {
+        final surface = MainPlayerFullscreen(
+          model: _player,
+          media: media,
+          mainMode: true,
+          showHeader: false,
+          controlsOpen: _chordActive
+              ? _mainSettingsOpen
+              : _mainControlsExpanded,
+          onExit: _openSidebar,
+          onTool: _tool,
+          videoPinned: _videoPinned,
+          onPinToggle: () => setState(() => _videoPinned = !_videoPinned),
+          onOpenFile: _pickFile,
+          onChordToggle: _toggleChord,
+          onSearch: _openYouTubeSearch,
+          chordActive: _chordActive,
+          youtubeNativeTransport: _player.isYouTube,
+          onNativeMediaTouch: _player.isYouTube
+              ? _player.noteNativeVideoTouch
+              : null,
+        );
+        final height = _player.isYouTube
+            ? box.maxHeight * (_chordActive ? .72 : 1.0)
+            : (box.maxWidth * 9 / 16).clamp(0.0, box.maxHeight * .72);
+        if (!_videoPinned) {
+          return NotificationListener<ScrollNotification>(
+            onNotification: _onMainPlayerScroll,
+            child: SingleChildScrollView(
+              key: const Key('visualScrollplayer'),
+              controller: _scroll,
+              child: Column(
+                children: [
+                  _playerPageHeader(),
+                  SizedBox(height: height, child: surface),
+                  if (_chordActive) controls,
+                ],
+              ),
+            ),
+          );
+        }
+        return NotificationListener<ScrollNotification>(
+          onNotification: _onMainPlayerScroll,
+          child: CustomScrollView(
+            key: const Key('visualScrollplayer'),
+            controller: _scroll,
+            slivers: [
+              SliverToBoxAdapter(child: _playerPageHeader()),
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _PlayerVideoHeader(
+                  height: height,
+                  child: SizedBox(
+                    key: const Key('pinnedPlayerMedia'),
+                    child: surface,
+                  ),
+                ),
+              ),
+              if (_chordActive) SliverToBoxAdapter(child: controls),
+            ],
+          ),
+        );
+      },
+    );
   }
+
+  Widget _playerPageHeader() => _recoveryBanner();
+
+  Widget _header() => ColoredBox(
+    color: _tab == StudioTab.player ? const Color(0xDF040F1C) : studioBg,
+    child: SizedBox(
+      key: const Key('visualPlayerHeader'),
+      height: 57,
+      child: Row(
+        children: [
+          IconButton(
+            key: const Key('visualPlayerMenu'),
+            tooltip: 'Menu lateral',
+            onPressed: _openSidebar,
+            icon: const Icon(Icons.menu),
+          ),
+          Expanded(
+            child: Text(
+              switch (_tab) {
+                StudioTab.player =>
+                  _player.loaded && _player.title.isNotEmpty
+                      ? _player.title
+                      : 'Transpono',
+                StudioTab.practice => 'Prática',
+                StudioTab.chords => 'Acordes',
+                StudioTab.stage => 'Palco',
+              },
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _tab == StudioTab.player ? 17 : 21,
+                fontWeight: _tab == StudioTab.player
+                    ? FontWeight.w500
+                    : FontWeight.w800,
+              ),
+            ),
+          ),
+          IconButton(
+            key: const Key('visualPlayerSearch'),
+            tooltip: 'Pesquisar no YouTube',
+            onPressed: _openYouTubeSearch,
+            icon: const Icon(Icons.search),
+          ),
+          IconButton(
+            key: const Key('visualPlayerMore'),
+            tooltip: 'Mais opções',
+            onPressed: _openMore,
+            icon: const Icon(Icons.more_vert),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _secondaryPanel(Widget media) {
     final controls = switch (_tab) {
@@ -758,7 +1078,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ],
           );
         }
-        final height = ((box.maxWidth - 32) * 9 / 16 + 104).clamp(
+        final height = ((box.maxWidth - 32) * 9 / 16 + 48).clamp(
           0.0,
           box.maxHeight * .52,
         );
@@ -798,57 +1118,40 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   media: media,
                   onExit: _exitFullscreen,
                   onTool: _tool,
+                  youtubeNativeTransport: _player.isYouTube,
+                  onNativeMediaTouch: _player.isYouTube
+                      ? _player.noteNativeVideoTouch
+                      : null,
                 )
               : _browsing
               ? _browserPage(media)
-              : Column(
+              : Stack(
                   children: <Widget>[
-                    _recoveryBanner(),
-                    SizedBox(
-                      height: 57,
-                      child: Row(
-                        children: [
-                          IconButton(
-                            key: const Key('visualPlayerMenu'),
-                            tooltip: 'Menu',
-                            onPressed: _openSidebar,
-                            icon: const Icon(Icons.menu),
+                    Column(
+                      children: <Widget>[
+                        if (_tab != StudioTab.player) _header(),
+                        if (_tab != StudioTab.player) _recoveryBanner(),
+                        Expanded(
+                          child: _tab == StudioTab.player
+                              ? _mainPanel(media)
+                              : _secondaryPanel(media),
+                        ),
+                      ],
+                    ),
+                    if (_tab == StudioTab.player)
+                      Positioned(
+                        bottom: 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: _MainAdjustmentsBar(
+                            expanded: _chordActive
+                                ? _mainSettingsOpen
+                                : _mainControlsExpanded,
+                            onPressed: _toggleMainAdjustments,
                           ),
-                          Expanded(
-                            child: Text(
-                              switch (_tab) {
-                                StudioTab.player => 'Transpono',
-                                StudioTab.practice => 'Prática',
-                                StudioTab.chords => 'Acordes',
-                                StudioTab.stage => 'Palco',
-                              },
-                              style: const TextStyle(
-                                fontSize: 21,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            key: const Key('visualPlayerSearch'),
-                            tooltip: 'Pesquisar no YouTube',
-                            onPressed: _openYouTubeSearch,
-                            icon: const Icon(Icons.search),
-                          ),
-                          IconButton(
-                            key: const Key('visualPlayerMore'),
-                            tooltip: 'Mais opções',
-                            onPressed: _openMore,
-                            icon: const Icon(Icons.more_vert),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      child: _tab == StudioTab.player
-                          ? _mainPanel(media)
-                          : _secondaryPanel(media),
-                    ),
-                    _BottomTabs(selected: _tab, onSelect: _select),
                   ],
                 ),
         ),
@@ -858,9 +1161,30 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   Widget _recoveryBanner() {
     final recovery = _recovery;
-    final message = recovery?.message;
-    if (recovery == null || message == null) return const SizedBox.shrink();
+    if (recovery == null) return const SizedBox.shrink();
     final waiting = recovery.initializing || recovery.restoring;
+    if (!waiting && recovery.pending?.media.youtube == true) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          key: const Key('recoveryRestore'),
+          onPressed: () async {
+            await recovery.restorePending();
+            if (mounted && recovery.pending?.media.youtube == true) {
+              final error = recovery.message;
+              if (error != null && error.isNotEmpty) _notice(error);
+            }
+          },
+          icon: const Icon(Icons.restore),
+          label: const Text('Restaurar vídeo'),
+        ),
+      );
+    }
+    final message = recovery.message;
+    if (message == null) return const SizedBox.shrink();
+    if (recovery.pending == null && message.startsWith('Sessão recuperada')) {
+      return const SizedBox.shrink();
+    }
     return ConstrainedBox(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * .28,
@@ -940,6 +1264,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
     );
   }
+}
+
+class _PlayerVideoHeader extends SliverPersistentHeaderDelegate {
+  _PlayerVideoHeader({required this.height, required this.child});
+
+  final double height;
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+  @override
+  double get maxExtent => height;
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => ColoredBox(color: studioBg, child: child);
+  @override
+  bool shouldRebuild(_PlayerVideoHeader oldDelegate) =>
+      height != oldDelegate.height || child != oldDelegate.child;
 }
 
 class _PresetNameDialog extends StatefulWidget {

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 import 'package:transpose_mobile/web_media_command.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
 
 void main() {
   late _Browser browser;
@@ -130,6 +132,23 @@ void main() {
     // Replace the disposed test subject for teardown's single disposal.
     session = WebViewYouTubeSession(controller: browser);
   });
+
+  test('restored watch page is focused once when its video appears', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    WebViewPlatform.instance = _TestWebViewPlatform();
+    await session.start(Uri.https('m.youtube.com', '/'));
+    await session.openVideo('aqz-KE-bpKQ');
+    expect(browser.loaded?.queryParameters['v'], 'aqz-KE-bpKQ');
+    browser.pollState = _state(2)..['hasVideo'] = false;
+    await session.refresh();
+    expect(browser.focusCalls, 0);
+    browser.pollState = _state(3);
+    await session.refresh();
+    expect(browser.focusCalls, 1);
+    browser.pollState = _state(4);
+    await session.refresh();
+    expect(browser.focusCalls, 1, reason: 'Do not undo later user scrolling');
+  });
 }
 
 Map<String, dynamic> _state(
@@ -150,12 +169,38 @@ Map<String, dynamic> _state(
 };
 
 class _Browser implements WebViewController {
+  @override
+  PlatformWebViewController get platform => _FakePlatformController();
   Map<String, dynamic> pollState = _state(0), commandState = _state(1);
   String commandStatus = 'done';
   bool missingBridge = false;
   Completer<bool>? backGate;
   Completer<Object>? replyGate;
   final scripts = <String>[];
+  Uri? loaded;
+  NavigationDelegate? navigationDelegate;
+  int get focusCalls =>
+      scripts.where((s) => s.contains('window.scrollTo')).length;
+  @override
+  Future<void> loadRequest(
+    Uri uri, {
+    LoadRequestMethod method = LoadRequestMethod.get,
+    Map<String, String> headers = const <String, String>{},
+    body,
+  }) async {
+    loaded = uri;
+    navigationDelegate?.onPageStarted?.call(uri.toString());
+  }
+
+  @override
+  Future<void> setJavaScriptMode(JavaScriptMode mode) async {}
+  @override
+  Future<void> setBackgroundColor(Color color) async {}
+  @override
+  Future<void> setNavigationDelegate(NavigationDelegate delegate) async {
+    navigationDelegate = delegate;
+  }
+
   @override
   Future<void> runJavaScript(String script) async {
     scripts.add(script);
@@ -177,4 +222,33 @@ class _Browser implements WebViewController {
   Future<bool> canGoBack() async => backGate?.future ?? false;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakePlatformController extends PlatformWebViewController {
+  _FakePlatformController()
+    : super.implementation(const PlatformWebViewControllerCreationParams());
+}
+
+class _TestWebViewPlatform extends WebViewPlatform {
+  @override
+  PlatformNavigationDelegate createPlatformNavigationDelegate(
+    PlatformNavigationDelegateCreationParams params,
+  ) => _FakeNavigationDelegate(params);
+}
+
+class _FakeNavigationDelegate extends PlatformNavigationDelegate {
+  _FakeNavigationDelegate(super.params) : super.implementation();
+
+  @override
+  Future<void> setOnNavigationRequest(
+    NavigationRequestCallback callback,
+  ) async {}
+  @override
+  Future<void> setOnPageStarted(PageEventCallback callback) async {}
+  @override
+  Future<void> setOnPageFinished(PageEventCallback callback) async {}
+  @override
+  Future<void> setOnProgress(ProgressCallback callback) async {}
+  @override
+  Future<void> setOnWebResourceError(WebResourceErrorCallback callback) async {}
 }

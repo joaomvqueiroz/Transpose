@@ -66,6 +66,11 @@ void main() {
       }
 
       Future<void> tapKey(String key) async {
+        if (key.startsWith('visualTab') &&
+            find.byKey(Key(key)).evaluate().isEmpty) {
+          await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+          await tester.pump(const Duration(milliseconds: 250));
+        }
         final finder = find.byKey(Key(key));
         await tester.ensureVisible(finder);
         await tester.pump(const Duration(milliseconds: 200));

@@ -6,6 +6,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
+import 'main_player_test_navigation.dart';
+
 /// Live-network Android probe of the actual main panel. DOM interaction only
 /// selects a rendered search result; playback intents use the Flutter controls.
 /// It neither extracts media nor replaces the production audio bridge.
@@ -94,6 +96,7 @@ void main() {
     }
 
     Future<void> tap(String key) async {
+      await prepareMainPlayerControl(tester, key);
       final Finder target = find.byKey(Key(key));
       await waitFor('control available: $key', () async {
         await tester.pump();
@@ -239,7 +242,7 @@ void main() {
       await tap('youtubeUseInPlayer');
       await waitFor('main panel visible', () async {
         return find
-            .byKey(const Key('visualPlayerPitchUp'))
+            .byKey(const Key('visualPlayerMediaSurface'))
             .evaluate()
             .isNotEmpty;
       });

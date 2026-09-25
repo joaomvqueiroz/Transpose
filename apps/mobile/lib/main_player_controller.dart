@@ -23,6 +23,7 @@ class MainPlayerController extends PlayerPanelModel {
   YouTubeBrowserSession? get youtube => _youtube;
   bool _online = false, _disposed = false;
   bool _youtubePauseRequested = false, _pausingYouTube = false;
+  DateTime? _lastNativeVideoTouch;
   Completer<void>? _restoreCancellation;
   int _pending = 0;
   int _pauseRevision = 0;
@@ -164,6 +165,7 @@ class MainPlayerController extends PlayerPanelModel {
   Future<void> openYouTube() {
     _cancelRestore();
     _youtubePauseRequested = false;
+    _lastNativeVideoTouch = null;
     return _run(() async {
       if (!await _releaseLocal() || _disposed) return;
       await _ensureYouTube();
@@ -176,6 +178,7 @@ class MainPlayerController extends PlayerPanelModel {
     if (query.trim().isEmpty) return Future<void>.value();
     _cancelRestore();
     _youtubePauseRequested = false;
+    _lastNativeVideoTouch = null;
     return _run(() async {
       if (!await _releaseLocal() || _disposed) return;
       await _ensureYouTube();
@@ -253,6 +256,7 @@ class MainPlayerController extends PlayerPanelModel {
     _pauseRevision++;
     _cancelRestore();
     _youtubePauseRequested = true;
+    _lastNativeVideoTouch = null;
     try {
       await Future.wait<void>(<Future<void>>[
         local.pause(),
@@ -410,6 +414,7 @@ class MainPlayerController extends PlayerPanelModel {
     final cancellation = Completer<void>();
     _restoreCancellation = cancellation;
     _youtubePauseRequested = !preset.youtube;
+    _lastNativeVideoTouch = null;
     bool active() => !_disposed && !cancellation.isCompleted;
     return _run(() async {
       if (!active()) return;
@@ -588,6 +593,17 @@ class MainPlayerController extends PlayerPanelModel {
 
   void _changed() {
     if (_disposed) return;
+    final lastTouch = _lastNativeVideoTouch;
+    if (_online &&
+        _youtubePauseRequested &&
+        _media.playing &&
+        lastTouch != null &&
+        DateTime.now().difference(lastTouch) < const Duration(seconds: 5)) {
+      // The restored video stays paused against page autoplay. A real touch
+      // on its WebView followed by native playback releases that guard.
+      _youtubePauseRequested = false;
+      _lastNativeVideoTouch = null;
+    }
     if (_pending == 0 &&
         !_pausingYouTube &&
         _media.playing &&
@@ -603,6 +619,12 @@ class MainPlayerController extends PlayerPanelModel {
       );
     }
     notifyListeners();
+  }
+
+  void noteNativeVideoTouch() {
+    if (_online && _youtubePauseRequested && !_disposed) {
+      _lastNativeVideoTouch = DateTime.now();
+    }
   }
 
   @override

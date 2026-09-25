@@ -248,3 +248,9 @@ Antes de modificar:
 6. não refatore áreas não relacionadas;
 7. se uma decisão permanente mudar, atualize PROJECT_MEMORY e ADR.
 ```
+
+## 14. Player com cifra opcional — pedido corrigido
+
+Executar o prompt e gates S0–S5 de `docs/PLAYER_CIFRA_SEQUENTIAL_PLAN.md`.
+É obrigatório trabalhar sequencialmente, testar cada alteração e atualizar o
+roadmap antes de avançar; não repetir a UI de cifra permanente/vídeo fixo.

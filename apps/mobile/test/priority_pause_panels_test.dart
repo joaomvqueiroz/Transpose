@@ -96,6 +96,12 @@ void main() {
         ),
       );
       await tester.pump();
+      if (panel.$1 == 'main') {
+        final surface = find.byKey(const Key('visualPlayerMediaSurface'));
+        await tester.ensureVisible(surface);
+        await tester.tap(surface);
+        await tester.pump();
+      }
       final transport = find.byKey(Key(panel.$2));
       await tester.ensureVisible(transport);
       expect(_enabled(tester, transport), isTrue);

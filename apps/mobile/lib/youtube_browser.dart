@@ -147,6 +147,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   int _document = 0;
   int _snapshotRevision = -1;
   String? _pauseOnReadyVideoId;
+  String? _focusOnReadyVideoId;
   int _pauseOnReadyDocument = 0;
   Timer? _timer;
   String? _bridge;
@@ -284,6 +285,24 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         return;
       }
       if (decoded is Map<String, dynamic>) _acceptSnapshot(decoded);
+      if (_focusOnReadyVideoId != null &&
+          decoded is Map<String, dynamic> &&
+          decoded['videoId'] == _focusOnReadyVideoId &&
+          decoded['hasVideo'] == true &&
+          decoded['isAd'] != true) {
+        // A restored watch page can retain YouTube's own scroll position and
+        // display its small sticky player. Focus once when its video exists;
+        // never keep pulling the page back while the user browses it.
+        try {
+          await focusVideo();
+          if (generation == _document &&
+              decoded['videoId'] == _focusOnReadyVideoId) {
+            _focusOnReadyVideoId = null;
+          }
+        } on Object {
+          // A navigation can replace the JS context; the next refresh retries.
+        }
+      }
       _canGoBack = back;
       _notify();
     } on Object {
@@ -311,7 +330,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         state['videoId'] is String &&
         (state['videoId'] as String).isNotEmpty &&
         state['videoId'] != pausedVideoId;
-    if (selectedAnotherVideo) _pauseOnReadyVideoId = null;
+    if (selectedAnotherVideo) {
+      _pauseOnReadyVideoId = null;
+      _focusOnReadyVideoId = null;
+    }
     if (pausedVideoId == null ||
         selectedAnotherVideo ||
         state['isAd'] == true ||
@@ -364,6 +386,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     await command('pause');
     if (_disposed) return;
     _pauseOnReadyVideoId = videoId;
+    _focusOnReadyVideoId = videoId;
     _pauseOnReadyDocument = _document + 1;
     _media = const YouTubeMediaState();
     _error = null;
@@ -389,6 +412,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     await command('pause');
     if (_disposed) return;
     _pauseOnReadyVideoId = null;
+    _focusOnReadyVideoId = null;
     _error = null;
     await controller.loadRequest(youtubeSearchUri(query));
   }
@@ -404,6 +428,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   Future<void> goBack() async {
     await command('pause');
     _pauseOnReadyVideoId = null;
+    _focusOnReadyVideoId = null;
     if (await controller.canGoBack()) await controller.goBack();
   }
 

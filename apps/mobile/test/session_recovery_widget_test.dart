@@ -84,7 +84,8 @@ void main() {
       await tester.tap(find.byKey(const Key('recoveryRestore')));
       await tester.pumpAndSettle();
       expect(creations, 1);
-      expect(find.textContaining('Sessão recuperada'), findsOneWidget);
+      expect(find.textContaining('Sessão recuperada'), findsNothing);
+      expect(find.byKey(const Key('recoveryRestore')), findsNothing);
       expect(find.byKey(const Key('visualPlayerMenu')), findsOneWidget);
       expect(
         session.commands.where(
@@ -99,7 +100,7 @@ void main() {
   );
 
   testWidgets(
-    'dismiss saved online session never clears data or creates WebView',
+    'saved online session remains available without creating WebView',
     (tester) async {
       final store = _Store(SessionRecoveryResult(snapshot: _savedVideo));
       await tester.pumpWidget(
@@ -109,9 +110,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('recoveryDismiss')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('recoveryRestore')), findsOneWidget);
       expect(find.byKey(const Key('recoveryStatus')), findsNothing);
+      expect(find.byKey(const Key('recoveryDismiss')), findsNothing);
       expect(store.clears, 0);
       expect(store.saves, isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());

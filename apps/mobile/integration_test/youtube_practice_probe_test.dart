@@ -12,6 +12,8 @@ import 'package:transpose_mobile/practice_session.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
+import 'main_player_test_navigation.dart';
+
 /// Live-network QA, not a synthetic substitute for YouTube. Rendered search
 /// results are selected in the real browser; practice uses production widgets,
 /// the existing shared player and the actual WebView audio/loop bridge.
@@ -138,6 +140,7 @@ void main() {
       }
 
       Future<void> tap(String key) async {
+        await prepareMainPlayerControl(tester, key);
         final keyed = find.byKey(Key(key));
         // An expanded tile's centre is in its children, not its header.
         final target = key == 'practicePlanConfiguration'
@@ -251,7 +254,10 @@ void main() {
         await waitFor(
           'main panel mounted after selection',
           () async =>
-              find.byKey(const Key('visualPlayerPlay')).evaluate().isNotEmpty &&
+              find
+                  .byKey(const Key('visualPlayerMediaSurface'))
+                  .evaluate()
+                  .isNotEmpty &&
               find.byKey(const Key('youtubeUseInPlayer')).evaluate().isEmpty &&
               !player.busy,
         );

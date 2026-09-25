@@ -4,6 +4,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val flutterTarget = providers.gradleProperty("target").orNull
+    ?.replace('\\', '/') ?: "lib/main.dart"
+val isQaBuild = flutterTarget.contains("integration_test/")
+val isDevBuild = providers.gradleProperty("transponoDev").orNull == "true" && !isQaBuild
+
 android {
     namespace = "com.example.transpose_mobile"
     compileSdk = flutter.compileSdkVersion
@@ -22,12 +27,17 @@ android {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         // Integration targets must never install over the user's app. Flutter
         // drive may uninstall its target during cleanup, even after a failure.
-        val flutterTarget = providers.gradleProperty("target").orNull
-            ?.replace('\\', '/') ?: "lib/main.dart"
-        applicationId = if (flutterTarget.contains("integration_test/")) {
+        applicationId = if (isQaBuild) {
             "com.example.transpose_mobile.qa"
+        } else if (isDevBuild) {
+            "com.example.transpose_mobile.dev"
         } else {
             "com.example.transpose_mobile"
+        }
+        manifestPlaceholders["transponoLabel"] = when {
+            isQaBuild -> "Transpono QA"
+            isDevBuild -> "Transpono Dev"
+            else -> "Transpono"
         }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -56,11 +66,28 @@ android {
         }
     }
 
+    signingConfigs {
+        if (isDevBuild) {
+            create("transponoDev") {
+                storeFile = file(System.getenv("TRANSPONO_DEV_KEYSTORE")
+                    ?: "${System.getProperty("user.home")}/.android/transpono-dev.keystore")
+                storePassword = "android"
+                keyAlias = "transponodev"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+        }
+        if (isDevBuild) {
+            configureEach {
+                signingConfig = signingConfigs.getByName("transponoDev")
+            }
         }
     }
 }

@@ -118,6 +118,26 @@ void main() {
     },
   );
 
+  test(
+    'native YouTube Play after a real video touch releases restore guard',
+    () async {
+      final youtube = _YouTube(<String>[])..state = _video();
+      final player = MainPlayerController(
+        local: _Local(<String>[]),
+        youtubeFactory: () => youtube,
+      );
+      await player.restore(_preset());
+      youtube.commands.clear();
+      player.noteNativeVideoTouch();
+      youtube.state = _video(playing: true);
+      youtube.notifyListeners();
+      await Future<void>.delayed(Duration.zero);
+      expect(youtube.commands, isEmpty);
+      expect(player.playing, isTrue);
+      player.dispose();
+    },
+  );
+
   for (final initiallyPlaying in [false, true]) {
     test(
       'YouTube transport preserves intent across page state changes ($initiallyPlaying)',

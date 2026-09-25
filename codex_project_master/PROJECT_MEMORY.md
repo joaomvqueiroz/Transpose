@@ -2,6 +2,38 @@
 
 > Fonte de verdade operacional do produto. Ler antes de alterações relevantes.
 
+## Ajuste posterior — fixação opcional e player sem faixa duplicada
+
+O utilizador pediu botão no próprio vídeo para fixar/soltar durante a rolagem.
+Solto é o estado inicial; fixar não recria a WebView. No player principal foram
+retirados título, indicação «YouTube · Navegador integrado» e seek de baixo do
+vídeo; seek e ecrã cheio aparecem ao tocar no box, durante dois segundos.
+Quando existe sessão YouTube pendente, mostrar só «Restaurar vídeo» sem o texto
+«Última sessão» nem X. Seguir adenda A1–A4 no roadmap; os demais modos de Cifra,
+regras de importação e a separação Transpono Dev/original permanecem válidos.
+
+## Correção prioritária de UX — 2026-09-25
+
+O pedido atual substitui a primeira revisão de cifra permanente/vídeo fixo.
+Seguir `docs/PLAYER_CIFRA_SEQUENTIAL_PLAN.md` e S0–S5 no ROADMAP, sequencialmente.
+Só cabeçalho fixo: YouTube rola no player principal. Cifra começa desligada;
+cards de Tom/Velocidade/A–B inline. Quando ligada, cifra substitui cards e os
+ajustes ficam num overlay dentro do box do vídeo, com fecho explícito. Transporte
+Play/Pausa/+/-10 s auto-hide de 2 s permanece separado dos ajustes.
+
+Botão Cifra abre navegador para escolher/importar página de cifras, com preview,
+origem e confirmação; priorizar acesso gratuito sem cadastro. Pesquisa/páginas
+são superfícies não confiáveis: HTTPS/allowlist, sem API privada, scraping em
+lote ou bypass de login/paywall/challenge. Termos dos fornecedores não equivalem
+a licença de distribuição; revisão/autorizações comerciais continuam abertas.
+
+Texto original e calibração por música ficam locais. Acompanhar áudio usa pitch
+confirmado (incluindo botões +/- da cifra); desligado transpõe só acordes.
+Trocar fonte invalida importação pendente. Sem detecção automática de tom/letra.
+Atualizações neste PC usam SOMENTE `com.example.transpose_mobile.dev`; preservar
+o app original e sua chave/dados. Evidências finais pertencem ao gate S5, não
+inferir release-ready a partir de testes de widget.
+
 ## Visão
 
 Aplicativo mobile premium para músicos praticarem e executarem músicas.

@@ -15,7 +15,12 @@ import 'session_snapshot_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(StudioVisualApp(recoveryRepository: SessionSnapshotStore()));
+  runApp(
+    StudioVisualApp(
+      recoveryRepository: SessionSnapshotStore(),
+      openSearchWhenEmpty: true,
+    ),
+  );
 }
 
 class TransposeApp extends StatelessWidget {

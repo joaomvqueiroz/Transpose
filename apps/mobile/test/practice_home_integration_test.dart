@@ -21,6 +21,11 @@ void main() {
 
   Future<void> tap(WidgetTester tester, String key) async {
     await tester.pump();
+    if (key.startsWith('visualTab') &&
+        find.byKey(Key(key)).evaluate().isEmpty) {
+      await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+      await tester.pumpAndSettle();
+    }
     final target = find.byKey(Key(key));
     await tester.ensureVisible(target);
     await tester.tap(target);
@@ -31,12 +36,34 @@ void main() {
       .widget<PracticeProgressionCard>(find.byType(PracticeProgressionCard))
       .controller;
 
+  void background(WidgetTester tester) {
+    // Match the lifecycle notifications delivered when Android hides the app.
+    for (final state in <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+  }
+
+  void foreground(WidgetTester tester) {
+    final binding = tester.binding;
+    if (binding.lifecycleState == AppLifecycleState.paused) {
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    }
+    if (binding.lifecycleState == AppLifecycleState.hidden) {
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    }
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  }
+
   Future<void> mount(
     WidgetTester tester,
     _Player player, {
     _Store? store,
   }) async {
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    foreground(tester);
     await tester.pumpWidget(
       StudioVisualApp(playerController: player, recoveryRepository: store),
     );
@@ -71,13 +98,19 @@ void main() {
       player.completeLoop();
       await tester.pump();
       expect(original.totalRepetitions, 2);
-      await tap(tester, 'visualPlayerFullscreen');
+      await tap(tester, 'visualPlayerMenu');
+      await tester.dragFrom(const Offset(400, 500), const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Tela cheia').last);
+      await tester.tap(find.text('Tela cheia').last);
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
       player.completeLoop();
       await tester.pumpAndSettle();
       expect(original.currentPercent, 65);
       expect(original.totalRepetitions, 3);
       await tap(tester, 'visualFullscreenBack');
+      await tester.pumpAndSettle();
       await tap(tester, 'visualTabpractice');
       expect(identical(practice(tester), original), isTrue);
       expect(original.snapshot!.id, id);
@@ -92,11 +125,7 @@ void main() {
   testWidgets(
     'background pauses practice away from its tab and never auto resumes',
     (tester) async {
-      addTearDown(
-        () => tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        ),
-      );
+      addTearDown(() => foreground(tester));
       final player = _Player();
       await mount(tester, player);
       final controller = practice(tester);
@@ -105,7 +134,7 @@ void main() {
       player.completeLoop();
       await tester.pump();
       await tap(tester, 'visualTabplayer');
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      background(tester);
       await tester.pumpAndSettle();
       expect(controller.status, PracticeStatus.paused);
       expect(player.playing, isFalse);
@@ -113,9 +142,11 @@ void main() {
       // Even a late adapter counter must not credit a paused session.
       player.completeLoop();
       await tester.pump(const Duration(seconds: 30));
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      foreground(tester);
       await tester.pumpAndSettle();
       expect(player.playCalls, plays);
+      expect(player.playing, isFalse);
+      expect(controller.status, PracticeStatus.paused);
       expect(controller.totalRepetitions, 1);
       await tap(tester, 'visualTabpractice');
       expect(find.text('Treino pausado'), findsOneWidget);
@@ -133,17 +164,13 @@ void main() {
   testWidgets(
     'background during preparation cancels pending play at home level',
     (tester) async {
-      addTearDown(
-        () => tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        ),
-      );
+      addTearDown(() => foreground(tester));
       final player = _Player()..seekGate = Completer<void>();
       await mount(tester, player);
       final controller = practice(tester);
       await tap(tester, 'practicePlanStart');
       expect(controller.busy, isTrue);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      background(tester);
       await tester.pump();
       player.seekGate!.complete();
       await tester.pumpAndSettle();
@@ -151,9 +178,11 @@ void main() {
       expect(controller.busy, isFalse);
       expect(player.playCalls, 0);
       expect(player.playing, isFalse);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      foreground(tester);
       await tester.pumpAndSettle();
       expect(player.playCalls, 0);
+      expect(player.playing, isFalse);
+      expect(controller.status, PracticeStatus.paused);
       expect(tester.takeException(), isNull);
       await unmount(tester, player);
     },

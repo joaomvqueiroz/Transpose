@@ -9,6 +9,8 @@ import 'package:transpose_mobile/main_player_controller.dart';
 import 'package:transpose_mobile/player_presets.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 
+import 'main_player_test_navigation.dart';
+
 /// Device probe of the actual principal panel and production audio/storage.
 /// Leaves one clearly named QA preset; never clears existing user collections.
 void main() {
@@ -40,6 +42,7 @@ void main() {
       }
 
       Future<void> tapKey(String key) async {
+        await prepareMainPlayerControl(tester, key);
         final Finder target = find.byKey(Key(key));
         await tester.ensureVisible(target);
         await tester.pump(const Duration(milliseconds: 200));
@@ -81,6 +84,7 @@ void main() {
 
       Future<void> seek(int milliseconds) async {
         await idle();
+        await prepareMainPlayerControl(tester, 'visualPlayerSeek');
         final Finder finder = find.byKey(const Key('visualPlayerSeek'));
         await tester.ensureVisible(finder);
         await tester.pump(const Duration(milliseconds: 200));

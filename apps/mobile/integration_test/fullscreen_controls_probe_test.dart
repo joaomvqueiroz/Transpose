@@ -76,6 +76,10 @@ void main() {
 
       Future<void> tapKey(String key) async {
         if (key.startsWith('visualFullscreen')) await reveal();
+        if (key == 'visualPlayerFullscreen') {
+          await tester.tap(find.byKey(const Key('visualPlayerMediaSurface')));
+          await tester.pump(const Duration(milliseconds: 100));
+        }
         final target = find.byKey(Key(key));
         await tester.ensureVisible(target);
         await tester.pump(const Duration(milliseconds: 200));

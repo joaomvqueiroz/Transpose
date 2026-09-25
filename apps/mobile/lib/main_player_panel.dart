@@ -2,11 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'chord_sheet.dart';
+import 'player_chord_sheet.dart';
 import 'player_panel_model.dart';
 import 'studio_native_pages.dart';
 
-/// Native controls for the selected, shared media session. Values are engine
-/// acknowledgements: only a slider's temporary drag preview is held locally.
+/// Shared player controls with a reading area and on-demand audio settings.
 class MainPlayerPanel extends StatefulWidget {
   const MainPlayerPanel({
     required this.model,
@@ -16,131 +17,243 @@ class MainPlayerPanel extends StatefulWidget {
     required this.onOpenFile,
     required this.onTool,
     this.showMedia = true,
+    this.mediaExtraHeight = 0,
+    this.sourceKey = '',
+    this.chordStore,
+    this.chordActive,
+    this.onChordToggle,
+    this.onChordSearch,
+    this.chordRevision = 0,
+    this.videoPinned = false,
+    this.onPinToggle,
+    this.controlsExpanded,
+    this.onControlsToggle,
+    this.showControlsToggle = true,
+    this.showTip = true,
+    this.showSourceButtons = true,
+    this.showMessage = true,
     super.key,
   });
-
   final PlayerPanelModel model;
   final Widget media;
-  final VoidCallback onFullscreen;
-  final VoidCallback onSearch;
-  final VoidCallback onOpenFile;
+  final VoidCallback onFullscreen, onSearch, onOpenFile;
   final ValueChanged<String> onTool;
   final bool showMedia;
-
+  final double mediaExtraHeight;
+  final String sourceKey;
+  final ChordSheetStore? chordStore;
+  final bool? chordActive;
+  final VoidCallback? onChordToggle;
+  final VoidCallback? onChordSearch;
+  final int chordRevision;
+  final bool videoPinned;
+  final VoidCallback? onPinToggle;
+  final bool? controlsExpanded;
+  final VoidCallback? onControlsToggle;
+  final bool showControlsToggle;
+  final bool showTip;
+  final bool showSourceButtons;
+  final bool showMessage;
   @override
   State<MainPlayerPanel> createState() => _MainPlayerPanelState();
 }
 
 class _MainPlayerPanelState extends State<MainPlayerPanel> {
   bool _showTip = true;
-  bool _studyExpanded = false;
+  bool _localChordActive = false;
+  bool _controlsExpanded = false;
+  bool get _effectiveControlsExpanded =>
+      widget.controlsExpanded ?? _controlsExpanded;
+  bool get _chordActive => widget.chordActive ?? _localChordActive;
+  final _chordKey = GlobalKey<PlayerChordSheetState>();
+  late final ChordSheetStore _fallbackChordStore = ChordSheetStore();
+
+  void _toggleChord() {
+    setState(() => _controlsExpanded = false);
+    if (widget.onChordToggle != null) {
+      widget.onChordToggle!();
+    } else {
+      setState(() => _localChordActive = !_localChordActive);
+    }
+  }
+
+  Widget _sourceAction({
+    required String keyName,
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool selected = false,
+  }) => Expanded(
+    child: OutlinedButton(
+      key: Key(keyName),
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: selected
+            ? studioCyan.withValues(alpha: .12)
+            : const Color(0xFF171717),
+        foregroundColor: selected ? studioCyan : Colors.white,
+        side: BorderSide(
+          color: selected ? studioCyan : const Color(0xFF383838),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+        minimumSize: const Size(0, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 17),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.model,
-    builder: (BuildContext context, Widget? _) {
-      final PlayerPanelModel model = widget.model;
-      final bool ready = model.loaded && !model.busy;
+    builder: (context, _) {
+      final model = widget.model;
       return ColoredBox(
-        color: studioBg,
+        color: Colors.black,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
+            children: [
               if (widget.showMedia)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: widget.media,
+                  child: LayoutBuilder(
+                    builder: (_, box) => SizedBox(
+                      height: box.maxWidth * 9 / 16 + widget.mediaExtraHeight,
+                      child: MainPlayerMediaSurface(
+                        model: model,
+                        settingsEnabled: _chordActive,
+                        media: widget.media,
+                        onFullscreen: widget.onFullscreen,
+                        videoPinned: widget.videoPinned,
+                        onPinToggle: widget.onPinToggle,
+                        transportInDeck:
+                            _effectiveControlsExpanded && !_chordActive,
+                      ),
                     ),
                   ),
                 ),
               const SizedBox(height: 8),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      model.loaded ? model.title : 'Escolha uma música',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+              if (!_chordActive) ...[
+                if (widget.showControlsToggle)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      key: const Key('visualPlayerControlsToggle'),
+                      onPressed:
+                          widget.onControlsToggle ??
+                          () => setState(
+                            () => _controlsExpanded = !_controlsExpanded,
+                          ),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 54),
+                        backgroundColor: const Color(0xFF143544),
+                        foregroundColor: studioCyan,
+                        side: const BorderSide(color: studioCyan, width: 1.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: Icon(
+                        _effectiveControlsExpanded
+                            ? Icons.keyboard_arrow_down
+                            : Icons.keyboard_arrow_up,
+                        size: 32,
+                      ),
+                      label: Text(
+                        _effectiveControlsExpanded
+                            ? 'Fechar ajustes'
+                            : 'Abrir ajustes',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                     ),
                   ),
-                  IconButton(
-                    key: const Key('visualPlayerFullscreen'),
-                    tooltip: 'Tela cheia',
-                    onPressed: model.loaded ? widget.onFullscreen : null,
-                    icon: const Icon(Icons.fullscreen),
-                  ),
+                if (_effectiveControlsExpanded) ...[
+                  const SizedBox(height: 6),
+                  _FullscreenStyleControls(model: model, onTool: widget.onTool),
                 ],
-              ),
-              if (model.loaded) ...<Widget>[
-                Text(
-                  model.sourceLabel,
-                  style: const TextStyle(color: studioMuted, fontSize: 12),
-                ),
-                _SeekControl(
-                  controlKey: const Key('visualPlayerSeek'),
-                  model: model,
-                  enabled: ready,
-                ),
-              ] else ...<Widget>[
-                const Text(
-                  'Pesquise no YouTube ou abra um ficheiro para começar.',
-                  style: TextStyle(color: studioMuted),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    FilledButton.icon(
-                      key: const Key('visualPlayerEmptySearch'),
-                      onPressed: model.busy ? null : widget.onSearch,
-                      icon: const Icon(Icons.search),
-                      label: const Text('YouTube'),
-                    ),
-                    OutlinedButton.icon(
-                      key: const Key('visualPlayerEmptyFile'),
+                const SizedBox(height: 8),
+              ],
+              if (widget.showSourceButtons)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sourceAction(
+                      keyName: 'visualPlayerEmptyFile',
+                      label: 'Abrir ficheiro',
+                      icon: Icons.folder_open,
                       onPressed: model.busy ? null : widget.onOpenFile,
-                      icon: const Icon(Icons.folder_open),
-                      label: const Text('Abrir ficheiro'),
+                    ),
+                    const SizedBox(width: 8),
+                    _sourceAction(
+                      keyName: 'visualPlayerChordPicker',
+                      label: 'Cifra',
+                      icon: Icons.library_music_outlined,
+                      selected: _chordActive,
+                      onPressed: _toggleChord,
+                    ),
+                    const SizedBox(width: 8),
+                    _sourceAction(
+                      keyName: 'visualPlayerEmptySearch',
+                      label: 'YouTube',
+                      icon: Icons.search,
+                      onPressed: model.busy ? null : widget.onSearch,
                     ),
                   ],
                 ),
-              ],
-              if (model.busy) ...<Widget>[
+              if (model.busy) ...[
                 const SizedBox(height: 8),
                 const LinearProgressIndicator(color: studioCyan),
               ],
-              if (model.message case final String message
-                  when message.isNotEmpty) ...<Widget>[
+              if (widget.showMessage &&
+                  model.message != null &&
+                  model.message!.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Semantics(
                   liveRegion: true,
                   child: Text(
-                    message,
+                    model.message!,
                     key: const Key('visualPlayerMessage'),
                     style: const TextStyle(color: studioMuted, fontSize: 13),
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-              if (_showTip) ...<Widget>[
+              SizedBox(height: _chordActive ? 8 : 16),
+              if (_chordActive)
+                PlayerChordSheet(
+                  key: _chordKey,
+                  model: model,
+                  sourceKey: widget.sourceKey,
+                  store: widget.chordStore ?? _fallbackChordStore,
+                  onSearch: widget.onChordSearch,
+                  revision: widget.chordRevision,
+                ),
+              if (widget.showTip && _showTip) ...[
+                const SizedBox(height: 12),
                 _Card(
                   padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
                   child: Row(
-                    children: <Widget>[
+                    children: [
                       const Icon(Icons.touch_app_outlined, color: studioCyan),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
-                          'Use os botões de 10 s para voltar ou avançar.',
-                          style: TextStyle(color: studioMuted, fontSize: 13),
+                          'Toque no vídeo para mostrar os controlos por 2 segundos. Com Cifra ativa, ajuste tom, velocidade e loop na engrenagem dentro do vídeo.',
+                          style: TextStyle(color: studioMuted, fontSize: 12),
                         ),
                       ),
                       IconButton(
@@ -152,15 +265,543 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
               ],
-              _Card(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// The caller sizes this surface, keeping the shared WebView's viewport intact.
+class MainPlayerMediaSurface extends StatefulWidget {
+  const MainPlayerMediaSurface({
+    required this.model,
+    required this.media,
+    this.onFullscreen,
+    this.settingsEnabled = false,
+    this.videoPinned = false,
+    this.onPinToggle,
+    this.externalSettingsOpen,
+    this.onSettingsToggle,
+    this.transportInDeck = false,
+    super.key,
+  });
+  final PlayerPanelModel model;
+  final Widget media;
+  final bool settingsEnabled;
+  final VoidCallback? onFullscreen;
+  final bool videoPinned;
+  final VoidCallback? onPinToggle;
+  final bool? externalSettingsOpen;
+  final VoidCallback? onSettingsToggle;
+  final bool transportInDeck;
+  @override
+  State<MainPlayerMediaSurface> createState() => _MainPlayerMediaSurfaceState();
+}
+
+class _MainPlayerMediaSurfaceState extends State<MainPlayerMediaSurface> {
+  Timer? _hideTimer;
+  bool _visible = false;
+  bool _localSettingsOpen = false;
+  bool get _settingsOpen => widget.externalSettingsOpen ?? _localSettingsOpen;
+
+  void _setSettingsOpen(bool value) {
+    if (_settingsOpen == value) return;
+    if (widget.onSettingsToggle != null) {
+      widget.onSettingsToggle!();
+    } else {
+      setState(() => _localSettingsOpen = value);
+    }
+  }
+
+  @override
+  void didUpdateWidget(MainPlayerMediaSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.settingsEnabled) _localSettingsOpen = false;
+  }
+
+  void _reveal() {
+    _hideTimer?.cancel();
+    if (!_visible) setState(() => _visible = true);
+    _hideTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Vídeo. Toque para mostrar os controlos',
+    onTap: _reveal,
+    child: Listener(
+      key: const Key('visualPlayerMediaSurface'),
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _reveal(),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: Colors.black, child: widget.media),
+          if (_visible && !_settingsOpen && !widget.transportInDeck)
+            ListenableBuilder(
+              listenable: widget.model,
+              builder: (context, _) {
+                final model = widget.model;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _reveal,
+                  child: ColoredBox(
+                    color: Colors.black.withValues(alpha: .38),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: _Transport(
+                            model: model,
+                            enabled: model.loaded && !model.busy,
+                            pauseEnabled:
+                                model.loaded && model.playing && !model.muted,
+                            fullscreen: false,
+                          ),
+                        ),
+                        if (widget.onFullscreen != null)
+                          Align(
+                            alignment: Alignment.topRight,
+                            child: IconButton(
+                              key: const Key('visualPlayerFullscreen'),
+                              tooltip: 'Tela cheia',
+                              onPressed: model.loaded
+                                  ? widget.onFullscreen
+                                  : null,
+                              icon: const Icon(
+                                Icons.fullscreen,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        if (model.loaded)
+                          Positioned(
+                            left: 4,
+                            right: widget.settingsEnabled ? 56 : 4,
+                            bottom: 0,
+                            child: _SeekControl(
+                              controlKey: const Key('visualPlayerSeek'),
+                              model: model,
+                              enabled: !model.busy,
+                              showTimes: false,
+                              onDragStart: () => _hideTimer?.cancel(),
+                              onDragEnd: _reveal,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          if (widget.transportInDeck && widget.onFullscreen != null)
+            Positioned(
+              right: 4,
+              top: 4,
+              child: IconButton.filledTonal(
+                key: const Key('visualPlayerFullscreen'),
+                tooltip: 'Tela cheia',
+                onPressed: widget.model.loaded ? widget.onFullscreen : null,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: .72),
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.fullscreen),
+              ),
+            ),
+          if (widget.settingsEnabled && !_settingsOpen)
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: IconButton.filled(
+                key: const Key('visualPlayerSettings'),
+                tooltip: 'Ajustar tom, velocidade e loop no vídeo',
+                onPressed: () => _setSettingsOpen(true),
+                icon: const Icon(Icons.settings, color: studioCyan),
+              ),
+            ),
+          if (widget.settingsEnabled && _settingsOpen)
+            Positioned.fill(
+              child: _VideoSettings(
+                model: widget.model,
+                onClose: () => _setSettingsOpen(false),
+              ),
+            ),
+          if (widget.onPinToggle != null && !_settingsOpen)
+            Positioned(
+              left: 4,
+              top: 4,
+              child: IconButton.filledTonal(
+                key: const Key('visualPlayerPinVideo'),
+                tooltip: widget.videoPinned
+                    ? 'Soltar vídeo da tela'
+                    : 'Fixar vídeo durante a rolagem',
+                onPressed: widget.onPinToggle,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: .72),
+                  foregroundColor: widget.videoPinned
+                      ? studioCyan
+                      : Colors.white,
+                ),
+                icon: Icon(
+                  widget.videoPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _PlayerControlCards extends StatefulWidget {
+  const _PlayerControlCards({required this.model, required this.onTool});
+  final PlayerPanelModel model;
+  final ValueChanged<String> onTool;
+  @override
+  State<_PlayerControlCards> createState() => _PlayerControlCardsState();
+}
+
+class _PlayerControlCardsState extends State<_PlayerControlCards> {
+  bool _studyExpanded = false;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.model,
+    builder: (context, _) {
+      final model = widget.model;
+      final ready = model.loaded && !model.busy;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
                   children: <Widget>[
-                    Row(
+                    const Expanded(child: _Label('TOM')),
+                    TextButton(
+                      key: const Key('visualPlayerPitchReset'),
+                      onPressed:
+                          ready &&
+                              (model.canPitch || model.pitchPending) &&
+                              (model.pitch != 0 || model.pitchPending)
+                          ? () => model.changePitch(0)
+                          : null,
+                      child: const Text('Original'),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: <Widget>[
+                    _RoundButton(
+                      controlKey: const Key('visualPlayerPitchDown'),
+                      tooltip: 'Diminuir tom em um semitom',
+                      icon: Icons.remove,
+                      onPressed: ready && model.canPitch && model.pitch > -12
+                          ? () => model.changePitch(
+                              (model.pitch - 1).clamp(-12, 12),
+                            )
+                          : null,
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: <Widget>[
+                          Text(
+                            _pitchLabel(model.pitch),
+                            key: const Key('visualPlayerPitchValue'),
+                            style: const TextStyle(
+                              fontSize: 36,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const Text(
+                            'semitons',
+                            style: TextStyle(
+                              color: studioCyan,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _RoundButton(
+                      controlKey: const Key('visualPlayerPitchUp'),
+                      tooltip: 'Aumentar tom em um semitom',
+                      icon: Icons.add,
+                      onPressed: ready && model.canPitch && model.pitch < 12
+                          ? () => model.changePitch(
+                              (model.pitch + 1).clamp(-12, 12),
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
+                if (model.loaded && !model.canPitch && !model.pitchPending)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      'A alteração de tom não está disponível nesta fonte.',
+                      style: TextStyle(color: studioMuted, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _Card(
+            child: _SpeedControl(model: model, enabled: ready),
+          ),
+          const SizedBox(height: 16),
+          _Card(
+            child: Column(
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const Icon(Icons.repeat, color: studioMuted, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(child: _Label('REPETIÇÃO A–B')),
+                    Switch(
+                      key: const Key('visualPlayerLoopToggle'),
+                      value: model.loopEnabled,
+                      activeThumbColor: studioCyan,
+                      onChanged:
+                          ready &&
+                              model.canLoop &&
+                              model.markerA != null &&
+                              model.markerB != null
+                          ? (_) => model.toggleLoop()
+                          : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _MarkerButton(
+                        controlKey: const Key('visualPlayerMarkA'),
+                        label: 'PONTO A',
+                        value: model.markerA,
+                        onPressed: ready && model.canLoop ? model.markA : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MarkerButton(
+                        controlKey: const Key('visualPlayerMarkB'),
+                        label: 'PONTO B',
+                        value: model.markerB,
+                        onPressed: ready && model.canLoop ? model.markB : null,
+                      ),
+                    ),
+                  ],
+                ),
+                if (model.markerA != null || model.markerB != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const Key('visualPlayerClearLoop'),
+                      onPressed: ready && model.canLoop
+                          ? model.clearLoop
+                          : null,
+                      icon: const Icon(Icons.clear, size: 16),
+                      label: const Text('Limpar pontos'),
+                    ),
+                  ),
+                if (model.loaded && !model.canLoop)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'A repetição A–B não está disponível nesta fonte.',
+                      style: TextStyle(color: studioMuted, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _Card(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: <Widget>[
+                InkWell(
+                  key: const Key('visualPlayerStudyTools'),
+                  borderRadius: BorderRadius.circular(15),
+                  onTap: () => setState(() => _studyExpanded = !_studyExpanded),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
                       children: <Widget>[
-                        const Expanded(child: _Label('TOM')),
+                        const Icon(
+                          Icons.school_outlined,
+                          size: 20,
+                          color: studioMuted,
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Ferramentas de Estudo',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        Icon(
+                          _studyExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          color: studioMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_studyExpanded)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        _ToolButton(
+                          icon: Icons.timer_outlined,
+                          label: 'Metrônomo',
+                          tool: 'metronome',
+                          onTool: widget.onTool,
+                        ),
+                        _ToolButton(
+                          icon: Icons.music_note_outlined,
+                          label: 'Acordes',
+                          tool: 'chords',
+                          onTool: widget.onTool,
+                        ),
+                        _ToolButton(
+                          icon: Icons.graphic_eq,
+                          label: 'Afinador',
+                          tool: 'tuner',
+                          onTool: widget.onTool,
+                        ),
+                        _ToolButton(
+                          icon: Icons.bookmark_border,
+                          label: 'Guardar',
+                          tool: 'save',
+                          onTool: widget.onTool,
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            key: const Key('visualPlayerAdvancedTools'),
+            onPressed: () => widget.onTool('advanced'),
+            icon: const Icon(Icons.tune, size: 18),
+            label: const Text('Ferramentas Áudio Avançado'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// The main player uses the fullscreen control language in a scrollable deck.
+/// The detailed cards remain available without taking space by default.
+class _FullscreenStyleControls extends StatefulWidget {
+  const _FullscreenStyleControls({required this.model, required this.onTool});
+
+  final PlayerPanelModel model;
+  final ValueChanged<String> onTool;
+
+  @override
+  State<_FullscreenStyleControls> createState() =>
+      _FullscreenStyleControlsState();
+}
+
+class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
+  bool _toolsOpen = false;
+  bool _detailsOpen = false;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.model,
+    builder: (context, _) {
+      final model = widget.model;
+      final ready = model.loaded && !model.busy;
+      return DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Color(0xFF171717),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'CONTROLOS',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: studioMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              _SeekControl(
+                controlKey: const Key('visualPlayerMainSeek'),
+                model: model,
+                enabled: ready,
+                compact: true,
+              ),
+              _Transport(
+                model: model,
+                enabled: ready,
+                pauseEnabled: model.loaded && model.playing && !model.muted,
+                fullscreen: false,
+              ),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF122B35),
+                  border: Border.all(color: studioCyan, width: 1.5),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
+                child: Column(
+                  children: [
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'TOM · SEMITONS',
+                          style: TextStyle(
+                            color: studioCyan,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                         TextButton(
                           key: const Key('visualPlayerPitchReset'),
                           onPressed:
@@ -169,84 +810,313 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                                   (model.pitch != 0 || model.pitchPending)
                               ? () => model.changePitch(0)
                               : null,
-                          child: const Text('Original'),
+                          child: const Text('Tom original'),
                         ),
                       ],
                     ),
                     Row(
-                      children: <Widget>[
-                        _RoundButton(
-                          controlKey: const Key('visualPlayerPitchDown'),
-                          tooltip: 'Diminuir tom em um semitom',
-                          icon: Icons.remove,
+                      children: [
+                        IconButton.filledTonal(
+                          key: const Key('visualPlayerPitchDown'),
+                          tooltip: 'Diminuir tom',
                           onPressed:
                               ready && model.canPitch && model.pitch > -12
                               ? () => model.changePitch(
                                   (model.pitch - 1).clamp(-12, 12),
                                 )
                               : null,
+                          icon: const Icon(Icons.remove, size: 28),
                         ),
                         Expanded(
-                          child: Column(
-                            children: <Widget>[
-                              Text(
-                                _pitchLabel(model.pitch),
-                                key: const Key('visualPlayerPitchValue'),
-                                style: const TextStyle(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const Text(
-                                'semitons',
-                                style: TextStyle(
-                                  color: studioCyan,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            _pitchLabel(model.pitch),
+                            key: const Key('visualPlayerPitchValue'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
                         ),
-                        _RoundButton(
-                          controlKey: const Key('visualPlayerPitchUp'),
-                          tooltip: 'Aumentar tom em um semitom',
-                          icon: Icons.add,
+                        IconButton.filledTonal(
+                          key: const Key('visualPlayerPitchUp'),
+                          tooltip: 'Aumentar tom',
                           onPressed: ready && model.canPitch && model.pitch < 12
                               ? () => model.changePitch(
                                   (model.pitch + 1).clamp(-12, 12),
                                 )
                               : null,
+                          icon: const Icon(Icons.add, size: 28),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (model.loaded && !model.canPitch && !model.pitchPending)
+                const Text(
+                  'A alteração de tom não está disponível nesta fonte.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: studioMuted, fontSize: 12),
+                ),
+              const Divider(color: Colors.white12),
+              _SpeedControl(model: model, enabled: ready),
+              const Divider(color: Colors.white12),
+              Row(
+                children: [
+                  const Icon(Icons.repeat, color: studioMuted, size: 18),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Repetir A–B')),
+                  Switch(
+                    key: const Key('visualPlayerLoopToggle'),
+                    value: model.loopEnabled,
+                    activeThumbColor: studioCyan,
+                    onChanged:
+                        ready &&
+                            model.canLoop &&
+                            model.markerA != null &&
+                            model.markerB != null
+                        ? (_) => model.toggleLoop()
+                        : null,
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MarkerButton(
+                      controlKey: const Key('visualPlayerMarkA'),
+                      label: 'PONTO A',
+                      value: model.markerA,
+                      onPressed: ready && model.canLoop ? model.markA : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _MarkerButton(
+                      controlKey: const Key('visualPlayerMarkB'),
+                      label: 'PONTO B',
+                      value: model.markerB,
+                      onPressed: ready && model.canLoop ? model.markB : null,
+                    ),
+                  ),
+                ],
+              ),
+              if (model.markerA != null || model.markerB != null)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: const Key('visualPlayerClearLoop'),
+                    onPressed: ready && model.canLoop ? model.clearLoop : null,
+                    icon: const Icon(Icons.clear, size: 16),
+                    label: const Text('Limpar A–B'),
+                  ),
+                ),
+              if (model.loaded && !model.canLoop)
+                const Text(
+                  'A repetição A–B não está disponível nesta fonte.',
+                  style: TextStyle(color: studioMuted, fontSize: 12),
+                ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                key: const Key('visualPlayerStudyTools'),
+                onPressed: () => setState(() => _toolsOpen = !_toolsOpen),
+                icon: Icon(_toolsOpen ? Icons.expand_less : Icons.expand_more),
+                label: const Text('Ferramentas de Estudo'),
+              ),
+              if (_toolsOpen)
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _ToolButton(
+                      icon: Icons.timer_outlined,
+                      label: 'Metrônomo',
+                      tool: 'metronome',
+                      onTool: widget.onTool,
+                    ),
+                    _ToolButton(
+                      icon: Icons.music_note_outlined,
+                      label: 'Acordes',
+                      tool: 'chords',
+                      onTool: widget.onTool,
+                    ),
+                    _ToolButton(
+                      icon: Icons.graphic_eq,
+                      label: 'Afinador',
+                      tool: 'tuner',
+                      onTool: widget.onTool,
+                    ),
+                    _ToolButton(
+                      icon: Icons.bookmark_border,
+                      label: 'Guardar',
+                      tool: 'save',
+                      onTool: widget.onTool,
+                    ),
+                  ],
+                ),
+              TextButton.icon(
+                key: const Key('visualPlayerAdvancedTools'),
+                onPressed: () => widget.onTool('advanced'),
+                icon: const Icon(Icons.tune, size: 18),
+                label: const Text('Ferramentas Áudio Avançado'),
+              ),
+              TextButton(
+                key: const Key('visualPlayerDetailedControls'),
+                onPressed: () => setState(() => _detailsOpen = !_detailsOpen),
+                child: Text(
+                  _detailsOpen
+                      ? 'Ocultar controlos detalhados'
+                      : 'Controlos detalhados',
+                ),
+              ),
+              if (_detailsOpen)
+                _PlayerControlCards(model: model, onTool: widget.onTool),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// Compact, scrollable adjustments clipped to the existing video box.
+class _VideoSettings extends StatelessWidget {
+  const _VideoSettings({required this.model, required this.onClose});
+  final PlayerPanelModel model;
+  final VoidCallback onClose;
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    key: const Key('visualPlayerSettingsSheet'),
+    color: studioBg.withValues(alpha: .96),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Ajustes do vídeo',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              key: const Key('visualPlayerSettingsClose'),
+              tooltip: 'Fechar ajustes',
+              onPressed: onClose,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            key: const Key('visualPlayerSettingsScroll'),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: ListenableBuilder(
+              listenable: model,
+              builder: (context, _) {
+                final ready = model.loaded && !model.busy;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      children: [
+                        const Text('Tom'),
+                        IconButton(
+                          key: const Key('visualPlayerPitchDown'),
+                          tooltip: 'Diminuir tom',
+                          onPressed:
+                              ready && model.canPitch && model.pitch > -12
+                              ? () => model.changePitch(model.pitch - 1)
+                              : null,
+                          icon: const Icon(Icons.remove),
+                        ),
+                        Text(
+                          _pitchLabel(model.pitch),
+                          key: const Key('visualPlayerPitchValue'),
+                        ),
+                        IconButton(
+                          key: const Key('visualPlayerPitchUp'),
+                          tooltip: 'Aumentar tom',
+                          onPressed: ready && model.canPitch && model.pitch < 12
+                              ? () => model.changePitch(model.pitch + 1)
+                              : null,
+                          icon: const Icon(Icons.add),
+                        ),
+                        TextButton(
+                          key: const Key('visualPlayerPitchReset'),
+                          onPressed:
+                              ready && (model.canPitch || model.pitchPending)
+                              ? () => model.changePitch(0)
+                              : null,
+                          child: const Text('Original'),
                         ),
                       ],
                     ),
                     if (model.loaded && !model.canPitch && !model.pitchPending)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 12),
-                        child: Text(
-                          'A alteração de tom não está disponível nesta fonte.',
-                          style: TextStyle(color: studioMuted, fontSize: 12),
-                        ),
+                      const Text(
+                        'Tom de áudio indisponível nesta fonte.',
+                        style: TextStyle(color: studioMuted, fontSize: 12),
                       ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              _Card(
-                child: _SpeedControl(model: model, enabled: ready),
-              ),
-              const SizedBox(height: 16),
-              _Card(
-                child: Column(
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        const Icon(Icons.repeat, color: studioMuted, size: 18),
-                        const SizedBox(width: 8),
-                        const Expanded(child: _Label('REPETIÇÃO A–B')),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      children: [
+                        const Text('Velocidade'),
+                        IconButton(
+                          key: const Key('visualPlayerSpeedDown'),
+                          tooltip: 'Diminuir velocidade',
+                          onPressed: ready && model.canSpeed && model.speed > .5
+                              ? () => model.changeSpeed(
+                                  (model.speed - .05).clamp(.5, 1.5),
+                                )
+                              : null,
+                          icon: const Icon(Icons.remove),
+                        ),
+                        Text('${model.speed.toStringAsFixed(2)}×'),
+                        IconButton(
+                          key: const Key('visualPlayerSpeedUp'),
+                          tooltip: 'Aumentar velocidade',
+                          onPressed:
+                              ready && model.canSpeed && model.speed < 1.5
+                              ? () => model.changeSpeed(
+                                  (model.speed + .05).clamp(.5, 1.5),
+                                )
+                              : null,
+                          icon: const Icon(Icons.add),
+                        ),
+                      ],
+                    ),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 4,
+                      children: [
+                        TextButton(
+                          key: const Key('visualPlayerMarkA'),
+                          onPressed: ready && model.canLoop
+                              ? model.markA
+                              : null,
+                          child: Text(
+                            'A: ${model.markerA == null ? "Marcar" : _time(model.markerA!)}',
+                          ),
+                        ),
+                        TextButton(
+                          key: const Key('visualPlayerMarkB'),
+                          onPressed: ready && model.canLoop
+                              ? model.markB
+                              : null,
+                          child: Text(
+                            'B: ${model.markerB == null ? "Marcar" : _time(model.markerB!)}',
+                          ),
+                        ),
+                        const Text('Loop'),
                         Switch(
                           key: const Key('visualPlayerLoopToggle'),
                           value: model.loopEnabled,
-                          activeThumbColor: studioCyan,
                           onChanged:
                               ready &&
                                   model.canLoop &&
@@ -255,149 +1125,28 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                               ? (_) => model.toggleLoop()
                               : null,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: _MarkerButton(
-                            controlKey: const Key('visualPlayerMarkA'),
-                            label: 'PONTO A',
-                            value: model.markerA,
-                            onPressed: ready && model.canLoop
-                                ? model.markA
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _MarkerButton(
-                            controlKey: const Key('visualPlayerMarkB'),
-                            label: 'PONTO B',
-                            value: model.markerB,
-                            onPressed: ready && model.canLoop
-                                ? model.markB
-                                : null,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (model.markerA != null || model.markerB != null)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
+                        TextButton(
                           key: const Key('visualPlayerClearLoop'),
                           onPressed: ready && model.canLoop
                               ? model.clearLoop
                               : null,
-                          icon: const Icon(Icons.clear, size: 16),
-                          label: const Text('Limpar pontos'),
+                          child: const Text('Limpar'),
                         ),
-                      ),
-                    if (model.loaded && !model.canLoop)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text(
-                          'A repetição A–B não está disponível nesta fonte.',
-                          style: TextStyle(color: studioMuted, fontSize: 12),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              _Transport(
-                model: model,
-                enabled: ready,
-                pauseEnabled: model.loaded && model.playing && !model.muted,
-                fullscreen: false,
-              ),
-              const SizedBox(height: 20),
-              _Card(
-                padding: EdgeInsets.zero,
-                child: Column(
-                  children: <Widget>[
-                    InkWell(
-                      key: const Key('visualPlayerStudyTools'),
-                      borderRadius: BorderRadius.circular(15),
-                      onTap: () =>
-                          setState(() => _studyExpanded = !_studyExpanded),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: <Widget>[
-                            const Icon(
-                              Icons.school_outlined,
-                              size: 20,
-                              color: studioMuted,
-                            ),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'Ferramentas de Estudo',
-                                style: TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                            Icon(
-                              _studyExpanded
-                                  ? Icons.expand_less
-                                  : Icons.expand_more,
-                              color: studioMuted,
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ),
-                    if (_studyExpanded)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <Widget>[
-                            _ToolButton(
-                              icon: Icons.timer_outlined,
-                              label: 'Metrônomo',
-                              tool: 'metronome',
-                              onTool: widget.onTool,
-                            ),
-                            _ToolButton(
-                              icon: Icons.music_note_outlined,
-                              label: 'Acordes',
-                              tool: 'chords',
-                              onTool: widget.onTool,
-                            ),
-                            _ToolButton(
-                              icon: Icons.graphic_eq,
-                              label: 'Afinador',
-                              tool: 'tuner',
-                              onTool: widget.onTool,
-                            ),
-                            _ToolButton(
-                              icon: Icons.bookmark_border,
-                              label: 'Guardar',
-                              tool: 'save',
-                              onTool: widget.onTool,
-                            ),
-                          ],
-                        ),
-                      ),
+                    _SeekControl(
+                      controlKey: const Key('visualPlayerSeek'),
+                      model: model,
+                      enabled: ready,
+                    ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextButton.icon(
-                key: const Key('visualPlayerAdvancedTools'),
-                onPressed: () => widget.onTool('advanced'),
-                icon: const Icon(Icons.tune, size: 18),
-                label: const Text('Ferramentas Áudio Avançado'),
-              ),
-            ],
+                );
+              },
+            ),
           ),
         ),
-      );
-    },
+      ],
+    ),
   );
 }
 
@@ -409,6 +1158,17 @@ class MainPlayerFullscreen extends StatefulWidget {
     required this.media,
     required this.onExit,
     this.onTool,
+    this.mainMode = false,
+    this.showHeader = true,
+    this.controlsOpen,
+    this.onPinToggle,
+    this.videoPinned = false,
+    this.onOpenFile,
+    this.onChordToggle,
+    this.onSearch,
+    this.chordActive = false,
+    this.youtubeNativeTransport = false,
+    this.onNativeMediaTouch,
     super.key,
   });
 
@@ -416,6 +1176,17 @@ class MainPlayerFullscreen extends StatefulWidget {
   final Widget media;
   final VoidCallback onExit;
   final ValueChanged<String>? onTool;
+  final bool mainMode;
+  final bool showHeader;
+  final bool? controlsOpen;
+  final VoidCallback? onPinToggle;
+  final bool videoPinned;
+  final VoidCallback? onOpenFile;
+  final VoidCallback? onChordToggle;
+  final VoidCallback? onSearch;
+  final bool chordActive;
+  final bool youtubeNativeTransport;
+  final VoidCallback? onNativeMediaTouch;
 
   @override
   State<MainPlayerFullscreen> createState() => _MainPlayerFullscreenState();
@@ -531,6 +1302,10 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
   Widget build(BuildContext context) {
     final PlayerPanelModel model = widget.model;
     final bool ready = !_locked && model.loaded && !model.busy;
+    final bool controlsVisible = widget.controlsOpen ?? _visible;
+    final bool headerVisible = widget.mainMode || _visible || _locked;
+    final bool compactMarkers =
+        widget.mainMode && MediaQuery.textScalerOf(context).scale(1) <= 1.3;
     return Listener(
       // A raw pointer listener observes taps without stealing gestures from
       // the existing WebView/video. No transparent gesture shield over it.
@@ -558,229 +1333,376 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                 children: <Widget>[
                   AbsorbPointer(
                     absorbing: _locked,
-                    child: SizedBox.expand(child: widget.media),
+                    child: Listener(
+                      onPointerDown: (_) => widget.onNativeMediaTouch?.call(),
+                      child: SizedBox.expand(child: widget.media),
+                    ),
                   ),
-                  Align(
-                    alignment: Alignment.topCenter,
-                    child: IgnorePointer(
-                      ignoring: !_visible && !_locked,
-                      child: AnimatedOpacity(
-                        opacity: _visible || _locked ? 1 : 0,
-                        duration: const Duration(milliseconds: 180),
-                        child: ColoredBox(
-                          color: const Color(0xDF040F1C),
-                          child: Row(
-                            children: <Widget>[
-                              IconButton(
-                                key: const Key('visualFullscreenBack'),
-                                tooltip: 'Sair da tela cheia',
-                                onPressed: _locked ? null : widget.onExit,
-                                icon: const Icon(Icons.arrow_back),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  _locked
-                                      ? 'Bloqueado · mantenha o cadeado pressionado'
-                                      : model.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                  if (widget.showHeader)
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: IgnorePointer(
+                        ignoring: !headerVisible,
+                        child: AnimatedOpacity(
+                          opacity: headerVisible ? 1 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: ColoredBox(
+                            color: const Color(0xDF040F1C),
+                            child: Row(
+                              children: <Widget>[
+                                IconButton(
+                                  key: Key(
+                                    widget.mainMode
+                                        ? 'visualPlayerMenu'
+                                        : 'visualFullscreenBack',
+                                  ),
+                                  tooltip: widget.mainMode
+                                      ? 'Menu lateral'
+                                      : 'Sair da tela cheia',
+                                  onPressed: _locked ? null : widget.onExit,
+                                  icon: Icon(
+                                    widget.mainMode
+                                        ? Icons.menu
+                                        : Icons.arrow_back,
+                                  ),
                                 ),
-                              ),
-                              IconButton(
-                                key: const Key('visualFullscreenLock'),
-                                tooltip: _locked
-                                    ? 'Mantenha pressionado para desbloquear'
-                                    : 'Bloquear toques',
-                                // A non-null tap keeps the underlying button enabled
-                                // for its long-press recognizer. A short tap never
-                                // unlocks the media surface.
-                                onPressed: () {
-                                  if (!_locked) _setLocked(true);
-                                },
-                                onLongPress: _locked
-                                    ? () => _setLocked(false)
-                                    : null,
-                                icon: Icon(
-                                  _locked ? Icons.lock : Icons.lock_open,
-                                  color: _locked ? studioCyan : Colors.white,
+                                Expanded(
+                                  child: Text(
+                                    _locked
+                                        ? 'Bloqueado · mantenha o cadeado pressionado'
+                                        : model.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                              PopupMenuButton<String>(
-                                key: const Key('visualFullscreenMore'),
-                                tooltip: 'Mais opções',
-                                enabled: !_locked,
-                                onOpened: () {
-                                  _menuOpen = true;
-                                  _hideTimer?.cancel();
-                                },
-                                onCanceled: _menuClosed,
-                                onSelected: (String value) {
-                                  _menuClosed();
-                                  if (value == 'reset') {
-                                    model.resetProcessing();
-                                  } else {
-                                    widget.onTool?.call(value);
-                                  }
-                                },
-                                itemBuilder: (_) => <PopupMenuEntry<String>>[
-                                  PopupMenuItem<String>(
-                                    value: 'reset',
-                                    enabled:
-                                        ready &&
-                                        (model.canPitch ||
-                                            model.pitchPending ||
-                                            model.canSpeed ||
-                                            model.canLoop),
-                                    child: const Text(
-                                      'Repor tom, velocidade e A–B',
+                                IconButton(
+                                  key: const Key('visualFullscreenLock'),
+                                  tooltip: _locked
+                                      ? 'Mantenha pressionado para desbloquear'
+                                      : 'Bloquear toques',
+                                  // A non-null tap keeps the underlying button enabled
+                                  // for its long-press recognizer. A short tap never
+                                  // unlocks the media surface.
+                                  onPressed: () {
+                                    if (!_locked) _setLocked(true);
+                                  },
+                                  onLongPress: _locked
+                                      ? () => _setLocked(false)
+                                      : null,
+                                  icon: Icon(
+                                    _locked ? Icons.lock : Icons.lock_open,
+                                    color: _locked ? studioCyan : Colors.white,
+                                  ),
+                                ),
+                                if (widget.mainMode &&
+                                    widget.onPinToggle != null)
+                                  IconButton(
+                                    key: const Key('visualPlayerPinVideo'),
+                                    tooltip: widget.videoPinned
+                                        ? 'Soltar vídeo da tela'
+                                        : 'Fixar vídeo durante a rolagem',
+                                    onPressed: _locked
+                                        ? null
+                                        : widget.onPinToggle,
+                                    icon: Icon(
+                                      widget.videoPinned
+                                          ? Icons.push_pin
+                                          : Icons.push_pin_outlined,
                                     ),
                                   ),
-                                  if (widget.onTool !=
-                                      null) ...<PopupMenuEntry<String>>[
+                                PopupMenuButton<String>(
+                                  key: const Key('visualFullscreenMore'),
+                                  tooltip: 'Mais opções',
+                                  enabled: !_locked,
+                                  onOpened: () {
+                                    _menuOpen = true;
+                                    _hideTimer?.cancel();
+                                  },
+                                  onCanceled: _menuClosed,
+                                  onSelected: (String value) {
+                                    _menuClosed();
+                                    if (value == 'reset') {
+                                      model.resetProcessing();
+                                    } else {
+                                      widget.onTool?.call(value);
+                                    }
+                                  },
+                                  itemBuilder: (_) => <PopupMenuEntry<String>>[
                                     PopupMenuItem<String>(
-                                      value: 'save',
-                                      enabled: ready && !model.pitchPending,
-                                      child: const Text('Guardar ajustes'),
+                                      value: 'reset',
+                                      enabled:
+                                          ready &&
+                                          (model.canPitch ||
+                                              model.pitchPending ||
+                                              model.canSpeed ||
+                                              model.canLoop),
+                                      child: const Text(
+                                        'Repor tom, velocidade e A–B',
+                                      ),
                                     ),
-                                    const PopupMenuItem<String>(
-                                      value: 'metronome',
-                                      child: Text('Metrônomo'),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'chords',
-                                      child: Text('Acordes'),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'tuner',
-                                      child: Text('Afinador por referência'),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'advanced',
-                                      child: Text('Ferramentas de áudio'),
-                                    ),
+                                    if (widget.onTool !=
+                                        null) ...<PopupMenuEntry<String>>[
+                                      PopupMenuItem<String>(
+                                        value: 'save',
+                                        enabled: ready && !model.pitchPending,
+                                        child: const Text('Guardar ajustes'),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'metronome',
+                                        child: Text('Metrônomo'),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'chords',
+                                        child: Text('Acordes'),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'tuner',
+                                        child: Text('Afinador por referência'),
+                                      ),
+                                      const PopupMenuItem<String>(
+                                        value: 'advanced',
+                                        child: Text('Ferramentas de áudio'),
+                                      ),
+                                    ],
                                   ],
-                                ],
-                              ),
-                            ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: IgnorePointer(
-                      ignoring: !_visible || _locked,
-                      child: AnimatedOpacity(
-                        key: const Key('visualFullscreenOverlay'),
-                        opacity: _visible && !_locked ? 1 : 0,
-                        duration: const Duration(milliseconds: 180),
+                  if (!widget.showHeader && widget.mainMode)
+                    Positioned(
+                      left: 4,
+                      top: 4,
+                      child: IconButton.filledTonal(
+                        key: const Key('visualPlayerMenu'),
+                        tooltip: 'Menu lateral',
+                        onPressed: _locked ? null : widget.onExit,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black.withValues(alpha: .72),
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.menu),
+                      ),
+                    ),
+                  if (!widget.showHeader && widget.onPinToggle != null)
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: IconButton.filledTonal(
+                        key: const Key('visualPlayerPinVideo'),
+                        tooltip: widget.videoPinned
+                            ? 'Soltar vídeo da tela'
+                            : 'Fixar vídeo durante a rolagem',
+                        onPressed: _locked ? null : widget.onPinToggle,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black.withValues(alpha: .72),
+                          foregroundColor: widget.videoPinned
+                              ? studioCyan
+                              : Colors.white,
+                        ),
+                        icon: Icon(
+                          widget.videoPinned
+                              ? Icons.push_pin
+                              : Icons.push_pin_outlined,
+                        ),
+                      ),
+                    ),
+                  if (widget.mainMode && controlsVisible)
+                    const Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 68,
+                      child: IgnorePointer(
                         child: ColoredBox(
-                          color: const Color(0xEC040F1C),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxHeight: constraints.maxHeight * .4,
-                            ),
-                            child: SingleChildScrollView(
-                              key: const Key('visualFullscreenControlsScroll'),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  0,
-                                  16,
-                                  12,
+                          key: Key('visualMainAdjustmentsBackdrop'),
+                          color: Color(0xFF040F1C),
+                        ),
+                      ),
+                    ),
+                  if (!widget.mainMode || controlsVisible)
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          bottom: widget.mainMode ? 68 : 0,
+                        ),
+                        child: IgnorePointer(
+                          key: widget.mainMode
+                              ? const Key('visualMainControlsOverlay')
+                              : null,
+                          ignoring: !controlsVisible || _locked,
+                          child: AnimatedOpacity(
+                            key: const Key('visualFullscreenOverlay'),
+                            opacity: controlsVisible && !_locked ? 1 : 0,
+                            duration: const Duration(milliseconds: 180),
+                            child: ColoredBox(
+                              color: widget.mainMode
+                                  ? const Color(0xFF040F1C)
+                                  : const Color(0xEC040F1C),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight:
+                                      constraints.maxHeight *
+                                      (widget.mainMode ? .5 : .4),
                                 ),
-                                child: Column(
-                                  children: <Widget>[
-                                    if (model.busy || model.pitchPending)
-                                      const LinearProgressIndicator(
-                                        color: studioCyan,
-                                      ),
-                                    if (model.message case final String message
-                                        when message.isNotEmpty)
-                                      Semantics(
-                                        liveRegion: true,
-                                        child: Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 8,
-                                          ),
-                                          child: Text(
-                                            message,
-                                            key: const Key(
-                                              'visualFullscreenMessage',
-                                            ),
-                                            style: const TextStyle(
-                                              color: studioMuted,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    _SeekControl(
-                                      controlKey: const Key(
-                                        'visualFullscreenSeek',
-                                      ),
-                                      model: model,
-                                      enabled: ready,
-                                      compact: compact,
+                                child: SingleChildScrollView(
+                                  key: const Key(
+                                    'visualFullscreenControlsScroll',
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      0,
+                                      16,
+                                      12,
                                     ),
-                                    _Transport(
-                                      model: model,
-                                      enabled: ready,
-                                      pauseEnabled:
-                                          !_locked &&
-                                          model.loaded &&
-                                          model.playing &&
-                                          !model.muted,
-                                      fullscreen: true,
-                                    ),
-                                    Wrap(
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      alignment: WrapAlignment.center,
-                                      spacing: 4,
+                                    child: Column(
                                       children: <Widget>[
-                                        IconButton(
-                                          key: const Key(
-                                            'visualFullscreenPitchDown',
+                                        if (model.busy || model.pitchPending)
+                                          const LinearProgressIndicator(
+                                            color: studioCyan,
                                           ),
-                                          tooltip: 'Diminuir tom',
-                                          onPressed:
-                                              ready &&
-                                                  model.canPitch &&
-                                                  model.pitch > -12
-                                              ? () => model.changePitch(
-                                                  (model.pitch - 1).clamp(
-                                                    -12,
-                                                    12,
-                                                  ),
-                                                )
-                                              : null,
-                                          icon: const Icon(Icons.remove),
-                                        ),
-                                        Text('${_pitchLabel(model.pitch)} st'),
-                                        IconButton(
-                                          key: const Key(
-                                            'visualFullscreenPitchUp',
+                                        if (model.message
+                                            case final String message
+                                            when message.isNotEmpty)
+                                          Semantics(
+                                            liveRegion: true,
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 8,
+                                              ),
+                                              child: Text(
+                                                message,
+                                                key: const Key(
+                                                  'visualFullscreenMessage',
+                                                ),
+                                                style: const TextStyle(
+                                                  color: studioMuted,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ),
                                           ),
-                                          tooltip: 'Aumentar tom',
-                                          onPressed:
-                                              ready &&
-                                                  model.canPitch &&
-                                                  model.pitch < 12
-                                              ? () => model.changePitch(
-                                                  (model.pitch + 1).clamp(
-                                                    -12,
-                                                    12,
-                                                  ),
-                                                )
-                                              : null,
-                                          icon: const Icon(Icons.add),
+                                        _SeekControl(
+                                          controlKey: const Key(
+                                            'visualFullscreenSeek',
+                                          ),
+                                          model: model,
+                                          enabled: ready,
+                                          compact: compact || widget.mainMode,
                                         ),
+                                        if (widget.youtubeNativeTransport)
+                                          _YouTubePitchTransport(
+                                            model: model,
+                                            enabled: ready,
+                                          )
+                                        else ...[
+                                          _Transport(
+                                            model: model,
+                                            enabled: ready,
+                                            pauseEnabled:
+                                                !_locked &&
+                                                model.loaded &&
+                                                model.playing &&
+                                                !model.muted,
+                                            fullscreen: true,
+                                          ),
+                                          Center(
+                                            child: SizedBox(
+                                              width: 208,
+                                              child: Row(
+                                                children: <Widget>[
+                                                  SizedBox(
+                                                    width: 50,
+                                                    child: IconButton(
+                                                      key: const Key(
+                                                        'visualFullscreenPitchDown',
+                                                      ),
+                                                      tooltip: 'Diminuir tom',
+                                                      onPressed:
+                                                          ready &&
+                                                              model.canPitch &&
+                                                              model.pitch > -12
+                                                          ? () => model
+                                                                .changePitch(
+                                                                  (model.pitch -
+                                                                          1)
+                                                                      .clamp(
+                                                                        -12,
+                                                                        12,
+                                                                      ),
+                                                                )
+                                                          : null,
+                                                      icon: const Icon(
+                                                        Icons.remove,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 24),
+                                                  SizedBox(
+                                                    width: 60,
+                                                    child: FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      child: Text(
+                                                        '${_pitchLabel(model.pitch)} st',
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 24),
+                                                  SizedBox(
+                                                    width: 50,
+                                                    child: IconButton(
+                                                      key: const Key(
+                                                        'visualFullscreenPitchUp',
+                                                      ),
+                                                      tooltip: 'Aumentar tom',
+                                                      onPressed:
+                                                          ready &&
+                                                              model.canPitch &&
+                                                              model.pitch < 12
+                                                          ? () => model
+                                                                .changePitch(
+                                                                  (model.pitch +
+                                                                          1)
+                                                                      .clamp(
+                                                                        -12,
+                                                                        12,
+                                                                      ),
+                                                                )
+                                                          : null,
+                                                      icon: const Icon(
+                                                        Icons.add,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                         TextButton(
                                           key: const Key(
                                             'visualFullscreenPitchReset',
                                           ),
+                                          style: widget.mainMode
+                                              ? TextButton.styleFrom(
+                                                  minimumSize: const Size(
+                                                    0,
+                                                    32,
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                      ),
+                                                  tapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                )
+                                              : null,
                                           onPressed:
                                               ready &&
                                                   (model.canPitch ||
@@ -791,217 +1713,372 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                               : null,
                                           child: const Text('Tom original'),
                                         ),
-                                      ],
-                                    ),
-                                    if (model.loaded &&
-                                        !model.canPitch &&
-                                        !model.pitchPending)
-                                      const Text(
-                                        'Tom indisponível nesta fonte.',
-                                        style: TextStyle(
-                                          color: studioMuted,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    Wrap(
-                                      alignment: WrapAlignment.center,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      spacing: 4,
-                                      children: <Widget>[
-                                        IconButton(
-                                          key: const Key(
-                                            'visualFullscreenSpeedDown',
+                                        if (model.loaded &&
+                                            !model.canPitch &&
+                                            !model.pitchPending)
+                                          const Text(
+                                            'Tom indisponível nesta fonte.',
+                                            style: TextStyle(
+                                              color: studioMuted,
+                                              fontSize: 12,
+                                            ),
                                           ),
-                                          tooltip:
-                                              'Diminuir velocidade em 0,05',
-                                          onPressed:
-                                              ready &&
-                                                  model.canSpeed &&
-                                                  model.speed > .5
-                                              ? () => model.changeSpeed(
-                                                  ((model.speed * 20).round() -
-                                                              1)
-                                                          .clamp(10, 30) /
-                                                      20,
-                                                )
-                                              : null,
-                                          icon: const Icon(Icons.fast_rewind),
-                                        ),
-                                        PopupMenuButton<double>(
-                                          key: const Key(
-                                            'visualFullscreenSpeed',
-                                          ),
-                                          tooltip: 'Velocidade',
-                                          enabled: ready && model.canSpeed,
-                                          initialValue: model.speed,
-                                          onOpened: () {
-                                            _menuOpen = true;
-                                            _hideTimer?.cancel();
-                                          },
-                                          onCanceled: _menuClosed,
-                                          onSelected: (double value) {
-                                            _menuClosed();
-                                            model.changeSpeed(value);
-                                          },
-                                          itemBuilder: (_) =>
-                                              <PopupMenuEntry<double>>[
-                                                for (final double speed
-                                                    in <double>[
-                                                      .5,
-                                                      .75,
-                                                      .85,
-                                                      1,
-                                                      1.25,
-                                                      1.5,
-                                                    ])
-                                                  PopupMenuItem<double>(
-                                                    value: speed,
-                                                    child: Text(
-                                                      '${speed.toStringAsFixed(2)}×',
-                                                    ),
-                                                  ),
-                                              ],
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(12),
-                                            child: Text(
-                                              '${model.speed.toStringAsFixed(2)}× ▾',
-                                              style: const TextStyle(
-                                                color: studioCyan,
+                                        Wrap(
+                                          alignment: WrapAlignment.center,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          spacing: 4,
+                                          children: <Widget>[
+                                            IconButton(
+                                              key: const Key(
+                                                'visualFullscreenSpeedDown',
+                                              ),
+                                              tooltip:
+                                                  'Diminuir velocidade em 0,05',
+                                              onPressed:
+                                                  ready &&
+                                                      model.canSpeed &&
+                                                      model.speed > .5
+                                                  ? () => model.changeSpeed(
+                                                      ((model.speed * 20)
+                                                                      .round() -
+                                                                  1)
+                                                              .clamp(10, 30) /
+                                                          20,
+                                                    )
+                                                  : null,
+                                              icon: const Icon(
+                                                Icons.fast_rewind,
                                               ),
                                             ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          key: const Key(
-                                            'visualFullscreenSpeedUp',
-                                          ),
-                                          tooltip:
-                                              'Aumentar velocidade em 0,05',
-                                          onPressed:
-                                              ready &&
-                                                  model.canSpeed &&
-                                                  model.speed < 1.5
-                                              ? () => model.changeSpeed(
-                                                  ((model.speed * 20).round() +
-                                                              1)
-                                                          .clamp(10, 30) /
-                                                      20,
-                                                )
-                                              : null,
-                                          icon: const Icon(Icons.fast_forward),
-                                        ),
-                                        TextButton(
-                                          key: const Key(
-                                            'visualFullscreenSpeedReset',
-                                          ),
-                                          onPressed:
-                                              ready &&
-                                                  model.canSpeed &&
-                                                  model.speed != 1
-                                              ? () => model.changeSpeed(1)
-                                              : null,
-                                          child: const Text('1,00× original'),
-                                        ),
-                                      ],
-                                    ),
-                                    if (model.loaded && !model.canSpeed)
-                                      const Text(
-                                        'Velocidade indisponível nesta fonte.',
-                                        style: TextStyle(
-                                          color: studioMuted,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: <Widget>[
-                                        Expanded(
-                                          child: _MarkerButton(
-                                            controlKey: const Key(
-                                              'visualFullscreenMarkA',
+                                            PopupMenuButton<double>(
+                                              key: const Key(
+                                                'visualFullscreenSpeed',
+                                              ),
+                                              tooltip: 'Velocidade',
+                                              enabled: ready && model.canSpeed,
+                                              initialValue: model.speed,
+                                              onOpened: () {
+                                                _menuOpen = true;
+                                                _hideTimer?.cancel();
+                                              },
+                                              onCanceled: _menuClosed,
+                                              onSelected: (double value) {
+                                                _menuClosed();
+                                                model.changeSpeed(value);
+                                              },
+                                              itemBuilder: (_) =>
+                                                  <PopupMenuEntry<double>>[
+                                                    for (final double speed
+                                                        in <double>[
+                                                          .5,
+                                                          .75,
+                                                          .85,
+                                                          1,
+                                                          1.25,
+                                                          1.5,
+                                                        ])
+                                                      PopupMenuItem<double>(
+                                                        value: speed,
+                                                        child: Text(
+                                                          '${speed.toStringAsFixed(2)}×',
+                                                        ),
+                                                      ),
+                                                  ],
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(
+                                                  12,
+                                                ),
+                                                child: Text(
+                                                  '${model.speed.toStringAsFixed(2)}× ▾',
+                                                  style: const TextStyle(
+                                                    color: studioCyan,
+                                                  ),
+                                                ),
+                                              ),
                                             ),
-                                            label: 'PONTO A',
-                                            value: model.markerA,
-                                            onPressed: ready && model.canLoop
-                                                ? model.markA
-                                                : null,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: _MarkerButton(
-                                            controlKey: const Key(
-                                              'visualFullscreenMarkB',
+                                            IconButton(
+                                              key: const Key(
+                                                'visualFullscreenSpeedUp',
+                                              ),
+                                              tooltip:
+                                                  'Aumentar velocidade em 0,05',
+                                              onPressed:
+                                                  ready &&
+                                                      model.canSpeed &&
+                                                      model.speed < 1.5
+                                                  ? () => model.changeSpeed(
+                                                      ((model.speed * 20)
+                                                                      .round() +
+                                                                  1)
+                                                              .clamp(10, 30) /
+                                                          20,
+                                                    )
+                                                  : null,
+                                              icon: const Icon(
+                                                Icons.fast_forward,
+                                              ),
                                             ),
-                                            label: 'PONTO B',
-                                            value: model.markerB,
-                                            onPressed: ready && model.canLoop
-                                                ? model.markB
-                                                : null,
-                                          ),
+                                            TextButton(
+                                              key: const Key(
+                                                'visualFullscreenSpeedReset',
+                                              ),
+                                              style: widget.mainMode
+                                                  ? TextButton.styleFrom(
+                                                      minimumSize: const Size(
+                                                        0,
+                                                        32,
+                                                      ),
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                          ),
+                                                      tapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                    )
+                                                  : null,
+                                              onPressed:
+                                                  ready &&
+                                                      model.canSpeed &&
+                                                      model.speed != 1
+                                                  ? () => model.changeSpeed(1)
+                                                  : null,
+                                              child: const Text(
+                                                '1,00× original',
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    ),
-                                    Wrap(
-                                      alignment: WrapAlignment.center,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      spacing: 8,
-                                      children: <Widget>[
-                                        const Text('Repetir A–B'),
-                                        Switch(
-                                          key: const Key(
-                                            'visualFullscreenLoopToggle',
+                                        if (model.loaded && !model.canSpeed)
+                                          const Text(
+                                            'Velocidade indisponível nesta fonte.',
+                                            style: TextStyle(
+                                              color: studioMuted,
+                                              fontSize: 12,
+                                            ),
                                           ),
-                                          value: model.loopEnabled,
-                                          activeThumbColor: studioCyan,
-                                          onChanged:
-                                              ready &&
-                                                  model.canLoop &&
-                                                  model.markerA != null &&
-                                                  model.markerB != null
-                                              ? (_) => model.toggleLoop()
-                                              : null,
+                                        SizedBox(
+                                          height: widget.mainMode ? 2 : 8,
                                         ),
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: <Widget>[
+                                            SizedBox(
+                                              width: compactMarkers
+                                                  ? ((constraints.maxWidth -
+                                                                32) /
+                                                            3)
+                                                        .clamp(96.0, 220.0)
+                                                  : (constraints.maxWidth -
+                                                            40) /
+                                                        2,
+                                              child: _MarkerButton(
+                                                controlKey: const Key(
+                                                  'visualFullscreenMarkA',
+                                                ),
+                                                label: 'PONTO A',
+                                                value: model.markerA,
+                                                compact: compactMarkers,
+                                                onPressed:
+                                                    ready && model.canLoop
+                                                    ? model.markA
+                                                    : null,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            SizedBox(
+                                              width: compactMarkers
+                                                  ? ((constraints.maxWidth -
+                                                                32) /
+                                                            3)
+                                                        .clamp(96.0, 220.0)
+                                                  : (constraints.maxWidth -
+                                                            40) /
+                                                        2,
+                                              child: _MarkerButton(
+                                                controlKey: const Key(
+                                                  'visualFullscreenMarkB',
+                                                ),
+                                                label: 'PONTO B',
+                                                value: model.markerB,
+                                                compact: compactMarkers,
+                                                onPressed:
+                                                    ready && model.canLoop
+                                                    ? model.markB
+                                                    : null,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        Wrap(
+                                          alignment: WrapAlignment.center,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          spacing: 8,
+                                          children: <Widget>[
+                                            const Text('Repetir A–B'),
+                                            Switch(
+                                              key: const Key(
+                                                'visualFullscreenLoopToggle',
+                                              ),
+                                              value: model.loopEnabled,
+                                              activeThumbColor: studioCyan,
+                                              onChanged:
+                                                  ready &&
+                                                      model.canLoop &&
+                                                      model.markerA != null &&
+                                                      model.markerB != null
+                                                  ? (_) => model.toggleLoop()
+                                                  : null,
+                                            ),
+                                            TextButton.icon(
+                                              key: const Key(
+                                                'visualFullscreenClearLoop',
+                                              ),
+                                              onPressed:
+                                                  ready &&
+                                                      model.canLoop &&
+                                                      (model.markerA != null ||
+                                                          model.markerB != null)
+                                                  ? model.clearLoop
+                                                  : null,
+                                              icon: const Icon(
+                                                Icons.repeat,
+                                                size: 18,
+                                              ),
+                                              label: const Text('Limpar A–B'),
+                                            ),
+                                          ],
+                                        ),
+                                        if (model.loaded && !model.canLoop)
+                                          const Text(
+                                            'Repetição A–B indisponível nesta fonte.',
+                                            style: TextStyle(
+                                              color: studioMuted,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        if (widget.mainMode &&
+                                            widget.onOpenFile != null &&
+                                            widget.onChordToggle != null &&
+                                            widget.onSearch != null) ...[
+                                          const Divider(color: Colors.white24),
+                                          Row(
+                                            children: [
+                                              for (final action
+                                                  in <
+                                                    ({
+                                                      String key,
+                                                      String label,
+                                                      IconData icon,
+                                                      VoidCallback? onPressed,
+                                                    })
+                                                  >[
+                                                    (
+                                                      key: 'visualPlayerEmptyFile',
+                                                      label: 'Abrir ficheiro',
+                                                      icon: Icons.folder_open,
+                                                      onPressed: model.busy
+                                                          ? null
+                                                          : widget.onOpenFile,
+                                                    ),
+                                                    (
+                                                      key: 'visualPlayerChordPicker',
+                                                      label: 'Cifra',
+                                                      icon: Icons
+                                                          .library_music_outlined,
+                                                      onPressed:
+                                                          widget.onChordToggle,
+                                                    ),
+                                                    (
+                                                      key: 'visualPlayerEmptySearch',
+                                                      label: 'YouTube',
+                                                      icon: Icons.search,
+                                                      onPressed: model.busy
+                                                          ? null
+                                                          : widget.onSearch,
+                                                    ),
+                                                  ])
+                                                Expanded(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 3,
+                                                        ),
+                                                    child: OutlinedButton.icon(
+                                                      key: Key(action.key),
+                                                      onPressed:
+                                                          action.onPressed,
+                                                      style: OutlinedButton.styleFrom(
+                                                        foregroundColor:
+                                                            action.key ==
+                                                                    'visualPlayerChordPicker' &&
+                                                                widget
+                                                                    .chordActive
+                                                            ? studioCyan
+                                                            : Colors.white,
+                                                        backgroundColor:
+                                                            const Color(
+                                                              0xB3143544,
+                                                            ),
+                                                        side: BorderSide(
+                                                          color:
+                                                              action.key ==
+                                                                      'visualPlayerChordPicker' &&
+                                                                  widget
+                                                                      .chordActive
+                                                              ? studioCyan
+                                                              : const Color(
+                                                                  0xFF607080,
+                                                                ),
+                                                        ),
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 3,
+                                                            ),
+                                                        minimumSize: const Size(
+                                                          0,
+                                                          44,
+                                                        ),
+                                                      ),
+                                                      icon: Icon(
+                                                        action.icon,
+                                                        size: 16,
+                                                      ),
+                                                      label: FittedBox(
+                                                        fit: BoxFit.scaleDown,
+                                                        child: Text(
+                                                          action.label,
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 12,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                        ],
                                         TextButton.icon(
                                           key: const Key(
-                                            'visualFullscreenClearLoop',
+                                            'visualFullscreenLockSurface',
                                           ),
-                                          onPressed:
-                                              ready &&
-                                                  model.canLoop &&
-                                                  (model.markerA != null ||
-                                                      model.markerB != null)
-                                              ? model.clearLoop
-                                              : null,
+                                          onPressed: _locked
+                                              ? null
+                                              : () => _setLocked(true),
                                           icon: const Icon(
-                                            Icons.repeat,
-                                            size: 18,
+                                            Icons.shield_outlined,
                                           ),
-                                          label: const Text('Limpar A–B'),
+                                          label: const Text('Bloquear toques'),
                                         ),
                                       ],
                                     ),
-                                    if (model.loaded && !model.canLoop)
-                                      const Text(
-                                        'Repetição A–B indisponível nesta fonte.',
-                                        style: TextStyle(
-                                          color: studioMuted,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    TextButton.icon(
-                                      key: const Key(
-                                        'visualFullscreenLockSurface',
-                                      ),
-                                      onPressed: _locked
-                                          ? null
-                                          : () => _setLocked(true),
-                                      icon: const Icon(Icons.shield_outlined),
-                                      label: const Text('Bloquear toques'),
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -1009,7 +2086,6 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                         ),
                       ),
                     ),
-                  ),
                   if (!_visible && !_locked)
                     Align(
                       alignment: Alignment.bottomRight,
@@ -1036,12 +2112,17 @@ class _SeekControl extends StatefulWidget {
     required this.model,
     required this.enabled,
     this.compact = false,
+    this.showTimes = true,
+    this.onDragStart,
+    this.onDragEnd,
   });
 
   final Key controlKey;
   final PlayerPanelModel model;
   final bool enabled;
   final bool compact;
+  final bool showTimes;
+  final VoidCallback? onDragStart, onDragEnd;
 
   @override
   State<_SeekControl> createState() => _SeekControlState();
@@ -1060,41 +2141,47 @@ class _SeekControlState extends State<_SeekControl> {
             .clamp(0, duration > 0 ? duration : 1);
     return Column(
       children: <Widget>[
-        Slider(
-          key: widget.controlKey,
-          min: 0,
-          max: duration > 0 ? duration : 1,
-          value: position,
-          activeColor: studioCyan,
-          inactiveColor: const Color(0xFF25384D),
-          semanticFormatterCallback: (double value) =>
-              _time(Duration(milliseconds: value.round())),
-          onChanged: seekable
-              ? (double value) => setState(() => _dragMilliseconds = value)
-              : null,
-          onChangeEnd: seekable
-              ? (double value) {
-                  setState(() => _dragMilliseconds = null);
-                  widget.model.seek(Duration(milliseconds: value.round()));
-                }
-              : null,
-        ),
-        Padding(
-          padding: EdgeInsets.only(bottom: widget.compact ? 0 : 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: <Widget>[
-              Text(
-                _time(Duration(milliseconds: position.round())),
-                style: const TextStyle(color: studioCyan, fontSize: 12),
-              ),
-              Text(
-                _time(widget.model.duration),
-                style: const TextStyle(color: studioMuted, fontSize: 12),
-              ),
-            ],
+        SizedBox(
+          height: widget.compact ? 34 : 48,
+          child: Slider(
+            key: widget.controlKey,
+            min: 0,
+            max: duration > 0 ? duration : 1,
+            value: position,
+            activeColor: studioCyan,
+            inactiveColor: const Color(0xFF25384D),
+            semanticFormatterCallback: (double value) =>
+                _time(Duration(milliseconds: value.round())),
+            onChangeStart: seekable ? (_) => widget.onDragStart?.call() : null,
+            onChanged: seekable
+                ? (double value) => setState(() => _dragMilliseconds = value)
+                : null,
+            onChangeEnd: seekable
+                ? (double value) {
+                    setState(() => _dragMilliseconds = null);
+                    widget.model.seek(Duration(milliseconds: value.round()));
+                    widget.onDragEnd?.call();
+                  }
+                : null,
           ),
         ),
+        if (widget.showTimes)
+          Padding(
+            padding: EdgeInsets.only(bottom: widget.compact ? 0 : 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                Text(
+                  _time(Duration(milliseconds: position.round())),
+                  style: const TextStyle(color: studioCyan, fontSize: 12),
+                ),
+                Text(
+                  _time(widget.model.duration),
+                  style: const TextStyle(color: studioMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -1199,6 +2286,74 @@ class _SpeedControlState extends State<_SpeedControl> {
   }
 }
 
+class _YouTubePitchTransport extends StatelessWidget {
+  const _YouTubePitchTransport({required this.model, required this.enabled});
+
+  final PlayerPanelModel model;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: <Widget>[
+      _RoundButton(
+        controlKey: const Key('visualFullscreenPitchDown'),
+        tooltip: 'Diminuir tom',
+        icon: Icons.remove,
+        onPressed: enabled && model.canPitch && model.pitch > -12
+            ? () => model.changePitch((model.pitch - 1).clamp(-12, 12))
+            : null,
+      ),
+      const SizedBox(width: 24),
+      Semantics(
+        key: const Key('visualFullscreenPitchValue'),
+        label: 'Tom ${_pitchLabel(model.pitch)} semitons',
+        child: Container(
+          width: 60,
+          height: 60,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: studioCyan,
+            shape: BoxShape.circle,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Text(
+                _pitchLabel(model.pitch),
+                style: const TextStyle(
+                  color: studioBg,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+              const Text(
+                'st',
+                style: TextStyle(
+                  color: studioBg,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(width: 24),
+      _RoundButton(
+        controlKey: const Key('visualFullscreenPitchUp'),
+        tooltip: 'Aumentar tom',
+        icon: Icons.add,
+        onPressed: enabled && model.canPitch && model.pitch < 12
+            ? () => model.changePitch((model.pitch + 1).clamp(-12, 12))
+            : null,
+      ),
+    ],
+  );
+}
+
 class _Transport extends StatelessWidget {
   const _Transport({
     required this.model,
@@ -1292,11 +2447,13 @@ class _MarkerButton extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onPressed,
+    this.compact = false,
   });
   final Key controlKey;
   final String label;
   final Duration? value;
   final VoidCallback? onPressed;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => OutlinedButton(
@@ -1305,14 +2462,22 @@ class _MarkerButton extends StatelessWidget {
     style: OutlinedButton.styleFrom(
       backgroundColor: const Color(0xFF1B2D40),
       foregroundColor: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      fixedSize: compact ? const Size.fromHeight(44) : null,
+      tapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : null,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 4 : 12,
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
     child: Column(
       children: <Widget>[
         Text(label, style: const TextStyle(fontSize: 10, color: studioMuted)),
-        const SizedBox(height: 4),
-        Text(value == null ? 'Marcar' : _time(value!)),
+        SizedBox(height: compact ? 2 : 4),
+        Text(
+          value == null ? 'Marcar' : _time(value!),
+          style: compact ? const TextStyle(fontSize: 14) : null,
+        ),
       ],
     ),
   );

@@ -18,7 +18,11 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(844, 390));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(app);
-    await tester.tap(find.byKey(const Key('visualPlayerSearch')));
+    await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+    await tester.pumpAndSettle();
+    final search = find.text('Pesquisar no YouTube').last;
+    await tester.ensureVisible(search);
+    await tester.tap(search);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
     expect(find.byKey(const Key('youtubeUseInPlayer')), findsOneWidget);
@@ -62,7 +66,11 @@ void main() {
     expect(session.focuses, 1);
     expect(searchStillMounted, isFalse);
     expect(playerMounted, isTrue);
-    expect(focusedWidth, lessThan(browserWidth));
+    expect(
+      focusedWidth,
+      browserWidth,
+      reason: 'O Player principal usa agora o vídeo de largura total.',
+    );
     expect(creations, 1);
     expect(session.views, 1);
     expect(session.disposed, isFalse);

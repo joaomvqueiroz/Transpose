@@ -53,14 +53,44 @@ int currentChordIndex(List<ChordCue> cues, Duration position) {
 }
 
 class ChordSheet {
-  const ChordSheet({this.timeline = '', this.notes = ''});
-  final String timeline, notes;
+  const ChordSheet({
+    this.timeline = '',
+    this.notes = '',
+    this.sourceTitle = '',
+    this.sourceUrl = '',
+    this.transpose = 0,
+    this.followAudio = true,
+  });
+  final String timeline, notes, sourceTitle, sourceUrl;
+  final int transpose;
+  final bool followAudio;
+
+  ChordSheet copyWith({
+    String? timeline,
+    String? notes,
+    String? sourceTitle,
+    String? sourceUrl,
+    int? transpose,
+    bool? followAudio,
+  }) => ChordSheet(
+    timeline: timeline ?? this.timeline,
+    notes: notes ?? this.notes,
+    sourceTitle: sourceTitle ?? this.sourceTitle,
+    sourceUrl: sourceUrl ?? this.sourceUrl,
+    transpose: transpose ?? this.transpose,
+    followAudio: followAudio ?? this.followAudio,
+  );
 }
 
 class ChordSheetStore {
   ChordSheetStore({SharedPreferencesAsync? preferences})
     : _preferences = preferences ?? SharedPreferencesAsync();
   final SharedPreferencesAsync _preferences;
+
+  /// Session-only draft retained when the player is rebuilt during navigation.
+  /// It is never written to preferences or associated with an empty source key.
+  ChordSheet temporarySheet = const ChordSheet();
+
   String _key(String source) =>
       'transpono.chords.v1.${base64Url.encode(utf8.encode(source))}';
   Future<ChordSheet> read(String source) async {
@@ -74,13 +104,33 @@ class ChordSheetStore {
       throw const FormatException('Cifras guardadas inválidas.');
     }
     parseChordCues(data['timeline']);
-    return ChordSheet(timeline: data['timeline'], notes: data['notes']);
+    if ((data['sourceTitle'] != null && data['sourceTitle'] is! String) ||
+        (data['sourceUrl'] != null && data['sourceUrl'] is! String)) {
+      throw const FormatException('Origem da cifra inválida.');
+    }
+    if ((data['transpose'] != null &&
+            (data['transpose'] is! int ||
+                (data['transpose'] as int).abs() > 48)) ||
+        (data['followAudio'] != null && data['followAudio'] is! bool)) {
+      throw const FormatException('Tonalidade da cifra inválida.');
+    }
+    return ChordSheet(
+      timeline: data['timeline'],
+      notes: data['notes'],
+      sourceTitle: data['sourceTitle'] ?? '',
+      sourceUrl: data['sourceUrl'] ?? '',
+      transpose: data['transpose'] ?? 0,
+      followAudio: data['followAudio'] ?? true,
+    );
   }
 
   Future<void> save(String source, ChordSheet sheet) async {
     if (source.isEmpty ||
         sheet.timeline.length > 60000 ||
-        sheet.notes.length > 10000) {
+        sheet.notes.length > 10000 ||
+        sheet.sourceTitle.length > 240 ||
+        sheet.sourceUrl.length > 2048 ||
+        sheet.transpose.abs() > 48) {
       throw const FormatException('Dados fora do limite permitido.');
     }
     parseChordCues(sheet.timeline);
@@ -92,6 +142,10 @@ class ChordSheetStore {
         'version': 1,
         'timeline': sheet.timeline,
         'notes': sheet.notes,
+        'sourceTitle': sheet.sourceTitle,
+        'sourceUrl': sheet.sourceUrl,
+        'transpose': sheet.transpose,
+        'followAudio': sheet.followAudio,
       }),
     );
   }
@@ -410,7 +464,7 @@ class _ChordEditorState extends State<_ChordEditor> {
     try {
       await widget.store.save(
         widget.source,
-        ChordSheet(timeline: _timeline.text, notes: _notes.text),
+        widget.initial.copyWith(timeline: _timeline.text, notes: _notes.text),
       );
       if (mounted) Navigator.pop(context);
     } on FormatException catch (e) {

@@ -11,6 +11,7 @@ import 'main_player_panel.dart';
 import 'player_presets.dart';
 import 'study_tools.dart';
 import 'chord_sheet.dart';
+import 'chord_browser.dart';
 import 'stage_panel.dart';
 import 'practice_panel.dart';
 import 'practice_controller.dart';
@@ -30,6 +31,8 @@ class StudioVisualApp extends StatelessWidget {
     this.playerController,
     this.presetStore,
     this.recoveryRepository,
+    this.chordBrowserFactory,
+    this.openSearchWhenEmpty = false,
   });
 
   final Widget? functionalPlayer;
@@ -37,6 +40,8 @@ class StudioVisualApp extends StatelessWidget {
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
   final SessionSnapshotRepository? recoveryRepository;
+  final ChordBrowserSession Function()? chordBrowserFactory;
+  final bool openSearchWhenEmpty;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -57,6 +62,8 @@ class StudioVisualApp extends StatelessWidget {
       playerController: playerController,
       presetStore: presetStore,
       recoveryRepository: recoveryRepository,
+      chordBrowserFactory: chordBrowserFactory,
+      openSearchWhenEmpty: openSearchWhenEmpty,
     ),
   );
 }
@@ -71,6 +78,8 @@ class StudioVisualHome extends StatefulWidget {
     this.playerController,
     this.presetStore,
     this.recoveryRepository,
+    this.chordBrowserFactory,
+    this.openSearchWhenEmpty = false,
   });
 
   final Widget? functionalPlayer;
@@ -78,62 +87,39 @@ class StudioVisualHome extends StatefulWidget {
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
   final SessionSnapshotRepository? recoveryRepository;
+  final ChordBrowserSession Function()? chordBrowserFactory;
+  final bool openSearchWhenEmpty;
 
   @override
   State<StudioVisualHome> createState() => _StudioVisualHomeState();
 }
 
-class _BottomTabs extends StatelessWidget {
-  const _BottomTabs({required this.selected, required this.onSelect});
-  final StudioTab selected;
-  final ValueChanged<StudioTab> onSelect;
+class _MainAdjustmentsBar extends StatelessWidget {
+  const _MainAdjustmentsBar({required this.expanded, required this.onPressed});
+
+  final bool expanded;
+  final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 65,
-    decoration: const BoxDecoration(
-      color: Color(0xFF07121F),
-      border: Border(top: BorderSide(color: Color(0xFF16283D))),
-    ),
-    child: Row(
-      children: <Widget>[
-        _tab(StudioTab.player, Icons.play_circle_outline, 'PLAYER'),
-        _tab(StudioTab.practice, Icons.graphic_eq, 'PRÁTICA'),
-        _tab(StudioTab.chords, Icons.music_note, 'ACORDES'),
-        _tab(StudioTab.stage, Icons.tune, 'PALCO'),
-      ],
+  Widget build(BuildContext context) => SizedBox(
+    width: 230,
+    height: 52,
+    child: OutlinedButton.icon(
+      key: const Key('visualMainAdjustments'),
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: const Color(0xB3143544),
+        foregroundColor: const Color(0xFF00E5FF),
+        side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
+      ),
+      icon: Icon(
+        expanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+        size: 30,
+      ),
+      label: Text(
+        expanded ? 'Fechar ajustes' : 'Ajustes',
+        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+      ),
     ),
   );
-
-  Widget _tab(StudioTab tab, IconData icon, String label) {
-    final bool active = tab == selected;
-    final Color color = active
-        ? const Color(0xFF00E5FF)
-        : const Color(0xFF94A3B8);
-    return Expanded(
-      child: InkWell(
-        key: Key('visualTab${tab.name}'),
-        onTap: () => onSelect(tab),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(icon, size: 21, color: color),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-            const SizedBox(height: 3),
-            if (active)
-              const CircleAvatar(radius: 2, backgroundColor: Color(0xFF00E5FF)),
-          ],
-        ),
-      ),
-    );
-  }
 }

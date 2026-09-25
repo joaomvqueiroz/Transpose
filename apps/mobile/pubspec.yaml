@@ -25,6 +25,7 @@ dependencies:
 dev_dependencies:
   sqflite_common_ffi: ^2.4.3
   shared_preferences_platform_interface: ^2.4.2
+  webview_flutter_platform_interface: ^2.15.1
   flutter_test:
     sdk: flutter
   integration_test:

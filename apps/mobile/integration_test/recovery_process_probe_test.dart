@@ -102,10 +102,8 @@ void main() {
           final preferencesBefore = await _preferencesFingerprint();
           await mount();
           await waitFor(
-            () => find
-                .byKey(const Key('visualTabpractice'))
-                .evaluate()
-                .isNotEmpty,
+            () =>
+                find.byKey(const Key('visualPlayerMenu')).evaluate().isNotEmpty,
             'studio startup',
           );
           // Give the empty startup read a chance to complete before selecting
@@ -126,6 +124,8 @@ void main() {
           );
           await player.toggleLoop();
           await player.seek(const Duration(seconds: 3));
+          await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+          await tester.pump(const Duration(milliseconds: 250));
           await tester.tap(find.byKey(const Key('visualTabpractice')));
           await waitFor(() async {
             final snapshot = (await repository.read()).snapshot;

@@ -408,3 +408,49 @@ Consequences:
 - Não alterar recuperação sem autoplay, política de anúncio, extração,
   download, CORS/CSP/DRM ou arquitetura DSP. ADR-013 e revisão de distribuição
   continuam abertos, assim como iPhone, chamadas/BT, acústica e uso prolongado.
+
+## ADR-019 — Cifra opcional e vídeo no fluxo do player principal
+
+Status: Accepted — 2026-09-25; contrato corrigido pelo utilizador. Evidências de
+implementação e gates pendentes em `docs/PLAYER_CIFRA_SEQUENTIAL_PLAN.md`.
+
+Decision: o player principal deixa de fixar o vídeo durante a rolagem. O cabeçalho
+continua fixo e a mesma sessão de mídia é preservada. Esta decisão não altera o
+layout dos painéis Prática/Palco. Cifra começa desligada, com cards originais de
+tom, velocidade e A–B. Ao importar/ativar uma cifra, esses ajustes passam para um
+painel limitado ao box do vídeo, e a cifra ocupa o espaço dos cards. Desligar o
+modo não apaga texto, origem nem ajustes.
+
+Consequences:
+- Pesquisa em navegador visível; confirmação explícita antes de guardar texto
+  renderizado e origem por música. Pausar áudio ao pesquisar, sem autoplay ao voltar.
+- Cancelamento e troca de fonte invalidam importações pendentes. Persistência
+  mantém marcações e lê os registos anteriores, sem sobrescrever dados inválidos.
+- Transposição é calculada a partir do texto original. Pode ser independente ou
+  acompanhar o pitch confirmado do áudio; intenção pendente não é pitch aplicado.
+- O transporte sobre o vídeo desaparece em dois segundos; ajustes têm fecho
+  explícito. Nenhum modal externo substitui os cards quando Cifra está desligada.
+- Sites gratuitos não equivalem a licença de extração/redistribuição. Cifra Club
+  e Cifras.com.br têm restrições contratuais. O protótipo não é integração oficial;
+  permissões e revisão de distribuição continuam obrigatórias antes de publicar.
+  Não contornar login, CAPTCHA, paywall ou bloqueios nem usar APIs privadas.
+- Desenvolver/testar apenas no pacote separado Transpono Dev deste PC. Preservar
+  o APK, assinatura e dados do app original no telemóvel.
+
+## ADR-020 — Fixação opcional do vídeo e superfície única de transporte
+
+Status: Accepted — 2026-09-25, adenda à ADR-019 a pedido do utilizador.
+
+O vídeo do player principal começa na rolagem normal. Um botão sobre o vídeo
+alterna para uma área fixa acima do conteúdo rolável e volta ao modo normal.
+O mesmo widget global da mídia é transferido entre as posições no mesmo frame,
+preservando a WebView/sessão; nenhum Play é emitido pela alternância. Em modo
+fixo, a área ocupa até 52% do espaço vertical no retrato e usa duas colunas
+em paisagem. Prática/Palco mantêm a sua apresentação anterior.
+
+Título, rótulo de origem e barra de posição duplicados abaixo da mídia deixam
+de ser apresentados. Posição, transporte e ecrã cheio aparecem no vídeo por
+dois segundos após toque; ao arrastar a posição, o temporizador de ocultação
+fica suspenso até terminar o gesto. Cifra ativa mantém seek também nos ajustes.
+Recuperação de YouTube pendente expõe apenas a ação «Restaurar vídeo»; o
+restauro continua explícito e pausado.

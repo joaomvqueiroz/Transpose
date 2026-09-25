@@ -8,14 +8,81 @@ hierarchy follow the supplied panel references.
 The sample does not loop: natural completion shows `Faixa terminada`, and
 `Recomeçar` is an explicit user action.
 
+## Main player and chord sheet
+
+The main video scrolls with the page by default. Its pin button fixes it while
+the controls below scroll; tapping again releases it. The same browser/video
+session remains mounted. Tap the video to reveal Play/Pause, ten-second jumps,
+seek and fullscreen for two seconds. The title, browser label and seek row are
+not repeated beneath the video. A pending YouTube recovery shows only the
+**Restaurar vídeo** action.
+Cifra starts OFF, with the original pitch, speed and A/B cards below the video.
+
+**Cifra**, beside **Abrir ficheiro**, opens an in-app browser with Cifra Club and
+Cifras.com.br, site-filtered web search and direct links. A user-selected public
+chord page can be previewed and confirmed for import. No hidden APIs, batch
+scraping, login/paywall/challenge bypass, or automatic song recognition is used.
+Website changes/access restrictions may prevent import; compatibility is not a
+provider partnership or permission to redistribute. Provider terms/licensing
+remain a publishing gate. Sources with free browsing are preferred.
+
+With Cifra ON, the sheet replaces those cards and the gear INSIDE the video opens
+compact pitch/speed/A-B/seek controls within that same box. Toggle Cifra OFF to
+restore cards without deleting saved text. Search on the sheet chooses another
+version.
+The **Acompanhar áudio** switch (labelled **Tom ligado ao áudio** / **Tom só da cifra**)
+couples chord transposition to confirmed audio pitch; turn
+it off for independent +/- semitones. Repor cifra resets only the chord display.
+Original text and source attribution persist by track, preserving timed cues.
+The reader retains chord start columns and handles slash chords/ChordPro tags.
+Without a selected source, imported text is retained only during the app session.
+Text is limited to 10,000 characters / 500 lines; PDF/image recognition is absent.
+
+Sequential contract and verification: `../../docs/PLAYER_CIFRA_SEQUENTIAL_PLAN.md`.
+
 ## Run
 
-From `apps/mobile`:
+On Windows, from `apps/mobile`, build and open the isolated development app:
 
-```text
-flutter pub get
-flutter run -d <device-id>
+```powershell
+.\tool\run_dev.ps1 -DeviceId <device-id>
 ```
+
+### Development on this Windows PC
+
+Use the isolated **Transpono Dev** app while retaining the existing Transpono
+installation and its data. From `apps/mobile`:
+
+```powershell
+.\tool\run_dev.ps1 -DeviceId R58YA16NDVM
+# Compile without installing:
+.\tool\run_dev.ps1 -BuildOnly
+```
+
+This checkout was created with Flutter **3.47.5** (Dart **3.13.4**).
+Android builds are limited to two Gradle workers, a 2 GB Gradle heap and a
+512 MB Kotlin heap to fit the development PC's approximately 6 GB of RAM.
+The runner uses Flutter at `%LOCALAPPDATA%\Codex\Toolchains\flutter`, builds
+`lib/main.dart`, checks APK metadata for `com.example.transpose_mobile.dev`,
+then installs with `adb install -r`. It never automatically uninstalls an app.
+Use `-FlutterPath` and `-AndroidSdk` to override the tool locations.
+The Dev app has its own empty storage; existing sessions are not copied.
+
+The first run generates a dedicated development key at
+`%USERPROFILE%\.android\transpono-dev.keystore`. Keep a private backup outside
+Git and copy it to future development PCs to preserve Dev app updates.
+This is a development-only key (alias `transponodev`, conventional password
+`android`), not a publishing key. `TRANSPONO_DEV_KEYSTORE` can override its path.
+
+For hot reload, after the first successful setup, in PowerShell:
+
+```powershell
+flutter run -d R58YA16NDVM --target=lib/main.dart --android-project-arg=transponoDev=true
+```
+
+The Gradle property applies only to normal targets. Integration-test targets
+always keep the isolated `.qa` package and do not use the Dev signing key.
+Without the property, the original package and signing configuration remain.
 
 ## Android integration-test safety
 
