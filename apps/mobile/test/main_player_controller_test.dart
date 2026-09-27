@@ -258,6 +258,24 @@ void main() {
     },
   );
 
+  test('YouTube accepts 0.25x to 2x and rejects values outside', () async {
+    final youtube = _YouTube(<String>[])..state = _video();
+    final player = MainPlayerController(
+      local: _Local(<String>[]),
+      youtubeFactory: () => youtube,
+    );
+    await player.openYouTube();
+    await player.changeSpeed(.25);
+    expect(youtube.commands.last, ('speed', .25));
+    await player.changeSpeed(2);
+    expect(youtube.commands.last, ('speed', 2));
+    final count = youtube.commands.length;
+    await player.changeSpeed(.2);
+    await player.changeSpeed(2.1);
+    expect(youtube.commands, hasLength(count));
+    player.dispose();
+  });
+
   test(
     'loading local sample pauses the browser before changing the source',
     () async {

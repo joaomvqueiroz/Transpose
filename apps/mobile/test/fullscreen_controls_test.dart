@@ -67,6 +67,27 @@ void main() {
     },
   );
 
+  testWidgets('YouTube uses only its native seek bar', (tester) async {
+    final model = _Model();
+    await tester.pumpWidget(_app(model, youtubeNativeTransport: true));
+    expect(find.byKey(const Key('visualFullscreenSeek')), findsNothing);
+    expect(find.byKey(const Key('visualFullscreenPitchUp')), findsOneWidget);
+    expect(find.byKey(const Key('visualFullscreenMarkA')), findsOneWidget);
+
+    await tester.pumpWidget(_app(model));
+    expect(find.byKey(const Key('visualFullscreenSeek')), findsOneWidget);
+  });
+
+  testWidgets('main player has no redundant reveal button on the right', (
+    tester,
+  ) async {
+    final model = _Model()..playing = true;
+    await tester.pumpWidget(_app(model, mainMode: true));
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byKey(const Key('visualFullscreenReveal')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'more menu connects real tools and reset, without hiding under popup',
     (tester) async {
@@ -361,6 +382,8 @@ Widget _app(
   Widget media = const ColoredBox(color: Colors.black),
   VoidCallback? onExit,
   ValueChanged<String>? onTool,
+  bool youtubeNativeTransport = false,
+  bool mainMode = false,
 }) => MaterialApp(
   theme: ThemeData.dark(),
   home: Scaffold(
@@ -374,6 +397,10 @@ Widget _app(
         media: media,
         onExit: onExit ?? () {},
         onTool: onTool,
+        youtubeNativeTransport: youtubeNativeTransport,
+        mainMode: mainMode,
+        showHeader: !mainMode,
+        controlsOpen: mainMode ? false : null,
       ),
     ),
   ),

@@ -21,6 +21,7 @@ dependencies:
   webview_flutter: ^4.14.1
   webview_flutter_android: ^4.13.0
   webview_flutter_wkwebview: ^3.26.0
+  record: ^7.1.1
 
 dev_dependencies:
   sqflite_common_ffi: ^2.4.3
@@ -38,10 +39,10 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/branding/transpono_launcher.png
-  adaptive_icon_background: "#0B1826"
+  adaptive_icon_background: "#080809"
   adaptive_icon_foreground: assets/branding/transpono_launcher.png
   remove_alpha_ios: true
-  background_color_ios: "#0B1826"
+  background_color_ios: "#080809"
 
 flutter:
   uses-material-design: true

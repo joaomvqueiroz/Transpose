@@ -240,6 +240,7 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                   sourceKey: widget.sourceKey,
                   store: widget.chordStore ?? _fallbackChordStore,
                   onSearch: widget.onChordSearch,
+                  onHide: _toggleChord,
                   revision: widget.chordRevision,
                 ),
               if (widget.showTip && _showTip) ...[
@@ -1150,6 +1151,284 @@ class _VideoSettings extends StatelessWidget {
   );
 }
 
+/// Ajustes compartilhados do player unificado. O transporte do YouTube fica
+/// exclusivamente no próprio vídeo; ficheiros locais mantêm transporte aqui.
+class UnifiedPlayerAdjustments extends StatelessWidget {
+  const UnifiedPlayerAdjustments({
+    required this.model,
+    required this.youtubeNativeTransport,
+    this.showPracticeControls = true,
+    super.key,
+  });
+
+  final PlayerPanelModel model;
+  final bool youtubeNativeTransport;
+  final bool showPracticeControls;
+
+  Widget _card({required Widget child, EdgeInsets? padding}) => Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: padding ?? const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: studioCard,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFF38383E)),
+    ),
+    child: child,
+  );
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: model,
+    builder: (context, _) {
+      final ready = model.loaded && !model.busy;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!youtubeNativeTransport) ...[
+              _SeekControl(
+                controlKey: const Key('unifiedLocalSeek'),
+                model: model,
+                enabled: ready,
+                compact: true,
+              ),
+              _Transport(
+                model: model,
+                enabled: ready,
+                pauseEnabled: model.loaded && model.playing && !model.muted,
+                fullscreen: false,
+              ),
+            ],
+            _card(
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.music_note,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 5),
+                      const Expanded(
+                        child: Text(
+                          'MODULAÇÃO CROMÁTICA',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .7,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        key: const Key('unifiedPitchReset'),
+                        onPressed: ready && model.canPitch && model.pitch != 0
+                            ? () => model.changePitch(0)
+                            : null,
+                        child: const Text(
+                          'Redefinir (0)',
+                          style: TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      IconButton.filledTonal(
+                        key: const Key('unifiedPitchDown'),
+                        tooltip: 'Diminuir tom',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 18,
+                        onPressed: ready && model.canPitch && model.pitch > -12
+                            ? () => model.changePitch(
+                                (model.pitch - 1).clamp(-12, 12),
+                              )
+                            : null,
+                        icon: const Icon(Icons.remove),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: ready && model.canPitch && model.pitch != 0
+                              ? () => model.changePitch(0)
+                              : null,
+                          child: Column(
+                            children: [
+                              const Text(
+                                'TOM ATUAL',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: studioMuted,
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                              Text(
+                                '${_pitchLabel(model.pitch)} semitons',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      IconButton.filledTonal(
+                        key: const Key('unifiedPitchUp'),
+                        tooltip: 'Aumentar tom',
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        iconSize: 18,
+                        onPressed: ready && model.canPitch && model.pitch < 12
+                            ? () => model.changePitch(
+                                (model.pitch + 1).clamp(-12, 12),
+                              )
+                            : null,
+                        icon: const Icon(Icons.add),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (model.loaded && !model.canPitch)
+              const Text(
+                'Tom indisponível nesta fonte.',
+                style: TextStyle(color: studioMuted),
+              ),
+            if (showPracticeControls)
+              _card(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'TEMPO MASTER',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: .7,
+                      ),
+                    ),
+                    _SpeedControl(
+                      model: model,
+                      enabled: ready,
+                      compact: true,
+                      minSpeed: youtubeNativeTransport ? .25 : .5,
+                      maxSpeed: 2,
+                    ),
+                  ],
+                ),
+              ),
+            if (showPracticeControls)
+              _card(
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.repeat, color: studioCyan, size: 16),
+                        const SizedBox(width: 5),
+                        const Expanded(
+                          child: Text(
+                            'TRECHO DE ENSAIO (A–B)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (model.markerA != null && model.markerB != null)
+                          Text(
+                            '${(model.markerB! - model.markerA!).inSeconds}s',
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _MarkerButton(
+                            controlKey: const Key('unifiedMarkA'),
+                            label: 'INÍCIO',
+                            value: model.markerA,
+                            onPressed: ready && model.canLoop
+                                ? model.markA
+                                : null,
+                            compact: true,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _MarkerButton(
+                            controlKey: const Key('unifiedMarkB'),
+                            label: 'FIM',
+                            value: model.markerB,
+                            onPressed: ready && model.canLoop
+                                ? model.markB
+                                : null,
+                            compact: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Repetir trecho continuamente',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Transform.scale(
+                          scale: .75,
+                          child: Switch(
+                            key: const Key('unifiedLoopToggle'),
+                            value: model.loopEnabled,
+                            onChanged:
+                                ready &&
+                                    model.canLoop &&
+                                    model.markerA != null &&
+                                    model.markerB != null
+                                ? (_) => model.toggleLoop()
+                                : null,
+                          ),
+                        ),
+                        IconButton(
+                          key: const Key('unifiedClearLoop'),
+                          tooltip: 'Limpar trecho',
+                          onPressed:
+                              ready &&
+                                  model.canLoop &&
+                                  (model.markerA != null ||
+                                      model.markerB != null)
+                              ? model.clearLoop
+                              : null,
+                          icon: const Icon(Icons.close, size: 17),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// The parent passes the very same media surface used by [MainPlayerPanel].
 /// Locking absorbs platform-view touches as well as native transport controls.
 class MainPlayerFullscreen extends StatefulWidget {
@@ -1351,20 +1630,10 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                             child: Row(
                               children: <Widget>[
                                 IconButton(
-                                  key: Key(
-                                    widget.mainMode
-                                        ? 'visualPlayerMenu'
-                                        : 'visualFullscreenBack',
-                                  ),
-                                  tooltip: widget.mainMode
-                                      ? 'Menu lateral'
-                                      : 'Sair da tela cheia',
+                                  key: const Key('visualFullscreenBack'),
+                                  tooltip: 'Sair da tela cheia',
                                   onPressed: _locked ? null : widget.onExit,
-                                  icon: Icon(
-                                    widget.mainMode
-                                        ? Icons.menu
-                                        : Icons.arrow_back,
-                                  ),
+                                  icon: const Icon(Icons.arrow_back),
                                 ),
                                 Expanded(
                                   child: Text(
@@ -1472,21 +1741,6 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                         ),
                       ),
                     ),
-                  if (!widget.showHeader && widget.mainMode)
-                    Positioned(
-                      left: 4,
-                      top: 4,
-                      child: IconButton.filledTonal(
-                        key: const Key('visualPlayerMenu'),
-                        tooltip: 'Menu lateral',
-                        onPressed: _locked ? null : widget.onExit,
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.black.withValues(alpha: .72),
-                          foregroundColor: Colors.white,
-                        ),
-                        icon: const Icon(Icons.menu),
-                      ),
-                    ),
                   if (!widget.showHeader && widget.onPinToggle != null)
                     Positioned(
                       right: 4,
@@ -1547,7 +1801,12 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                 constraints: BoxConstraints(
                                   maxHeight:
                                       constraints.maxHeight *
-                                      (widget.mainMode ? .5 : .4),
+                                      (widget.mainMode &&
+                                              widget.youtubeNativeTransport
+                                          ? .47
+                                          : widget.mainMode
+                                          ? .5
+                                          : .4),
                                 ),
                                 child: SingleChildScrollView(
                                   key: const Key(
@@ -1587,14 +1846,15 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                               ),
                                             ),
                                           ),
-                                        _SeekControl(
-                                          controlKey: const Key(
-                                            'visualFullscreenSeek',
+                                        if (!widget.youtubeNativeTransport)
+                                          _SeekControl(
+                                            controlKey: const Key(
+                                              'visualFullscreenSeek',
+                                            ),
+                                            model: model,
+                                            enabled: ready,
+                                            compact: compact || widget.mainMode,
                                           ),
-                                          model: model,
-                                          enabled: ready,
-                                          compact: compact || widget.mainMode,
-                                        ),
                                         if (widget.youtubeNativeTransport)
                                           _YouTubePitchTransport(
                                             model: model,
@@ -1612,75 +1872,86 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                             fullscreen: true,
                                           ),
                                           Center(
-                                            child: SizedBox(
-                                              width: 208,
-                                              child: Row(
-                                                children: <Widget>[
-                                                  SizedBox(
-                                                    width: 50,
-                                                    child: IconButton(
-                                                      key: const Key(
-                                                        'visualFullscreenPitchDown',
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: <Widget>[
+                                                SizedBox(
+                                                  width: 208,
+                                                  child: Row(
+                                                    children: <Widget>[
+                                                      SizedBox(
+                                                        width: 50,
+                                                        child: IconButton(
+                                                          key: const Key(
+                                                            'visualFullscreenPitchDown',
+                                                          ),
+                                                          tooltip:
+                                                              'Diminuir tom',
+                                                          onPressed:
+                                                              ready &&
+                                                                  model
+                                                                      .canPitch &&
+                                                                  model.pitch >
+                                                                      -12
+                                                              ? () => model
+                                                                    .changePitch(
+                                                                      (model.pitch -
+                                                                              1)
+                                                                          .clamp(
+                                                                            -12,
+                                                                            12,
+                                                                          ),
+                                                                    )
+                                                              : null,
+                                                          icon: const Icon(
+                                                            Icons.remove,
+                                                          ),
+                                                        ),
                                                       ),
-                                                      tooltip: 'Diminuir tom',
-                                                      onPressed:
-                                                          ready &&
-                                                              model.canPitch &&
-                                                              model.pitch > -12
-                                                          ? () => model
-                                                                .changePitch(
-                                                                  (model.pitch -
-                                                                          1)
-                                                                      .clamp(
-                                                                        -12,
-                                                                        12,
-                                                                      ),
-                                                                )
-                                                          : null,
-                                                      icon: const Icon(
-                                                        Icons.remove,
+                                                      const SizedBox(width: 24),
+                                                      SizedBox(
+                                                        width: 60,
+                                                        child: FittedBox(
+                                                          fit: BoxFit.scaleDown,
+                                                          child: Text(
+                                                            '${_pitchLabel(model.pitch)} st',
+                                                          ),
+                                                        ),
                                                       ),
-                                                    ),
+                                                      const SizedBox(width: 24),
+                                                      SizedBox(
+                                                        width: 50,
+                                                        child: IconButton(
+                                                          key: const Key(
+                                                            'visualFullscreenPitchUp',
+                                                          ),
+                                                          tooltip:
+                                                              'Aumentar tom',
+                                                          onPressed:
+                                                              ready &&
+                                                                  model
+                                                                      .canPitch &&
+                                                                  model.pitch <
+                                                                      12
+                                                              ? () => model
+                                                                    .changePitch(
+                                                                      (model.pitch +
+                                                                              1)
+                                                                          .clamp(
+                                                                            -12,
+                                                                            12,
+                                                                          ),
+                                                                    )
+                                                              : null,
+                                                          icon: const Icon(
+                                                            Icons.add,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
-                                                  const SizedBox(width: 24),
-                                                  SizedBox(
-                                                    width: 60,
-                                                    child: FittedBox(
-                                                      fit: BoxFit.scaleDown,
-                                                      child: Text(
-                                                        '${_pitchLabel(model.pitch)} st',
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 24),
-                                                  SizedBox(
-                                                    width: 50,
-                                                    child: IconButton(
-                                                      key: const Key(
-                                                        'visualFullscreenPitchUp',
-                                                      ),
-                                                      tooltip: 'Aumentar tom',
-                                                      onPressed:
-                                                          ready &&
-                                                              model.canPitch &&
-                                                              model.pitch < 12
-                                                          ? () => model
-                                                                .changePitch(
-                                                                  (model.pitch +
-                                                                          1)
-                                                                      .clamp(
-                                                                        -12,
-                                                                        12,
-                                                                      ),
-                                                                )
-                                                          : null,
-                                                      icon: const Icon(
-                                                        Icons.add,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ],
@@ -2086,7 +2357,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                         ),
                       ),
                     ),
-                  if (!_visible && !_locked)
+                  if (!_visible && !_locked && !widget.mainMode)
                     Align(
                       alignment: Alignment.bottomRight,
                       child: IconButton.filledTonal(
@@ -2149,7 +2420,7 @@ class _SeekControlState extends State<_SeekControl> {
             max: duration > 0 ? duration : 1,
             value: position,
             activeColor: studioCyan,
-            inactiveColor: const Color(0xFF25384D),
+            inactiveColor: const Color(0xFF414145),
             semanticFormatterCallback: (double value) =>
                 _time(Duration(milliseconds: value.round())),
             onChangeStart: seekable ? (_) => widget.onDragStart?.call() : null,
@@ -2188,9 +2459,17 @@ class _SeekControlState extends State<_SeekControl> {
 }
 
 class _SpeedControl extends StatefulWidget {
-  const _SpeedControl({required this.model, required this.enabled});
+  const _SpeedControl({
+    required this.model,
+    required this.enabled,
+    this.compact = false,
+    this.minSpeed = .5,
+    this.maxSpeed = 1.5,
+  });
   final PlayerPanelModel model;
   final bool enabled;
+  final bool compact;
+  final double minSpeed, maxSpeed;
 
   @override
   State<_SpeedControl> createState() => _SpeedControlState();
@@ -2202,6 +2481,108 @@ class _SpeedControlState extends State<_SpeedControl> {
   @override
   Widget build(BuildContext context) {
     final bool enabled = widget.enabled && widget.model.canSpeed;
+    if (widget.compact) {
+      final value = (_dragSpeed ?? widget.model.speed).clamp(
+        widget.minSpeed,
+        widget.maxSpeed,
+      );
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.speed, color: studioCyan, size: 15),
+              const SizedBox(width: 5),
+              const Expanded(
+                child: Text(
+                  'VELOCIDADE',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .6,
+                  ),
+                ),
+              ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: studioCardAlt,
+                  border: Border.all(color: const Color(0xFF77777E)),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  child: Text(
+                    '${value.toStringAsFixed(2)}×',
+                    key: const Key('unifiedSpeedValue'),
+                    style: const TextStyle(
+                      color: studioCyan,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            ),
+            child: SizedBox(
+              height: 24,
+              child: Slider(
+                key: const Key('unifiedSpeedSlider'),
+                value: value,
+                min: widget.minSpeed,
+                max: widget.maxSpeed,
+                divisions: ((widget.maxSpeed - widget.minSpeed) * 20).round(),
+                activeColor: studioCyan,
+                inactiveColor: const Color(0xFF39393E),
+                onChanged: enabled
+                    ? (v) => setState(() => _dragSpeed = v)
+                    : null,
+                onChangeEnd: enabled
+                    ? (v) {
+                        setState(() => _dragSpeed = null);
+                        widget.model.changeSpeed(v);
+                      }
+                    : null,
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${widget.minSpeed.toStringAsFixed(2)}×',
+                style: const TextStyle(color: studioMuted, fontSize: 9),
+              ),
+              const Text(
+                '1,00×',
+                style: TextStyle(color: studioMuted, fontSize: 9),
+              ),
+              Text(
+                '${widget.maxSpeed.toStringAsFixed(2)}×',
+                style: const TextStyle(color: studioMuted, fontSize: 9),
+              ),
+            ],
+          ),
+          if (widget.model.loaded && !widget.model.canSpeed)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Velocidade indisponível nesta fonte.',
+                style: TextStyle(color: studioMuted, fontSize: 10),
+              ),
+            ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -2225,7 +2606,7 @@ class _SpeedControlState extends State<_SpeedControl> {
           max: 1.5,
           divisions: 20,
           activeColor: studioCyan,
-          inactiveColor: const Color(0xFF25384D),
+          inactiveColor: const Color(0xFF414145),
           semanticFormatterCallback: (double value) =>
               '${value.toStringAsFixed(2)} vezes',
           onChanged: enabled
@@ -2257,9 +2638,9 @@ class _SpeedControlState extends State<_SpeedControl> {
                   side: BorderSide(
                     color: (widget.model.speed - preset.$1).abs() < .001
                         ? studioCyan
-                        : const Color(0xFF2C4055),
+                        : const Color(0xFF444447),
                   ),
-                  backgroundColor: const Color(0xFF1B2C40),
+                  backgroundColor: const Color(0xFF2A2A2C),
                   minimumSize: const Size(76, 44),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   shape: RoundedRectangleBorder(
@@ -2431,10 +2812,10 @@ class _RoundButton extends StatelessWidget {
     tooltip: tooltip,
     onPressed: onPressed,
     style: IconButton.styleFrom(
-      backgroundColor: primary ? studioCyan : const Color(0xFF203146),
+      backgroundColor: primary ? studioCyan : const Color(0xFF2A2A2C),
       foregroundColor: primary ? studioBg : Colors.white,
-      disabledBackgroundColor: const Color(0xFF192838),
-      disabledForegroundColor: const Color(0xFF667381),
+      disabledBackgroundColor: const Color(0xFF202022),
+      disabledForegroundColor: const Color(0xFF77777D),
       fixedSize: Size.square(primary ? 60 : 50),
     ),
     icon: Icon(icon, size: primary ? 30 : 24),
@@ -2460,7 +2841,7 @@ class _MarkerButton extends StatelessWidget {
     key: controlKey,
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(
-      backgroundColor: const Color(0xFF1B2D40),
+      backgroundColor: const Color(0xFF232326),
       foregroundColor: Colors.white,
       fixedSize: compact ? const Size.fromHeight(44) : null,
       tapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : null,

@@ -589,3 +589,77 @@ YouTube, tentativas físicas, instalação e limites devem ser consultados em
 `YOUTUBE_PRACTICE_QA.md`. A pesquisa está em `YOUTUBE_PRACTICE_RESEARCH.md`.
 ACK e sinal DSP não comprovam precisão acústica, qualidade, latência ou iPhone.
 Distribuição YouTube continua sujeita ao gate ADR-013.
+
+## 20. Player unificado e colunas de ferramentas — 2026-09-25
+
+O player principal conserva uma única superfície de mídia ao abrir/fechar
+ajustes. A faixa horizontal de colunas oferece Cifra, Treino, Instrumentos,
+Setlist, Metrônomo, Afinador por referência e Áudio. As quatro últimas reutilizam
+as funções existentes no próprio painel, sem abrir outra sessão de mídia.
+Setlist reutiliza `PlayerCollectionsPage` em modo embutido; metrônomo e afinador
+reutilizam os widgets de `study_tools.dart`. A faixa rola lateralmente, enquanto
+o conteúdo ativo rola verticalmente. Fechar ajustes deixa apenas a mídia e o
+botão para reabri-los.
+
+Na Cifra, o conteúdo inicial permanece 16 px abaixo da posição anterior. Quando
+o utilizador rola os controles para fora, a moldura da cifra fica fixa logo
+abaixo do vídeo, com cantos arredondados; só o texto rola dentro. Arrastar o
+texto para baixo no início expande novamente os controles. A superfície de
+vídeo não é recriada nessa transição.
+
+Deteção automática do tom acústico e separação/mistura de instrumentos **não**
+foram implementadas por estas colunas. A primeira exige uma fonte de áudio
+analisável; a segunda exige stems disponibilizados ou um motor de separação.
+As políticas publicadas de YouTube e Spotify não oferecem uma exceção de uso
+pessoal para alterar/separar o conteúdo dessas plataformas. A escolha da fonte
+autorizada e do processamento permanece pendente de discussão com o utilizador;
+o painel Instrumentos não mostra controles de ganho/tom/solo que não funcionem.
+
+Nesta etapa, `flutter analyze lib test` não encontrou problemas e os 302 testes
+mobile passaram. A build debug foi instalada no Android SM-A165F conectado.
+
+## 21. Cifra contínua, Treino compacto e afinação por microfone — 2026-09-26
+
+A Cifra usa uma rolagem coordenada: os controles saem gradualmente da vista;
+ao chegar ao vídeo, a moldura arredondada permanece visível e o conteúdo rola
+dentro dela. Não há substituição abrupta por um segundo painel. A cifra pode
+ser trocada após a importação e linhas largas quebram dentro da largura
+disponível. A navegação inferior da página móvel do YouTube pertence ao site e
+não é recortada nem alterada pelo Transpono.
+
+Treino mostra inicialmente apenas os ajustes básicos e botões para trechos
+guardados, metrônomo e progressão de velocidade. Os dois últimos expandem
+somente ao toque. O Afinador saiu da faixa de colunas e está dentro de Áudio.
+Com permissão explícita, ele lê PCM mono do microfone e usa uma estimativa YIN
+para indicar nota e desvio em cents de uma corda tocada isoladamente; isto não
+determina automaticamente a tonalidade de uma música inteira. O microfone é
+desligado ao sair da ferramenta ou ao colocar o app em segundo plano.
+
+O grafo Web Audio do vídeo suportado ganhou banda média (peaking em 1 kHz) e
+um único eco de 280 ms com mistura até 35%, mantendo uma única fonte e saída
+de áudio. Os efeitos não são prometidos para vídeos protegidos, anúncios ou
+ficheiros locais; a interface comunica quando não podem ser aplicados.
+
+Na faixa de colunas, os ícones isolados de pesquisa e tela cheia foram
+substituídos por um único menu “Mais” com essas ações. A Cifra mantém somente
+o botão de ocultar dentro da própria moldura; o botão redundante acima dela
+foi removido.
+
+## 22. Sem recuperação automática, navegação reduzida e cifra nativa — 2026-09-26
+
+Esta decisão substitui os caminhos de recuperação e fullscreen descritos nas
+secções anteriores. O `StudioVisualApp` já não constrói nem inicia o
+`SessionRecoveryController`; fechar o vídeo não cria uma ação de restauro, e
+voltar a abri-lo fica a cargo da setlist/predefinições explicitamente guardadas.
+A sidebar esquerda, a ação "Tempos" ao lado de "Escolher cifra" e a opção
+"Tela cheia" do menu foram removidas do player atual. A superfície de vídeo
+principal permanece a mesma; o fullscreen do próprio YouTube pertence ao site.
+
+"Escolher cifra" abre uma lista com interface do Transpono dentro da coluna
+Cifra. A pesquisa inicia com o título do vídeo preenchido e pode ser alterada
+e repetida. O app lê apenas links de cifras exibidos na página pública de
+busca do Cifras.com.br, valida os URLs e mostra os resultados como cartões
+nativos; tocar num resultado prepara e importa a cifra automaticamente. O
+utilizador pode fechar a pesquisa ou trocar a cifra depois. O site é uma
+dependência externa: mudanças no HTML ou indisponibilidade podem exigir
+adaptação futura. Não se usam APIs privadas nem se contornam bloqueios.

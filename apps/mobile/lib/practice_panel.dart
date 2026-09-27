@@ -15,11 +15,13 @@ class PracticePanel extends StatefulWidget {
     required this.onMetronome,
     this.onEditLoop,
     this.practiceController,
+    this.unifiedMode = false,
     super.key,
   });
 
   final PlayerPanelModel model;
   final PracticeController? practiceController;
+  final bool unifiedMode;
   final VoidCallback onOpenPlayer;
   final VoidCallback onSaveLoop;
   final VoidCallback onOpenLoops;
@@ -116,211 +118,220 @@ class _PracticePanelState extends State<PracticePanel> {
               Semantics(liveRegion: true, child: Text(message)),
             ],
             const SizedBox(height: 16),
-            _card(
-              children: <Widget>[
-                const Text(
-                  'TRECHO A–B',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '${_time(model.markerA)} — ${_time(model.markerB)}',
-                  key: const Key('practiceRange'),
-                  style: const TextStyle(
-                    fontSize: 25,
-                    color: studioCyan,
-                    fontWeight: FontWeight.w800,
+            if (!widget.unifiedMode)
+              _card(
+                children: <Widget>[
+                  const Text(
+                    'TRECHO A–B',
+                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Posição: ${_time(Duration(milliseconds: position.round()))} / ${_time(model.duration)}',
-                  style: const TextStyle(color: studioMuted),
-                ),
-                Slider(
-                  key: const Key('practiceSeek'),
-                  value: position,
-                  max: maxPosition > 0 ? maxPosition : 1,
-                  label: _time(Duration(milliseconds: position.round())),
-                  onChanged: ready && model.canSeek
-                      ? (v) => setState(() => _seekPreview = v)
-                      : null,
-                  onChangeEnd: ready && model.canSeek
-                      ? (v) {
-                          setState(() => _seekPreview = null);
-                          model.seek(Duration(milliseconds: v.round()));
-                        }
-                      : null,
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    OutlinedButton(
-                      key: const Key('visualPracticeMarkA'),
-                      onPressed: ready && model.canLoop ? model.markA : null,
-                      child: const Text('Marcar A'),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${_time(model.markerA)} — ${_time(model.markerB)}',
+                    key: const Key('practiceRange'),
+                    style: const TextStyle(
+                      fontSize: 25,
+                      color: studioCyan,
+                      fontWeight: FontWeight.w800,
                     ),
-                    OutlinedButton(
-                      key: const Key('visualPracticeMarkB'),
-                      onPressed: ready && model.canLoop ? model.markB : null,
-                      child: const Text('Marcar B'),
-                    ),
-                    if (widget.onEditLoop != null)
-                      OutlinedButton.icon(
-                        key: const Key('practiceEditLoop'),
-                        onPressed: ready && model.canLoop
-                            ? widget.onEditLoop
-                            : null,
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Editar tempos'),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Posição: ${_time(Duration(milliseconds: position.round()))} / ${_time(model.duration)}',
+                    style: const TextStyle(color: studioMuted),
+                  ),
+                  Slider(
+                    key: const Key('practiceSeek'),
+                    value: position,
+                    max: maxPosition > 0 ? maxPosition : 1,
+                    label: _time(Duration(milliseconds: position.round())),
+                    onChanged: ready && model.canSeek
+                        ? (v) => setState(() => _seekPreview = v)
+                        : null,
+                    onChangeEnd: ready && model.canSeek
+                        ? (v) {
+                            setState(() => _seekPreview = null);
+                            model.seek(Duration(milliseconds: v.round()));
+                          }
+                        : null,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      OutlinedButton(
+                        key: const Key('visualPracticeMarkA'),
+                        onPressed: ready && model.canLoop ? model.markA : null,
+                        child: const Text('Marcar A'),
                       ),
-                  ],
-                ),
-                SwitchListTile.adaptive(
-                  key: const Key('practiceLoopToggle'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Repetir trecho'),
-                  subtitle: Text(
-                    !model.canLoop && model.loaded
-                        ? 'A fonte atual não permite loop.'
-                        : 'Marque A e B com pelo menos 0,25 s entre eles.',
+                      OutlinedButton(
+                        key: const Key('visualPracticeMarkB'),
+                        onPressed: ready && model.canLoop ? model.markB : null,
+                        child: const Text('Marcar B'),
+                      ),
+                      if (widget.onEditLoop != null)
+                        OutlinedButton.icon(
+                          key: const Key('practiceEditLoop'),
+                          onPressed: ready && model.canLoop
+                              ? widget.onEditLoop
+                              : null,
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Editar tempos'),
+                        ),
+                    ],
                   ),
-                  value: model.loopEnabled,
-                  onChanged: ready && model.canLoop && hasRange
-                      ? (_) => model.toggleLoop()
-                      : null,
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    TextButton.icon(
-                      key: const Key('practiceReturnA'),
-                      onPressed: ready && model.canSeek && model.markerA != null
-                          ? () => model.seek(model.markerA!)
-                          : null,
-                      icon: const Icon(Icons.first_page),
-                      label: const Text('Voltar ao A'),
+                  SwitchListTile.adaptive(
+                    key: const Key('practiceLoopToggle'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Repetir trecho'),
+                    subtitle: Text(
+                      !model.canLoop && model.loaded
+                          ? 'A fonte atual não permite loop.'
+                          : 'Marque A e B com pelo menos 0,25 s entre eles.',
                     ),
-                    TextButton.icon(
-                      key: const Key('practiceClearLoop'),
-                      onPressed:
-                          ready &&
-                              (model.markerA != null || model.markerB != null)
-                          ? model.clearLoop
-                          : null,
-                      icon: const Icon(Icons.clear),
-                      label: const Text('Limpar A/B'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                    value: model.loopEnabled,
+                    onChanged: ready && model.canLoop && hasRange
+                        ? (_) => model.toggleLoop()
+                        : null,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      TextButton.icon(
+                        key: const Key('practiceReturnA'),
+                        onPressed:
+                            ready && model.canSeek && model.markerA != null
+                            ? () => model.seek(model.markerA!)
+                            : null,
+                        icon: const Icon(Icons.first_page),
+                        label: const Text('Voltar ao A'),
+                      ),
+                      TextButton.icon(
+                        key: const Key('practiceClearLoop'),
+                        onPressed:
+                            ready &&
+                                (model.markerA != null || model.markerB != null)
+                            ? model.clearLoop
+                            : null,
+                        icon: const Icon(Icons.clear),
+                        label: const Text('Limpar A/B'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             const SizedBox(height: 16),
             if (widget.practiceController case final controller?) ...[
               PracticeProgressionCard(controller: controller),
               const SizedBox(height: 16),
             ],
-            _card(
-              children: <Widget>[
-                const Text(
-                  'VELOCIDADE DO TREINO',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${(speed * 100).round()}%',
-                  key: const Key('practiceSpeedValue'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 46,
-                    fontWeight: FontWeight.w900,
-                    color: studioCyan,
+            if (!widget.unifiedMode)
+              _card(
+                children: <Widget>[
+                  const Text(
+                    'VELOCIDADE DO TREINO',
+                    style: TextStyle(fontWeight: FontWeight.w800),
                   ),
-                ),
-                Slider(
-                  key: const Key('practiceSpeed'),
-                  value: speed.clamp(.5, 1.5),
-                  min: .5,
-                  max: 1.5,
-                  divisions: 20,
-                  label: '${(speed * 100).round()}%',
-                  onChanged: ready && model.canSpeed
-                      ? (v) => setState(() => _speedPreview = v)
-                      : null,
-                  onChangeEnd: ready && model.canSpeed
-                      ? (v) {
-                          setState(() => _speedPreview = null);
-                          model.changeSpeed(v);
-                        }
-                      : null,
-                ),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    OutlinedButton.icon(
-                      key: const Key('visualPracticeMinus'),
-                      onPressed: ready && model.canSpeed && model.speed > .5
-                          ? () => model.changeSpeed(
-                              ((model.speed * 100).round() - 5).clamp(50, 150) /
-                                  100,
-                            )
-                          : null,
-                      icon: const Icon(Icons.remove),
-                      label: const Text('5%'),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${(speed * 100).round()}%',
+                    key: const Key('practiceSpeedValue'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 46,
+                      fontWeight: FontWeight.w900,
+                      color: studioCyan,
                     ),
-                    FilledButton.icon(
-                      key: const Key('visualPracticePause'),
-                      onPressed:
-                          ready ||
-                              (model.loaded && model.playing && !model.muted)
-                          ? model.playPause
-                          : null,
-                      icon: Icon(
-                        model.playing && !model.muted
-                            ? Icons.pause
-                            : Icons.play_arrow,
+                  ),
+                  Slider(
+                    key: const Key('practiceSpeed'),
+                    value: speed.clamp(.5, 1.5),
+                    min: .5,
+                    max: 1.5,
+                    divisions: 20,
+                    label: '${(speed * 100).round()}%',
+                    onChanged: ready && model.canSpeed
+                        ? (v) => setState(() => _speedPreview = v)
+                        : null,
+                    onChangeEnd: ready && model.canSpeed
+                        ? (v) {
+                            setState(() => _speedPreview = null);
+                            model.changeSpeed(v);
+                          }
+                        : null,
+                  ),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      OutlinedButton.icon(
+                        key: const Key('visualPracticeMinus'),
+                        onPressed: ready && model.canSpeed && model.speed > .5
+                            ? () => model.changeSpeed(
+                                ((model.speed * 100).round() - 5).clamp(
+                                      50,
+                                      150,
+                                    ) /
+                                    100,
+                              )
+                            : null,
+                        icon: const Icon(Icons.remove),
+                        label: const Text('5%'),
                       ),
-                      label: Text(
-                        model.muted
-                            ? 'Ativar som'
-                            : model.playing
-                            ? 'Pausar'
-                            : 'Reproduzir',
+                      FilledButton.icon(
+                        key: const Key('visualPracticePause'),
+                        onPressed:
+                            ready ||
+                                (model.loaded && model.playing && !model.muted)
+                            ? model.playPause
+                            : null,
+                        icon: Icon(
+                          model.playing && !model.muted
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                        ),
+                        label: Text(
+                          model.muted
+                              ? 'Ativar som'
+                              : model.playing
+                              ? 'Pausar'
+                              : 'Reproduzir',
+                        ),
                       ),
-                    ),
-                    OutlinedButton.icon(
-                      key: const Key('visualPracticePlus'),
-                      onPressed: ready && model.canSpeed && model.speed < 1.5
-                          ? () => model.changeSpeed(
-                              ((model.speed * 100).round() + 5).clamp(50, 150) /
-                                  100,
-                            )
-                          : null,
-                      icon: const Icon(Icons.add),
-                      label: const Text('5%'),
-                    ),
-                    TextButton(
-                      key: const Key('practiceOriginalSpeed'),
-                      onPressed: ready && model.canSpeed
-                          ? () => model.changeSpeed(1)
-                          : null,
-                      child: const Text('100% original'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  widget.practiceController == null
-                      ? 'A velocidade só muda quando você a ajusta. Não contamos repetições nem avaliamos a sua execução automaticamente.'
-                      : 'Um ajuste manual pausa a progressão. As voltas contam reprodução do trecho, não avaliam a sua execução.',
-                  style: const TextStyle(color: studioMuted, fontSize: 12),
-                ),
-              ],
-            ),
+                      OutlinedButton.icon(
+                        key: const Key('visualPracticePlus'),
+                        onPressed: ready && model.canSpeed && model.speed < 1.5
+                            ? () => model.changeSpeed(
+                                ((model.speed * 100).round() + 5).clamp(
+                                      50,
+                                      150,
+                                    ) /
+                                    100,
+                              )
+                            : null,
+                        icon: const Icon(Icons.add),
+                        label: const Text('5%'),
+                      ),
+                      TextButton(
+                        key: const Key('practiceOriginalSpeed'),
+                        onPressed: ready && model.canSpeed
+                            ? () => model.changeSpeed(1)
+                            : null,
+                        child: const Text('100% original'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.practiceController == null
+                        ? 'A velocidade só muda quando você a ajusta. Não contamos repetições nem avaliamos a sua execução automaticamente.'
+                        : 'Um ajuste manual pausa a progressão. As voltas contam reprodução do trecho, não avaliam a sua execução.',
+                    style: const TextStyle(color: studioMuted, fontSize: 12),
+                  ),
+                ],
+              ),
             const SizedBox(height: 16),
             _card(
               children: <Widget>[

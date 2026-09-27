@@ -1,0 +1,186 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:record/record.dart';
+
+import 'pitch_detector.dart';
+
+class MicrophoneTunerTool extends StatefulWidget {
+  const MicrophoneTunerTool({super.key});
+
+  @override
+  State<MicrophoneTunerTool> createState() => _MicrophoneTunerToolState();
+}
+
+class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
+    with WidgetsBindingObserver {
+  static const _sampleRate = 16000;
+  static const _windowSize = 4096;
+  final AudioRecorder _recorder = AudioRecorder();
+  final List<double> _samples = List.filled(_windowSize, 0);
+  StreamSubscription<Uint8List>? _subscription;
+  PitchReading? _reading;
+  String? _error;
+  bool _active = false;
+  bool _starting = false;
+  int _cursor = 0;
+  int _seen = 0;
+  int _sinceEstimate = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _active) {
+      unawaited(_stop());
+    }
+  }
+
+  Future<void> _start() async {
+    if (_active || _starting) return;
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    try {
+      if (!await _recorder.hasPermission()) {
+        throw StateError('Autorize o microfone nas definições do dispositivo.');
+      }
+      final stream = await _recorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _sampleRate,
+          numChannels: 1,
+          autoGain: false,
+          echoCancel: false,
+          noiseSuppress: false,
+        ),
+      );
+      if (!mounted) {
+        await _recorder.stop();
+        return;
+      }
+      _subscription = stream.listen(
+        _consume,
+        onError: (Object error) {
+          if (mounted) {
+            setState(() => _error = 'Falha ao ouvir o microfone: $error');
+          }
+          unawaited(_stop());
+        },
+      );
+      setState(() => _active = true);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _error = 'Não foi possível iniciar o afinador: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  void _consume(Uint8List bytes) {
+    if (!_active || bytes.length < 2) return;
+    final data = ByteData.sublistView(bytes);
+    for (var i = 0; i + 1 < bytes.length; i += 2) {
+      _samples[_cursor] = data.getInt16(i, Endian.little) / 32768;
+      _cursor = (_cursor + 1) % _windowSize;
+      _seen++;
+      _sinceEstimate++;
+    }
+    if (_seen < _windowSize || _sinceEstimate < 2048) return;
+    _sinceEstimate = 0;
+    final window = [..._samples.skip(_cursor), ..._samples.take(_cursor)];
+    final next = detectInstrumentPitch(window, sampleRate: _sampleRate);
+    if (mounted) setState(() => _reading = next);
+  }
+
+  Future<void> _stop() async {
+    final subscription = _subscription;
+    _subscription = null;
+    await subscription?.cancel();
+    try {
+      await _recorder.stop();
+    } on Object {
+      // The stream may already have ended after an OS interruption.
+    }
+    if (mounted) {
+      setState(() {
+        _active = false;
+        _reading = null;
+        _cursor = _seen = _sinceEstimate = 0;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_subscription?.cancel());
+    unawaited(_recorder.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reading = _reading;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Toque uma corda de cada vez, perto do telemóvel. O afinador mostra a nota e o desvio; não identifica o tom da música inteira.',
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          key: const Key('tunerMicrophoneToggle'),
+          onPressed: _starting
+              ? null
+              : _active
+              ? _stop
+              : _start,
+          icon: Icon(_active ? Icons.mic_off_outlined : Icons.mic_outlined),
+          label: Text(
+            _starting
+                ? 'A iniciar…'
+                : _active
+                ? 'Parar microfone'
+                : 'Ouvir instrumento',
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          !_active
+              ? 'Microfone desligado'
+              : reading == null
+              ? 'Toque uma corda…'
+              : reading.noteName,
+          key: const Key('tunerDetectedNote'),
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        if (reading != null) ...[
+          Text(
+            '${reading.cents >= 0 ? '+' : ''}${reading.cents.round()} cents · ${reading.frequency.toStringAsFixed(1)} Hz',
+            key: const Key('tunerCents'),
+            textAlign: TextAlign.center,
+          ),
+          Text(
+            reading.cents.abs() < 5
+                ? 'Afinada'
+                : reading.cents < 0
+                ? 'Aperte a corda'
+                : 'Afrouxe a corda',
+            textAlign: TextAlign.center,
+          ),
+        ],
+        if (_error != null)
+          Text(_error!, key: const Key('tunerMicrophoneError')),
+      ],
+    );
+  }
+}

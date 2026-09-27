@@ -24,6 +24,10 @@
   let videoId = null;
   let pitch = 0;
   let speed = 1;
+  let bass = 0;
+  let mid = 0;
+  let treble = 0;
+  let delay = 0;
   let pitchStatus = 'idle';
   let pitchMessage = '';
   let loopA = null;
@@ -95,14 +99,14 @@
     graph.audible = false;
     if (stopProcessing) {
       graph.acknowledged = false;
-      if (graph.dspConnected) {
+      if (graph.dspConnected && graph.stretch) {
         graph.input.disconnect(graph.stretch);
         graph.stretch.disconnect();
         graph.output.disconnect();
         graph.dspConnected = false;
       }
       try {
-        Promise.resolve(graph.stretch.schedule({active: false})).catch(() => {});
+        if (graph.stretch) Promise.resolve(graph.stretch.schedule({active: false})).catch(() => {});
       } catch (_) {
         // A dead processor must never prevent the dry route from being restored.
       }
@@ -122,14 +126,21 @@
     graph.input.disconnect();
     graph.dry.disconnect();
     graph.wet.disconnect();
+    graph.low.disconnect();
+    graph.mid.disconnect();
+    graph.high.disconnect();
+    graph.echoDelay.disconnect();
+    graph.echoGain.disconnect();
     graph.retired = true;
     allGraphs.delete(graph);
   }
 
   function revive(graph) {
     if (!graph || !graph.retired) return;
-    graph.input.connect(graph.dry).connect(audioContext.destination);
-    graph.wet.connect(audioContext.destination);
+    graph.input.connect(graph.dry).connect(graph.low);
+    graph.wet.connect(graph.low);
+    graph.low.connect(graph.mid).connect(graph.high).connect(audioContext.destination);
+    graph.high.connect(graph.echoDelay).connect(graph.echoGain).connect(audioContext.destination);
     graph.source.connect(graph.input);
     graph.retired = false;
     allGraphs.add(graph);
@@ -323,6 +334,17 @@
     if (previous) previous.playbackRate = 1;
     pitch = 0;
     speed = 1;
+    bass = 0;
+    mid = 0;
+    treble = 0;
+    delay = 0;
+    const graph = previous && graphs.get(previous);
+    if (graph) {
+      graph.low.gain.value = 0;
+      graph.mid.gain.value = 0;
+      graph.high.gain.value = 0;
+      graph.echoGain.gain.value = 0;
+    }
     pitchStatus = 'idle';
     pitchMessage = '';
     loopA = null;
@@ -370,6 +392,13 @@
       invalidateLoopObservation();
       revision += 1;
       dry(video && graphs.get(video), true);
+      const currentGraph = video && graphs.get(video);
+      if (currentGraph) {
+        currentGraph.low.gain.setValueAtTime(isAd ? 0 : bass, audioContext.currentTime);
+        currentGraph.mid.gain.setValueAtTime(isAd ? 0 : mid, audioContext.currentTime);
+        currentGraph.high.gain.setValueAtTime(isAd ? 0 : treble, audioContext.currentTime);
+        currentGraph.echoGain.gain.setValueAtTime(isAd ? 0 : delay, audioContext.currentTime);
+      }
       if (isAd) {
         if (video) video.playbackRate = 1;
         pitchStatus = 'idle';
@@ -434,44 +463,36 @@
     }
   }
 
-  async function prepareGraph(element) {
+  async function prepareGraph(element, needsPitch = true) {
     if (graphs.has(element)) {
       const graph = graphs.get(element);
       revive(graph);
+      if (needsPitch && !graph.stretch) await attachStretch(graph);
       return graph;
     }
-    if (preparing.has(element)) return preparing.get(element);
+    if (preparing.has(element)) {
+      const graph = await preparing.get(element);
+      if (needsPitch && !graph.stretch) await attachStretch(graph);
+      return graph;
+    }
     const id = videoId;
     const pending = (async () => {
       if (!safeSource(element)) throw new Error('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
       const Context = window.AudioContext || window.webkitAudioContext;
-      const createStretch = window.TransponoCreateStretch || window.SignalsmithStretch;
-      if (!Context || typeof createStretch !== 'function') {
-        throw new Error('A alteração de tom não está disponível neste navegador.');
-      }
+      if (!Context) throw new Error('O equalizador não está disponível neste navegador.');
       if (!audioContext) audioContext = new Context({latencyHint: 'interactive'});
       await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio e tente novamente.');
       let stretch;
       let connected = false;
       try {
-        // Worklet/WASM/CSP failure must happen before rerouting the media element.
-        // The default document policy remains in force; there is no CSP bypass.
-        const creation = Promise.resolve(createStretch(audioContext, {
-          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
-        }));
-        let expired = false;
-        creation.then(node => { if (expired) node.disconnect(); }, () => {});
-        try {
-          stretch = await timeout(creation, 8000, 'O processamento de tom não pôde ser iniciado.');
-        } catch (error) {
-          expired = true;
-          throw error;
+        if (needsPitch) {
+          // Worklet/WASM/CSP failure must precede MediaElementAudioSource ownership.
+          stretch = await createStretchNode();
+          await timeout(stretch.schedule({active: true, semitones: pitch}), 4000,
+            'O processador de tom não respondeu.');
         }
-        await timeout(stretch.schedule({active: true, semitones: pitch}), 4000,
-          'O processador de tom não respondeu.');
-        if (disposed || video !== element || videoId !== id || isAd || pitch === 0) {
-          throw new Error('A seleção de vídeo mudou. Aplique o tom novamente.');
-        }
+        if (disposed || video !== element || videoId !== id || isAd || (needsPitch && pitch === 0))
+          throw new Error('A seleção de vídeo mudou. Tente novamente.');
         if (!safeSource(element)) throw new Error('Esta fonte de áudio não permite alterar o tom.');
         requireSound(element);
         const input = audioContext.createAnalyser();
@@ -480,15 +501,35 @@
         if (probeEnabled) input.smoothingTimeConstant = output.smoothingTimeConstant = 0;
         const dryGain = audioContext.createGain();
         const wetGain = audioContext.createGain();
+        const low = audioContext.createBiquadFilter();
+        low.type = 'lowshelf';
+        low.frequency.value = 200;
+        low.gain.value = bass;
+        const high = audioContext.createBiquadFilter();
+        high.type = 'highshelf';
+        high.frequency.value = 3000;
+        high.gain.value = treble;
+        const midFilter = audioContext.createBiquadFilter();
+        midFilter.type = 'peaking';
+        midFilter.frequency.value = 1000;
+        midFilter.Q.value = 0.8;
+        midFilter.gain.value = mid;
+        const echoDelay = audioContext.createDelay(0.6);
+        echoDelay.delayTime.value = 0.28;
+        const echoGain = audioContext.createGain();
+        echoGain.gain.value = delay;
         dryGain.gain.value = 1;
         wetGain.gain.value = 0;
-        input.connect(dryGain).connect(audioContext.destination);
-        input.connect(stretch).connect(output).connect(wetGain).connect(audioContext.destination);
+        input.connect(dryGain).connect(low);
+        if (stretch) input.connect(stretch).connect(output).connect(wetGain).connect(low);
+        low.connect(midFilter).connect(high).connect(audioContext.destination);
+        high.connect(echoDelay).connect(echoGain).connect(audioContext.destination);
         // Last irreversible operation, after the entire output graph is ready.
         const source = audioContext.createMediaElementSource(element);
         const graph = {
-          element, source, input, output, stretch, dry: dryGain, wet: wetGain, retired: false,
-          samples: new Float32Array(512), audible: false, failed: false, dspConnected: true,
+          element, source, input, output, stretch, dry: dryGain, wet: wetGain,
+          low, mid: midFilter, high, echoDelay, echoGain, retired: false,
+          samples: new Float32Array(512), audible: false, failed: false, dspConnected: !!stretch,
           appliedPitch: pitch, acknowledged: false, silentSince: null,
           ...(probeEnabled ? {
             probeSpectrum: new Float32Array(4096), probeWave: new Float32Array(8192),
@@ -505,12 +546,7 @@
           throw error;
         }
         connected = true;
-        stretch.addEventListener('processorerror', () => {
-          graph.failed = true;
-          dry(graph, true);
-          if (element === video) unavailable('O processamento parou. O áudio original foi mantido. Reabra o vídeo para tentar novamente.');
-          post();
-        });
+        if (stretch) listenForProcessorError(graph);
         return graph;
       } finally {
         if (!connected && stretch) stretch.disconnect();
@@ -522,6 +558,45 @@
     } finally {
       preparing.delete(element);
     }
+  }
+
+  async function createStretchNode() {
+    const createStretch = window.TransponoCreateStretch || window.SignalsmithStretch;
+    if (typeof createStretch !== 'function')
+      throw new Error('A alteração de tom não está disponível neste navegador.');
+    const creation = Promise.resolve(createStretch(audioContext, {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+    }));
+    let expired = false;
+    creation.then(node => { if (expired) node.disconnect(); }, () => {});
+    try {
+      return await timeout(creation, 8000, 'O processamento de tom não pôde ser iniciado.');
+    } catch (error) {
+      expired = true;
+      throw error;
+    }
+  }
+
+  function listenForProcessorError(graph) {
+    graph.stretch.addEventListener('processorerror', () => {
+      graph.failed = true;
+      dry(graph, true);
+      if (graph.element === video)
+        unavailable('O processamento parou. O áudio original foi mantido. Reabra o vídeo para tentar novamente.');
+      post();
+    });
+  }
+
+  async function attachStretch(graph) {
+    const stretch = await createStretchNode();
+    if (disposed || graph.element !== video || isAd || pitch === 0) {
+      stretch.disconnect();
+      throw new Error('A seleção de vídeo mudou. Aplique o tom novamente.');
+    }
+    graph.stretch = stretch;
+    graph.input.connect(stretch).connect(graph.output).connect(graph.wet);
+    graph.dspConnected = true;
+    listenForProcessorError(graph);
   }
 
   async function applyPitch() {
@@ -733,9 +808,45 @@
         pitch = numberIn(request.value, -12, 12, 'Tom');
         await applyPitch();
         break;
+      case 'bass':
+      case 'mid':
+      case 'treble': {
+        requirePractice();
+        const value = numberIn(request.value, -12, 12, 'Equalizador');
+        if (!safeSource(video))
+          throw new Error('Este vídeo não disponibiliza áudio para o equalizador neste dispositivo.');
+        requireSound(video);
+        const graph = await prepareGraph(video, false);
+        if (disposed || graph.element !== video || isAd)
+          throw new Error('A seleção de vídeo mudou. Tente novamente.');
+        if (request.action === 'bass') {
+          bass = value;
+          graph.low.gain.setValueAtTime(value, audioContext.currentTime);
+        } else if (request.action === 'mid') {
+          mid = value;
+          graph.mid.gain.setValueAtTime(value, audioContext.currentTime);
+        } else {
+          treble = value;
+          graph.high.gain.setValueAtTime(value, audioContext.currentTime);
+        }
+        break;
+      }
+      case 'delay': {
+        requirePractice();
+        const value = numberIn(request.value, 0, 0.35, 'Delay');
+        if (!safeSource(video))
+          throw new Error('Este vídeo não disponibiliza áudio para o delay neste dispositivo.');
+        requireSound(video);
+        const graph = await prepareGraph(video, false);
+        if (disposed || graph.element !== video || isAd)
+          throw new Error('A seleção de vídeo mudou. Tente novamente.');
+        delay = value;
+        graph.echoGain.gain.setValueAtTime(value, audioContext.currentTime);
+        break;
+      }
       case 'speed': {
         requirePractice();
-        const value = numberIn(request.value, 0.5, 1.5, 'Velocidade');
+        const value = numberIn(request.value, 0.25, 2, 'Velocidade');
         if (value !== 1 && !preservesPitch(video)) throw new Error('Este navegador não consegue preservar o tom ao mudar a velocidade.');
         preservesPitch(video);
         video.playbackRate = value;

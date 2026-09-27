@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
+import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/player_presets.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
@@ -9,7 +10,11 @@ import 'package:transpose_mobile/youtube_browser.dart';
 import 'fake_youtube_session.dart';
 
 void main() {
-  testWidgets('empty startup opens YouTube with search focused', (
+  setUp(() {
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+  });
+  testWidgets('empty startup opens YouTube without duplicate search', (
     tester,
   ) async {
     SharedPreferencesAsyncPlatform.instance =
@@ -22,16 +27,45 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('youtubeSearchInput')), findsOneWidget);
+    expect(find.byKey(const Key('youtubeSearchInput')), findsNothing);
     expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
-    expect(tester.testTextInput.isVisible, isTrue);
+    expect(find.text('YouTube · Transpono'), findsNothing);
+    expect(find.byKey(const Key('youtubeClose')), findsNothing);
+    expect(tester.testTextInput.isVisible, isFalse);
     expect(session.commands.where((c) => c.$1 == 'play'), isEmpty);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('open button is centred and close button lives in tabs', (
+    tester,
+  ) async {
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    final screenWidth =
+        tester.view.physicalSize.width / tester.view.devicePixelRatio;
+    final open = tester.getRect(find.byKey(const Key('visualMainAdjustments')));
+    expect((open.center.dx - screenWidth / 2).abs(), lessThan(1));
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    final close = tester.getRect(
+      find.byKey(const Key('visualMainAdjustments')),
+    );
+    expect(close.center.dx, greaterThan(screenWidth / 2));
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.byKey(const Key('visualMainAdjustments')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   Future<void> tap(WidgetTester tester, String key) async {
-    if (key.startsWith('visualTab') &&
+    if (key == 'visualPlayerMenu') return;
+    if (key.startsWith('unifiedSection') &&
         find.byKey(Key(key)).evaluate().isEmpty) {
-      await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+      await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
     }
     await tester.ensureVisible(find.byKey(Key(key)));
@@ -40,11 +74,22 @@ void main() {
   }
 
   Future<void> openSearch(WidgetTester tester) async {
-    await tap(tester, 'visualPlayerMenu');
-    final action = find.text('Pesquisar no YouTube').last;
-    await tester.ensureVisible(action);
-    await tester.tap(action);
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
+  }
+
+  Future<void> selectVideo(
+    WidgetTester tester,
+    FakeYouTubeSession session,
+    YouTubeMediaState selected,
+  ) async {
+    session.state = const YouTubeMediaState();
+    session.notifyListeners();
+    await tester.pump();
+    session.state = selected;
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('youtubeUseInPlayer')), findsNothing);
   }
 
   testWidgets('save dialog persists acknowledged media and restores it', (
@@ -52,8 +97,20 @@ void main() {
   ) async {
     SharedPreferencesAsyncPlatform.instance =
         InMemorySharedPreferencesAsync.empty();
-    final session = FakeYouTubeSession()
-      ..state = const YouTubeMediaState(
+    final session = FakeYouTubeSession();
+    final store = PlayerPresetStore();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        presetStore: store,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await openSearch(tester);
+    await selectVideo(
+      tester,
+      session,
+      const YouTubeMediaState(
         videoId: 'aqz-KE-bpKQ',
         title: 'Song',
         hasVideo: true,
@@ -62,16 +119,11 @@ void main() {
         speed: .8,
         loopA: 2,
         loopB: 4,
-      );
-    final store = PlayerPresetStore();
-    await tester.pumpWidget(
-      StudioVisualApp(youtubeSessionFactory: () => session, presetStore: store),
+      ),
     );
-    await openSearch(tester);
-    await tap(tester, 'youtubeUseInPlayer');
-    await tap(tester, 'visualPlayerMenu');
-    await tester.ensureVisible(find.text('Guardar predefinição'));
-    await tester.tap(find.text('Guardar predefinição'));
+    await tap(tester, 'visualMainAdjustments');
+    await tap(tester, 'unifiedSectionpractice');
+    await tap(tester, 'visualPracticeSaveLoop');
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('presetName')), 'Saved test');
     await tap(tester, 'presetSave');
@@ -79,12 +131,10 @@ void main() {
     expect(entries, hasLength(1));
     expect(entries.single.name, 'Saved test');
     expect(entries.single.pitch, -2);
-    await tap(tester, 'visualPlayerMenu');
-    await tester.ensureVisible(find.text('Predefinições e loops guardados'));
-    await tester.tap(find.text('Predefinições e loops guardados'));
+    await tap(tester, 'practiceSavedLoops');
     await tester.pumpAndSettle();
     await tap(tester, 'collectionOpen-${entries.single.id}');
-    expect(find.byKey(const Key('visualScrollplayer')), findsOneWidget);
+    expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
     expect(
       session.commands.where(
         (c) => ['playPause', 'play', 'unmute'].contains(c.$1),
@@ -94,44 +144,27 @@ void main() {
     expect(session.disposed, isFalse);
   });
 
-  testWidgets('tabs and real main menu stay reachable', (tester) async {
+  testWidgets('secções e menu do player unificado ficam acessíveis', (
+    tester,
+  ) async {
     await tester.pumpWidget(const StudioVisualApp());
-    expect(find.byKey(const Key('visualMainAdjustments')), findsOneWidget);
-    expect(find.byKey(const Key('visualTabpractice')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerControlsToggle')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerPitchUp')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerChordPicker')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerEmptyFile')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerEmptySearch')), findsNothing);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.byKey(const Key('unifiedSectionpractice')), findsNothing);
     await tap(tester, 'visualMainAdjustments');
-    expect(find.byKey(const Key('visualPlayerChordPicker')), findsOneWidget);
-    expect(find.byKey(const Key('visualPlayerEmptyFile')), findsOneWidget);
-    expect(find.byKey(const Key('visualPlayerEmptySearch')), findsOneWidget);
-    expect(
-      tester
-          .widget<IgnorePointer>(
-            find.byKey(const Key('visualMainControlsOverlay')),
-          )
-          .ignoring,
-      isFalse,
-    );
-    expect(find.byKey(const Key('visualFullscreenPitchUp')), findsOneWidget);
-    await tap(tester, 'visualMainAdjustments');
-    expect(find.byKey(const Key('visualPlayerChordPicker')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerEmptyFile')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerEmptySearch')), findsNothing);
-    expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
-    for (final name in ['practice', 'chords', 'stage', 'player']) {
-      await tap(tester, 'visualTab$name');
-      expect(find.byKey(Key('visualScroll$name')), findsOneWidget);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.byKey(const Key('unifiedPitchUp')), findsOneWidget);
+    for (final name in ['practice', 'chords', 'setlist']) {
+      await tap(tester, 'unifiedSection$name');
+      expect(find.byKey(Key('unifiedSection$name')), findsOneWidget);
+      expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
     }
-    await tap(tester, 'visualPlayerMenu');
-    expect(find.text('Predefinições e loops guardados'), findsOneWidget);
-    await tap(tester, 'visualSidebarClose');
-    expect(find.byKey(const Key('visualScrollplayer')), findsOneWidget);
+    expect(find.byKey(const Key('unifiedSectionsetlist')), findsOneWidget);
+    await tap(tester, 'visualMainAdjustments');
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.byKey(const Key('unifiedSectionpractice')), findsNothing);
+    expect(find.text('Abrir ajustes'), findsOneWidget);
   });
-
-  testWidgets('search selection and fullscreen preserve one YouTube session', (
+  testWidgets('pesquisa e secções preservam uma sessão YouTube', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -142,6 +175,7 @@ void main() {
     int creations = 0;
     await tester.pumpWidget(
       StudioVisualApp(
+        openSearchWhenEmpty: true,
         youtubeSessionFactory: () {
           creations++;
           return session;
@@ -149,14 +183,7 @@ void main() {
       ),
     );
     await openSearch(tester);
-    expect(find.text('Resultados com miniaturas'), findsOneWidget);
     expect(session.startedUri?.host, 'm.youtube.com');
-    await tester.enterText(
-      find.byKey(const Key('youtubeSearchInput')),
-      'Gravity live',
-    );
-    await tap(tester, 'youtubeSearchSubmit');
-    expect(session.lastQuery, 'Gravity live');
     session.state = const YouTubeMediaState(
       videoId: 'aqz-KE-bpKQ',
       title: 'A música escolhida',
@@ -168,69 +195,188 @@ void main() {
     );
     session.notifyListeners();
     await tester.pumpAndSettle();
-    await tap(tester, 'youtubeUseInPlayer');
-    expect(find.byKey(const Key('visualScrollplayer')), findsOneWidget);
-    expect(find.byKey(const Key('visualPlayerHeader')), findsNothing);
-    expect(find.textContaining('Navegador integrado'), findsNothing);
-    for (final name in ['practice', 'chords', 'stage', 'player']) {
-      await tap(tester, 'visualTab$name');
-      expect(find.byKey(Key('visualScroll$name')), findsOneWidget);
-      expect(
-        find.text('Resultados com miniaturas').hitTestable(),
-        findsOneWidget,
-      );
-      expect(creations, 1);
-      expect(session.disposed, isFalse);
-    }
+    expect(find.byKey(const Key('youtubeBrowserViewport')), findsNothing);
+    expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     await tap(tester, 'visualMainAdjustments');
     expect(find.byKey(const Key('visualFullscreenPlay')), findsNothing);
     expect(find.byKey(const Key('visualFullscreenBack10')), findsNothing);
     expect(find.byKey(const Key('visualFullscreenForward10')), findsNothing);
-    expect(
-      tester
-          .widget<Semantics>(
-            find.byKey(const Key('visualFullscreenPitchValue')),
-          )
-          .properties
-          .label,
-      'Tom +2 semitons',
-    );
-    await tap(tester, 'visualFullscreenPitchUp');
+    await tap(tester, 'unifiedPitchUp');
     expect(session.commands.last, ('pitch', 3));
-    expect(find.byKey(const Key('visualFullscreenPitchValue')), findsOneWidget);
-    await tap(tester, 'visualFullscreenSpeed');
-    await tester.tap(find.text('0.75×').last);
-    await tester.pumpAndSettle();
-    expect(session.commands.last, ('speed', .75));
-    expect(find.byKey(const Key('pinnedYouTubeMedia')), findsNothing);
-    expect(find.text('Resultados com miniaturas'), findsOneWidget);
-    expect(
-      session.commands.where(
-        (command) => ['play', 'playPause', 'seekTo'].contains(command.$1),
-      ),
-      isEmpty,
-    );
-    await tap(tester, 'visualFullscreenMarkA');
-    expect(session.commands.last, ('markA', null));
-    await tap(tester, 'visualPlayerMenu');
-    await tester.ensureVisible(find.text('Tela cheia').last);
-    await tester.tap(find.text('Tela cheia').last);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
-    expect(find.byKey(const Key('visualFullscreenPlay')), findsNothing);
-    expect(find.text('Resultados com miniaturas'), findsOneWidget);
-    expect(session.disposed, isFalse);
-    await tap(tester, 'visualFullscreenBack');
-    expect(creations, 1);
-    expect(find.byKey(const Key('visualFullscreenPitchValue')), findsOneWidget);
-    expect(session.disposed, isFalse);
-    await openSearch(tester);
-    await tap(tester, 'youtubeClose');
+    for (final name in ['practice', 'chords', 'setlist']) {
+      await tap(tester, 'unifiedSection$name');
+      expect(creations, 1);
+      expect(session.disposed, isFalse);
+    }
+    await tap(tester, 'unifiedSectionchords');
+    expect(find.byKey(const Key('unifiedMore')), findsNothing);
+    expect(find.text('Tela cheia'), findsNothing);
     expect(creations, 1);
     expect(session.disposed, isFalse);
     await tester.pumpWidget(const SizedBox());
     expect(session.disposed, isTrue);
     expect(tester.takeException(), isNull);
+  });
+  testWidgets('opening a YouTube chord sheet gives it room below the video', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+    await ChordSheetStore().save(
+      'youtube:aqz-KE-bpKQ',
+      ChordSheet(
+        notes: List.generate(
+          50,
+          (i) => 'C     G\nLinha $i da cifra',
+        ).join('\n'),
+      ),
+    );
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await openSearch(tester);
+    await selectVideo(
+      tester,
+      session,
+      const YouTubeMediaState(
+        videoId: 'aqz-KE-bpKQ',
+        title: 'Song',
+        hasVideo: true,
+        duration: 180,
+      ),
+    );
+    final viewport = find.byKey(const Key('visualMainMediaViewport'));
+    final fullHeight = tester.getSize(viewport).height;
+    await tap(tester, 'visualMainAdjustments');
+    await tap(tester, 'unifiedChooseChord');
+    expect(find.byKey(const Key('playerChordSheet')), findsOneWidget);
+    expect(tester.getSize(viewport).height, fullHeight);
+    final chordOverlay = find.byKey(const Key('unifiedChordOverlay'));
+    final overlayTop = tester.getTopLeft(chordOverlay).dy;
+    final tabsTop = tester
+        .getTopLeft(find.byKey(const Key('unifiedSectionchords')))
+        .dy;
+    // Initial controls keep their lowered position, but the scrollable sheet
+    // can later occupy the title area immediately below the video.
+    expect(tabsTop - overlayTop, greaterThan(50));
+    expect(
+      tester.widget<ClipRRect>(chordOverlay).borderRadius,
+      const BorderRadius.vertical(top: Radius.circular(18)),
+    );
+    expect(
+      find.byKey(const Key('unifiedSectionchords')).hitTestable(),
+      findsOneWidget,
+    );
+    final initialSheetTop = tester
+        .getTopLeft(find.byKey(const Key('playerChordSheet')))
+        .dy;
+    final initialTabsTop = tester
+        .getTopLeft(find.byKey(const Key('unifiedSectionchords')))
+        .dy;
+    final backdrop = find.byKey(const Key('unifiedChordBackdrop'));
+    expect(tester.getSize(backdrop).width, tester.getSize(chordOverlay).width);
+    await tester.drag(
+      find.byKey(const Key('unifiedChordTextScroll')),
+      const Offset(0, -220),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(const Key('unifiedSectionchords'))).dy,
+      lessThan(initialTabsTop),
+      reason: 'Os botões da Cifra devem subir com a rolagem do texto.',
+    );
+    await tester.drag(
+      find.byKey(const Key('unifiedChordScroll')),
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedChordScroll')), findsOneWidget);
+    expect(find.byKey(const Key('pinnedChordTextScroll')), findsNothing);
+    final raisedSheet = tester.getRect(
+      find.byKey(const Key('playerChordSheet')),
+    );
+    expect(raisedSheet.top, lessThan(initialSheetTop));
+    expect(raisedSheet.left, greaterThan(0));
+    final frame = find.byKey(const Key('unifiedChordFrame'));
+    final frameTop = tester.getTopLeft(frame).dy;
+    expect(frameTop, closeTo(overlayTop, 2));
+    await tester.drag(
+      find.byKey(const Key('unifiedChordTextScroll')),
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(frame).dy, closeTo(frameTop, 1));
+    expect(
+      tester
+          .widget<Container>(find.byKey(const Key('playerChordSheet')))
+          .decoration,
+      isA<BoxDecoration>().having(
+        (decoration) => decoration.borderRadius,
+        'rounded top',
+        BorderRadius.circular(18),
+      ),
+    );
+    await tester.drag(
+      find.byKey(const Key('unifiedChordTextScroll')),
+      const Offset(0, 1500),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedChordScroll')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('playerChordSheet'))).dy,
+      greaterThan(raisedSheet.top),
+    );
+    expect(
+      find.byKey(const Key('unifiedSectionchords')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('visualFullscreenSeek')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Cifra sem folha cobre o fundo até ao fim dos ajustes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await openSearch(tester);
+    await selectVideo(
+      tester,
+      session,
+      const YouTubeMediaState(
+        videoId: 'aqz-KE-bpKQ',
+        title: 'Song',
+        hasVideo: true,
+        duration: 180,
+      ),
+    );
+    await tap(tester, 'visualMainAdjustments');
+    final overlay = tester.getRect(
+      find.byKey(const Key('unifiedChordOverlay')),
+    );
+    final backdrop = tester.getRect(
+      find.byKey(const Key('unifiedChordControlsBackdrop')),
+    );
+    expect(backdrop.bottom, closeTo(overlay.bottom, 1));
+    expect(backdrop.width, closeTo(overlay.width, 1));
   });
 
   testWidgets(
@@ -239,19 +385,17 @@ void main() {
       await tester.pumpWidget(
         const StudioVisualApp(functionalPlayer: Text('Legacy')),
       );
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
+      expect(find.byKey(const Key('unifiedPitchUp')), findsNothing);
       await tap(tester, 'visualMainAdjustments');
       expect(
         tester
-            .widget<IconButton>(find.byKey(const Key('visualFullscreenPlay')))
+            .widget<IconButton>(find.byKey(const Key('visualPlayerPlay')))
             .onPressed,
         isNull,
       );
       expect(
         tester
-            .widget<IconButton>(
-              find.byKey(const Key('visualFullscreenPitchUp')),
-            )
+            .widget<IconButton>(find.byKey(const Key('unifiedPitchUp')))
             .onPressed,
         isNull,
       );
@@ -274,9 +418,30 @@ void main() {
       await tester.pumpWidget(
         StudioVisualApp(youtubeSessionFactory: FakeYouTubeSession.new),
       );
-      for (final name in ['practice', 'chords', 'stage', 'player']) {
-        await tap(tester, 'visualTab$name');
+      await tester.pumpAndSettle();
+      await tap(tester, 'visualMainAdjustments');
+      final adjustments = tester.getRect(
+        find.byKey(const Key('visualMainAdjustments')),
+      );
+      expect(adjustments.center.dx, greaterThan(size.width / 2));
+      for (final name in ['practice', 'chords', 'setlist']) {
+        await tap(tester, 'unifiedSection$name');
+        expect(tester.takeException(), isNull, reason: 'secção $name');
       }
+      await tap(tester, 'unifiedSectionaudioSettings');
+      if (size.height >= 500) {
+        await tester.ensureVisible(find.byKey(const Key('audioTuner')));
+        await tester.tap(find.byKey(const Key('audioTuner')));
+        await tester.pumpAndSettle();
+      }
+      expect(tester.takeException(), isNull, reason: 'áudio/afinador');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        StudioVisualApp(
+          youtubeSessionFactory: FakeYouTubeSession.new,
+          openSearchWhenEmpty: true,
+        ),
+      );
       await openSearch(tester);
       expect(tester.takeException(), isNull);
       expect(

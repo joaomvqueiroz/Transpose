@@ -1,29 +1,30 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'studio_native_pages.dart';
+import 'studio_column_theme.dart';
 import 'youtube_browser.dart';
 import 'main_player_controller.dart';
 import 'main_player_panel.dart';
+import 'player_chord_sheet.dart';
 import 'player_presets.dart';
 import 'study_tools.dart';
 import 'chord_sheet.dart';
 import 'chord_browser.dart';
-import 'stage_panel.dart';
-import 'practice_panel.dart';
+import 'practice_progression_card.dart';
 import 'practice_controller.dart';
 import 'player_collections.dart';
-import 'session_recovery_controller.dart';
 import 'session_snapshot.dart';
+import 'premium_branding.dart';
+import 'microphone_tuner.dart';
 
 part 'studio_player_home.dart';
 
 /// Resolution-independent shell based on the six references supplied with the
 /// project. Actions without a product implementation remain explicitly pending.
-class StudioVisualApp extends StatelessWidget {
+class StudioVisualApp extends StatefulWidget {
   const StudioVisualApp({
     super.key,
     this.functionalPlayer,
@@ -33,15 +34,35 @@ class StudioVisualApp extends StatelessWidget {
     this.recoveryRepository,
     this.chordBrowserFactory,
     this.openSearchWhenEmpty = false,
+    this.deferHomeUntilLaunch = false,
+    this.waitForStartupBrowser = false,
   });
 
   final Widget? functionalPlayer;
   final YouTubeBrowserSession Function()? youtubeSessionFactory;
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
+  @Deprecated('A recuperação automática de sessões foi removida.')
   final SessionSnapshotRepository? recoveryRepository;
   final ChordBrowserSession Function()? chordBrowserFactory;
   final bool openSearchWhenEmpty;
+  final bool deferHomeUntilLaunch;
+  final bool waitForStartupBrowser;
+
+  @override
+  State<StudioVisualApp> createState() => _StudioVisualAppState();
+}
+
+class _StudioVisualAppState extends State<StudioVisualApp> {
+  late final ValueNotifier<bool> _startupBrowserReady = ValueNotifier(
+    !widget.waitForStartupBrowser,
+  );
+
+  @override
+  void dispose() {
+    _startupBrowserReady.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -50,25 +71,41 @@ class StudioVisualApp extends StatelessWidget {
     theme: ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xFF051424),
+      scaffoldBackgroundColor: studioBg,
       colorScheme: const ColorScheme.dark(
-        primary: Color(0xFF00E5FF),
-        surface: Color(0xFF07121F),
+        primary: Colors.white,
+        onPrimary: Color(0xFF101013),
+        surface: Color(0xFF18181B),
       ),
     ),
-    home: StudioVisualHome(
-      functionalPlayer: functionalPlayer,
-      youtubeSessionFactory: youtubeSessionFactory,
-      playerController: playerController,
-      presetStore: presetStore,
-      recoveryRepository: recoveryRepository,
-      chordBrowserFactory: chordBrowserFactory,
-      openSearchWhenEmpty: openSearchWhenEmpty,
+    home: TransponoLaunchGate(
+      deferChild: widget.deferHomeUntilLaunch,
+      revealWhen: widget.waitForStartupBrowser ? _startupBrowserReady : null,
+      child: StudioVisualHome(
+        functionalPlayer: widget.functionalPlayer,
+        youtubeSessionFactory: widget.youtubeSessionFactory,
+        playerController: widget.playerController,
+        presetStore: widget.presetStore,
+        recoveryRepository: widget.recoveryRepository,
+        chordBrowserFactory: widget.chordBrowserFactory,
+        openSearchWhenEmpty: widget.openSearchWhenEmpty,
+        onInitialBrowserReady: () => _startupBrowserReady.value = true,
+      ),
     ),
   );
 }
 
-enum StudioTab { player, practice, chords, stage }
+enum StudioTab {
+  player,
+  practice,
+  chords,
+  stage,
+  instruments,
+  setlist,
+  metronome,
+  tuner,
+  audioSettings,
+}
 
 class StudioVisualHome extends StatefulWidget {
   const StudioVisualHome({
@@ -80,15 +117,18 @@ class StudioVisualHome extends StatefulWidget {
     this.recoveryRepository,
     this.chordBrowserFactory,
     this.openSearchWhenEmpty = false,
+    this.onInitialBrowserReady,
   });
 
   final Widget? functionalPlayer;
   final YouTubeBrowserSession Function()? youtubeSessionFactory;
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
+  @Deprecated('A recuperação automática de sessões foi removida.')
   final SessionSnapshotRepository? recoveryRepository;
   final ChordBrowserSession Function()? chordBrowserFactory;
   final bool openSearchWhenEmpty;
+  final VoidCallback? onInitialBrowserReady;
 
   @override
   State<StudioVisualHome> createState() => _StudioVisualHomeState();
@@ -102,24 +142,54 @@ class _MainAdjustmentsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 230,
     height: 52,
-    child: OutlinedButton.icon(
-      key: const Key('visualMainAdjustments'),
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        backgroundColor: const Color(0xB3143544),
-        foregroundColor: const Color(0xFF00E5FF),
-        side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
-      ),
-      icon: Icon(
-        expanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-        size: 30,
-      ),
-      label: Text(
-        expanded ? 'Fechar ajustes' : 'Ajustes',
-        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-      ),
+    width: double.infinity,
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final buttonWidth = (box.maxWidth - 112).clamp(140.0, 230.0);
+        return Stack(
+          children: [
+            Center(
+              child: SizedBox(
+                width: buttonWidth,
+                height: 52,
+                child: OutlinedButton.icon(
+                  key: const Key('visualMainAdjustments'),
+                  onPressed: onPressed,
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: expanded
+                        ? Colors.white
+                        : const Color(0xEA18181B),
+                    foregroundColor: expanded
+                        ? const Color(0xFF161618)
+                        : const Color(0xFFF4F4F5),
+                    side: BorderSide(
+                      color: expanded ? Colors.white : const Color(0xFFBABAC0),
+                      width: 1.2,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                  icon: Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
+                    size: buttonWidth < 210 ? 24 : 30,
+                  ),
+                  label: Text(
+                    expanded ? 'Fechar ajustes' : 'Abrir ajustes',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: buttonWidth < 210 ? 14 : 16,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     ),
   );
 }

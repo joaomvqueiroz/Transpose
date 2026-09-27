@@ -66,6 +66,18 @@ function fixture(options = {}) {
       node.gain = {value: 1, cancelScheduledValues() {}, setValueAtTime(value) { this.value = value; }};
       return node;
     }
+    createBiquadFilter() {
+      const node = new Node('filter');
+      node.frequency = {value: 0};
+      node.Q = {value: 0};
+      node.gain = {value: 0, setValueAtTime(value) { this.value = value; }};
+      return node;
+    }
+    createDelay() {
+      const node = new Node('delay');
+      node.delayTime = {value: 0};
+      return node;
+    }
     createAnalyser() {
       const node = new Node(this.analyzers++ % 2 === 0 ? 'input' : 'output');
       node.getFloatTimeDomainData = samples => samples.fill(
@@ -92,7 +104,8 @@ function fixture(options = {}) {
     __transponoAudioProbe: !!options.probe,
     AudioContext: Context,
     async SignalsmithStretch(context, config) {
-      assert.equal(state.sources.length, state.worklets.length, 'Worklet is prepared before attaching source');
+      if (!state.sources.length)
+        assert.equal(state.sources.length, state.worklets.length, 'Worklet is prepared before attaching source');
       assert.equal(config.numberOfInputs, 1);
       if (options.factoryFails) throw new Error('CSP blocked');
       if (state.deferFactory) await state.deferFactory;
@@ -147,7 +160,7 @@ function fixture(options = {}) {
       this.advance();
     },
     reinject() { vm.runInContext(script, sandbox); },
-    gains() { return state.nodes.filter(node => node.kind === 'gain').map(node => node.gain.value); },
+    gains() { return state.nodes.filter(node => node.kind === 'gain').slice(0, 2).map(node => node.gain.value); },
   };
 }
 
@@ -592,6 +605,50 @@ test('the compatibility factory is preferred when provided by the host', async (
   assert.equal(f.api.snapshot().pitchStatus, 'active');
 });
 
+test('three-band EQ and delay filter the selected video without duplicating its source', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: 6});
+  const filters = f.nodes.filter(node => node.kind === 'filter');
+  assert.equal(filters.length, 3);
+  assert.equal(filters[0].type, 'lowshelf');
+  assert.equal(filters[0].frequency.value, 200);
+  assert.equal(filters[0].gain.value, 6);
+  await f.api.command({action: 'mid', value: 3});
+  assert.equal(filters[2].type, 'peaking');
+  assert.equal(filters[2].frequency.value, 1000);
+  assert.equal(filters[2].gain.value, 3);
+  await f.api.command({action: 'treble', value: -4});
+  assert.equal(filters[1].type, 'highshelf');
+  assert.equal(filters[1].frequency.value, 3000);
+  assert.equal(filters[1].gain.value, -4);
+  await f.api.command({action: 'delay', value: 0.2});
+  const echo = f.nodes.filter(node => node.kind === 'delay');
+  assert.equal(echo.length, 1);
+  assert.equal(echo[0].delayTime.value, 0.28);
+  const echoOutput = echo[0].connections[0];
+  assert.equal(echoOutput.gain.value, 0.2);
+  assert.equal(f.sources.length, 1);
+  f.setAd(true);
+  assert.equal(filters[0].gain.value, 0);
+  assert.equal(filters[1].gain.value, 0);
+  assert.equal(filters[2].gain.value, 0);
+  assert.equal(echoOutput.gain.value, 0);
+  f.setAd(false);
+  assert.equal(filters[0].gain.value, 6);
+  assert.equal(filters[1].gain.value, -4);
+  assert.equal(filters[2].gain.value, 3);
+  assert.equal(echoOutput.gain.value, 0.2);
+  await f.api.command({action: 'pitch', value: 2});
+  f.advance();
+  assert.equal(f.api.snapshot().pitchStatus, 'active');
+  assert.equal(f.sources.length, 1);
+  f.navigate('another');
+  assert.equal(filters[0].gain.value, 0);
+  assert.equal(filters[1].gain.value, 0);
+  assert.equal(filters[2].gain.value, 0);
+  assert.equal(echoOutput.gain.value, 0);
+});
+
 test('valid loop uses media positions, disarms on external seek, and validates bounds', async () => {
   const f = fixture();
   await assert.rejects(f.api.command({action: 'markB'}));
@@ -611,7 +668,7 @@ test('valid loop uses media positions, disarms on external seek, and validates b
   assert.equal(f.api.snapshot().loopA, null);
   for (const request of [
     {action: 'pitch', value: NaN}, {action: 'pitch', value: 13},
-    {action: 'speed', value: 0.49}, {action: 'speed', value: 1.51},
+    {action: 'speed', value: 0.24}, {action: 'speed', value: 2.01},
     {action: 'speed', value: '1'}, {action: 'seekBy', value: Infinity},
   ]) await assert.rejects(f.api.command(request));
 });

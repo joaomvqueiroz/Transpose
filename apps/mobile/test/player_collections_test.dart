@@ -72,38 +72,34 @@ void main() {
     },
   );
 
-  testWidgets('setlist arrows persist order and boundary arrows are disabled', (
-    tester,
-  ) async {
-    final store = PlayerPresetStore();
-    await store.save(_preset('one'), setlist: true);
-    await store.save(_preset('two'), setlist: true);
-    await _open(tester, store, setlist: true);
-    expect(
-      tester
-          .widget<IconButton>(find.byKey(const ValueKey('collectionUp-one')))
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byKey(const ValueKey('collectionDown-one')));
-    await tester.pumpAndSettle();
-    expect(
-      (await PlayerPresetStore().list(setlist: true)).map((item) => item.id),
-      ['two', 'one'],
-    );
-    expect(
-      tester
-          .widget<IconButton>(find.byKey(const ValueKey('collectionUp-two')))
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<IconButton>(find.byKey(const ValueKey('collectionDown-one')))
-          .onPressed,
-      isNull,
-    );
-  });
+  testWidgets(
+    'setlist shows only thumbnail and short title; long press manages order',
+    (tester) async {
+      final store = PlayerPresetStore();
+      await store.save(_preset('one'), setlist: true);
+      await store.save(_preset('two'), setlist: true);
+      await _open(tester, store, setlist: true);
+      expect(
+        find.byKey(const ValueKey('setlistThumbnail-one')),
+        findsOneWidget,
+      );
+      expect(find.text('Song'), findsNWidgets(2));
+      expect(find.byKey(const ValueKey('collectionMenu-one')), findsNothing);
+      expect(find.byKey(const ValueKey('collectionDown-one')), findsNothing);
+      await tester.longPress(find.byKey(const ValueKey('collectionOpen-one')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('setlistMoveDown')));
+      await tester.pumpAndSettle();
+      expect(
+        (await PlayerPresetStore().list(setlist: true)).map((item) => item.id),
+        ['two', 'one'],
+      );
+      await tester.longPress(find.byKey(const ValueKey('collectionOpen-two')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('setlistMoveUp')), findsNothing);
+      expect(find.byKey(const Key('setlistMoveDown')), findsOneWidget);
+    },
+  );
 
   testWidgets('applying delegates to existing player then closes this page', (
     tester,
@@ -146,10 +142,7 @@ void main() {
       await store.save(_preset('one'), setlist: true);
       await _open(tester, store, setlist: true, scale: 2);
       expect(tester.takeException(), isNull);
-      await tester.drag(
-        find.byType(ReorderableListView),
-        const Offset(0, -200),
-      );
+      await tester.drag(find.byType(ListView).first, const Offset(0, -200));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     },

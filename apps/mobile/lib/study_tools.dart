@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import 'microphone_tuner.dart';
+
 /// Opens the study tool attached to the current player's pitch.
 Future<void> showStudyTool(
   BuildContext context, {
@@ -14,7 +16,7 @@ Future<void> showStudyTool(
 }) async {
   final (String, Widget) content = switch (tool) {
     'metronome' => ('Metrônomo', const _MetronomeTool()),
-    'tuner' => ('Afinador por referência', const _ReferenceTunerTool()),
+    'tuner' => ('Afinador', const _InstrumentTunerTool()),
     'chords' => ('Acordes', _ChordTool(pitch: pitch.round())),
     _ => throw ArgumentError.value(tool, 'tool'),
   };
@@ -58,6 +60,13 @@ Future<void> showStudyTool(
     ),
   );
 }
+
+/// Reuses the same working tool inside the player's horizontally browsable tabs.
+Widget embeddedStudyTool(String tool) => switch (tool) {
+  'metronome' => const _MetronomeTool(),
+  'tuner' => const _InstrumentTunerTool(),
+  _ => throw ArgumentError.value(tool, 'tool'),
+};
 
 /// PCM16 mono WAV. Beat positions use absolute sample indices, so rounding
 /// does not accumulate between beats. The loop repeats a complete eight-bar
@@ -439,6 +448,22 @@ class _MetronomeToolState extends State<_MetronomeTool> {
         if (_sound.error != null) Text(_sound.error!),
       ],
     ),
+  );
+}
+
+class _InstrumentTunerTool extends StatelessWidget {
+  const _InstrumentTunerTool();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: const [
+      MicrophoneTunerTool(),
+      ExpansionTile(
+        title: Text('Notas de referência'),
+        children: [_ReferenceTunerTool()],
+      ),
+    ],
   );
 }
 

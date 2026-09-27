@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-const Color studioBg = Color(0xFF0B1826);
-const Color studioCard = Color(0xFF142435);
-const Color studioCardAlt = Color(0xFF102132);
-const Color studioCyan = Color(0xFF19D9F1);
-const Color studioMuted = Color(0xFFADB9C7);
+const Color studioBg = Color(0xFF080809);
+const Color studioCard = Color(0xFF18181B);
+const Color studioCardAlt = Color(0xFF222226);
+const Color studioCyan = Color(0xFFFFFFFF);
+const Color studioMuted = Color(0xFFA1A1AA);
 
 /// Resolution-independent recreation of the supplied 390 dp panel designs.
 /// Text, icons, cards and lines are rendered by Flutter, never scaled bitmaps.

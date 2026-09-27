@@ -21,12 +21,17 @@ void main() {
 
   Future<void> tap(WidgetTester tester, String key) async {
     await tester.pump();
-    if (key.startsWith('visualTab') &&
-        find.byKey(Key(key)).evaluate().isEmpty) {
-      await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+    final actualKey = switch (key) {
+      'visualTabpractice' => 'unifiedSectionpractice',
+      'visualTabplayer' => 'unifiedSectionchords',
+      _ => key,
+    };
+    if (actualKey.startsWith('unifiedSection') &&
+        find.byKey(Key(actualKey)).evaluate().isEmpty) {
+      await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
     }
-    final target = find.byKey(Key(key));
+    final target = find.byKey(Key(actualKey));
     await tester.ensureVisible(target);
     await tester.tap(target);
     await tester.pump();
@@ -70,6 +75,8 @@ void main() {
     await tester.pumpAndSettle();
     await tap(tester, 'visualTabpractice');
     await tester.pumpAndSettle();
+    await tap(tester, 'practiceProgression');
+    await tester.pumpAndSettle();
   }
 
   Future<void> unmount(WidgetTester tester, _Player player) async {
@@ -78,49 +85,34 @@ void main() {
     player.dispose();
   }
 
-  testWidgets(
-    'home keeps the same practice session across player and fullscreen',
-    (tester) async {
-      final player = _Player();
-      await mount(tester, player);
-      final original = practice(tester);
-      await tap(tester, 'practicePlanStart');
-      await tester.pumpAndSettle();
-      expect(original.running, isTrue);
-      expect(player.playing, isTrue);
-      player.completeLoop();
-      await tester.pump();
-      expect(original.totalRepetitions, 1);
-      final id = original.snapshot!.id;
+  testWidgets('home keeps the same practice session across player tabs', (
+    tester,
+  ) async {
+    final player = _Player();
+    await mount(tester, player);
+    final original = practice(tester);
+    await tap(tester, 'practicePlanStart');
+    await tester.pumpAndSettle();
+    expect(original.running, isTrue);
+    expect(player.playing, isTrue);
+    player.completeLoop();
+    await tester.pump();
+    expect(original.totalRepetitions, 1);
+    final id = original.snapshot!.id;
 
-      await tap(tester, 'visualTabplayer');
-      expect(find.byType(PracticeProgressionCard), findsNothing);
-      player.completeLoop();
-      await tester.pump();
-      expect(original.totalRepetitions, 2);
-      await tap(tester, 'visualPlayerMenu');
-      await tester.dragFrom(const Offset(400, 500), const Offset(0, -300));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Tela cheia').last);
-      await tester.tap(find.text('Tela cheia').last);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
-      player.completeLoop();
-      await tester.pumpAndSettle();
-      expect(original.currentPercent, 65);
-      expect(original.totalRepetitions, 3);
-      await tap(tester, 'visualFullscreenBack');
-      await tester.pumpAndSettle();
-      await tap(tester, 'visualTabpractice');
-      expect(identical(practice(tester), original), isTrue);
-      expect(original.snapshot!.id, id);
-      expect(find.text('65% · Etapa 2/9'), findsOneWidget);
-      expect(find.text('Total reproduzido: 3 voltas'), findsOneWidget);
-      expect(player.playCalls, 2); // Initial step and one confirmed transition.
-      expect(tester.takeException(), isNull);
-      await unmount(tester, player);
-    },
-  );
+    await tap(tester, 'visualTabplayer');
+    expect(find.byType(PracticeProgressionCard), findsNothing);
+    player.completeLoop();
+    await tester.pump();
+    expect(original.totalRepetitions, 2);
+    await tap(tester, 'visualTabpractice');
+    expect(identical(practice(tester), original), isTrue);
+    expect(original.snapshot!.id, id);
+    expect(find.text('Total reproduzido: 2 voltas'), findsOneWidget);
+    expect(player.playCalls, 1);
+    expect(tester.takeException(), isNull);
+    await unmount(tester, player);
+  });
 
   testWidgets(
     'background pauses practice away from its tab and never auto resumes',
@@ -188,7 +180,7 @@ void main() {
     },
   );
 
-  testWidgets('home saves confirmed practice progress and restores it paused', (
+  testWidgets('home does not persist or restore a closed practice session', (
     tester,
   ) async {
     final store = _Store();
@@ -198,13 +190,10 @@ void main() {
     await tester.pumpAndSettle();
     first.completeLoop();
     await tester.pumpAndSettle();
-    expect(store.saved?.practice?.totalRepetitions, 1);
+    expect(store.saved, isNull);
     first.completeLoop();
     await tester.pumpAndSettle();
-    expect(store.saved?.practice?.totalRepetitions, 2);
-    expect(store.saved?.practice?.currentPercent, 60);
-    expect(store.saved?.screen, 'practice');
-    final savedId = store.saved!.practice!.id;
+    expect(store.saved, isNull);
     await unmount(tester, first);
 
     final second = _Player();
@@ -212,24 +201,10 @@ void main() {
       StudioVisualApp(playerController: second, recoveryRepository: store),
     );
     await tester.pumpAndSettle();
-    expect(second.restoreCalls, 1);
+    expect(second.restoreCalls, 0);
     expect(second.playCalls, 0);
     expect(second.playing, isFalse);
-    expect(find.byKey(const Key('visualScrollpractice')), findsOneWidget);
-    final restored = practice(tester);
-    expect(restored.status, PracticeStatus.paused);
-    expect(restored.totalRepetitions, 2);
-    expect(restored.snapshot?.id, savedId);
-    expect(find.byKey(const Key('practicePlanResume')), findsOneWidget);
-    expect(find.text('Total reproduzido: 2 voltas'), findsOneWidget);
-    await tap(tester, 'practicePlanResume');
-    await tester.pumpAndSettle();
-    expect(second.playCalls, 1);
-    expect(restored.totalRepetitions, 2);
-    second.completeLoop();
-    await tester.pumpAndSettle();
-    expect(restored.currentPercent, 65);
-    expect(restored.totalRepetitions, 3);
+    expect(store.saved, isNull);
     expect(tester.takeException(), isNull);
     await unmount(tester, second);
   });

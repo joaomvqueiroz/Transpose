@@ -99,6 +99,9 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   YouTubeMediaState get media;
   int get progress;
   String? get error;
+
+  /// Ready to reveal the first page, not just finished downloading its shell.
+  bool get contentReady => progress >= 100 || error != null;
   bool get canGoBack;
   Future<void> start(Uri uri);
   Future<void> openVideo(String videoId) => start(_youtubeVideoUri(videoId));
@@ -140,6 +143,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   );
   YouTubeMediaState _media = const YouTubeMediaState();
   int _progress = 0;
+  bool _contentReady = false;
+  bool _checkingContent = false;
   String? _error;
   bool _canGoBack = false;
   bool _disposed = false;
@@ -159,6 +164,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   int get progress => _progress;
   @override
+  bool get contentReady => _contentReady || _error != null;
+  @override
   String? get error => _error;
   @override
   bool get canGoBack => _canGoBack;
@@ -177,7 +184,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     );
     if (_disposed) return;
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    await controller.setBackgroundColor(const Color(0xFF07121F));
+    await controller.setBackgroundColor(const Color(0xFF080809));
     if (controller.platform is AndroidWebViewController) {
       await AndroidWebViewController.enableDebugging(kDebugMode);
       await (controller.platform as AndroidWebViewController)
@@ -191,12 +198,16 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         },
         onPageStarted: (_) {
           _document++;
+          _contentReady = false;
           _snapshotRevision = -1;
           _error = null;
           _media = const YouTubeMediaState();
           _notify();
         },
-        onPageFinished: (_) => unawaited(_installBridge()),
+        onPageFinished: (_) {
+          unawaited(_installBridge());
+          unawaited(_checkContentReady());
+        },
         onWebResourceError: (WebResourceError failure) {
           if (failure.isForMainFrame != true) return;
           _error = 'Não foi possível carregar o YouTube. Verifique a ligação.';
@@ -216,11 +227,39 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       ),
     );
     if (_disposed) return;
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 400),
-      (_) => unawaited(refresh()),
-    );
+    _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      unawaited(refresh());
+      unawaited(_checkContentReady());
+    });
     await controller.loadRequest(uri);
+  }
+
+  Future<void> _checkContentReady() async {
+    if (_disposed || _contentReady || _checkingContent || _progress < 100) {
+      return;
+    }
+    _checkingContent = true;
+    final document = _document;
+    try {
+      final result = await controller.runJavaScriptReturningResult('''
+        (() => {
+          const body = document.body;
+          if (!body || document.readyState !== 'complete') return false;
+          const hasVideo = !!body.querySelector('a[href*="/watch"]');
+          const hasReadablePage = (body.innerText || '').trim().length > 150;
+          return hasVideo || hasReadablePage;
+        })()
+      ''');
+      if (_disposed || document != _document) return;
+      if (result == true || result.toString() == 'true') {
+        _contentReady = true;
+        _notify();
+      }
+    } on Object {
+      // The page may still be replacing its document; the next poll retries.
+    } finally {
+      _checkingContent = false;
+    }
   }
 
   Future<void> _installBridge() async {

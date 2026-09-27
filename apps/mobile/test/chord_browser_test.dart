@@ -7,9 +7,6 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:transpose_mobile/chord_browser.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
-import 'package:transpose_mobile/youtube_browser.dart';
-
-import 'fake_youtube_session.dart';
 
 void main() {
   setUp(() {
@@ -20,7 +17,7 @@ void main() {
   Future<void> tap(WidgetTester tester, String key) async {
     if (key.startsWith('visualTab') &&
         find.byKey(Key(key)).evaluate().isEmpty) {
-      await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+      await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
     }
     final target = find.byKey(Key(key));
@@ -29,41 +26,33 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  test(
-    'search encodes query and only known HTTPS destinations are allowed',
-    () {
-      final search = chordSearchUri(ChordSite.cifras, 'Canção & acorde');
-      expect(
-        search.queryParameters['q'],
-        'site:www.cifras.com.br Canção & acorde',
-      );
-      expect(chordNavigationUri(search.toString()), search);
-      for (final url in [
-        'https://www.cifraclub.com.br/artista/musica/',
-        'https://www.cifras.com.br/cifra/artista/musica',
-      ]) {
-        expect(isChordSourceUri(Uri.parse(url)), isTrue);
-        final redirect = Uri.https('www.google.com', '/url', {'q': url});
-        expect(chordNavigationUri(redirect.toString()).toString(), url);
-      }
-      for (final url in [
-        'http://www.cifras.com.br/',
-        'https://www.cifras.com.br.attacker.test/',
-        'https://attacker.test/?next=https://www.cifras.com.br',
-        'file:///sdcard/test',
-        'javascript:alert(1)',
-        'https://user:pass@www.cifras.com.br/',
-        'https://www.cifras.com.br:8443/',
-        'https://accounts.google.com/',
-      ]) {
-        expect(chordNavigationUri(url), isNull, reason: url);
-      }
-      expect(
-        () => chordSearchUri(ChordSite.cifraClub, ' '),
-        throwsFormatException,
-      );
-    },
-  );
+  test('the site search encodes the title and blocks other hosts', () {
+    final search = chordSearchUri('Canção & acorde');
+    expect(search.host, 'www.cifras.com.br');
+    expect(search.path, '/busca');
+    expect(search.queryParameters['q'], 'Canção & acorde');
+    expect(isChordPageUri(search), isFalse);
+    expect(chordNavigationUri(search.toString()), search);
+    for (final url in ['https://www.cifras.com.br/cifra/artista/musica']) {
+      expect(isChordSourceUri(Uri.parse(url)), isTrue);
+      expect(isChordPageUri(Uri.parse(url)), isTrue);
+    }
+    for (final url in [
+      'https://www.cifraclub.com.br/artista/musica/',
+      'https://www.google.com/search?q=cifra',
+      'http://www.cifras.com.br/',
+      'https://www.cifras.com.br.attacker.test/',
+      'https://attacker.test/?next=https://www.cifras.com.br',
+      'file:///sdcard/test',
+      'javascript:alert(1)',
+      'https://user:pass@www.cifras.com.br/',
+      'https://www.cifras.com.br:8443/',
+      'https://accounts.google.com/',
+    ]) {
+      expect(chordNavigationUri(url), isNull, reason: url);
+    }
+    expect(() => chordSearchUri(' '), throwsFormatException);
+  });
 
   test(
     'import validates URL text size and double-encoded platform results',
@@ -135,146 +124,101 @@ void main() {
     expect((await store.read('song')).notes, 'C G');
   });
 
-  testWidgets('search cancel does not enable Cifra or replace default cards', (
-    tester,
-  ) async {
+  test('native result parser keeps only unique public cifra links', () {
+    final results = decodeChordSearchResults(
+      jsonEncode([
+        {
+          'title': 'Santo Pra Sempre',
+          'url':
+              'https://www.cifras.com.br/cifra/gabriel-guedes/santo-pra-sempre',
+        },
+        {
+          'title': 'Repetido',
+          'url':
+              'https://www.cifras.com.br/cifra/gabriel-guedes/santo-pra-sempre',
+        },
+        {'title': 'Outro site', 'url': 'https://example.com/cifra/x/y'},
+        {'title': 'Pesquisa', 'url': 'https://www.cifras.com.br/busca?q=x'},
+      ]),
+    );
+    expect(results, hasLength(1));
+    expect(results.single.title, 'Santo Pra Sempre');
+  });
+
+  testWidgets('pesquisa nativa importa a cifra escolhida', (tester) async {
     final browser = _Browser();
     await tester.pumpWidget(
       StudioVisualApp(chordBrowserFactory: () => browser),
     );
-    expect(find.byKey(const Key('playerChordSheet')), findsNothing);
     await tap(tester, 'visualMainAdjustments');
-    await tap(tester, 'visualPlayerChordPicker');
-    expect(find.byKey(const Key('chordBrowserPage')), findsOneWidget);
-    expect(browser.currentUri, ChordSite.cifraClub.home);
-    await tester.enterText(
-      find.byKey(const Key('chordSearchInput')),
-      'Meu estudo',
+    await tap(tester, 'unifiedChooseChord');
+    expect(find.byKey(const Key('unifiedChordSearch')), findsOneWidget);
+    expect(find.byKey(const Key('chordBrowserPage')), findsNothing);
+    await tester.enterText(find.byKey(const Key('chordNativeQuery')), 'Estudo');
+    await tap(tester, 'chordNativeSearch');
+    await tester.pump();
+    expect(browser.currentUri, chordSearchUri('Estudo'));
+    expect(find.byKey(const Key('chordNativeResult0')), findsOneWidget);
+    await tap(tester, 'chordNativeResult0');
+    await tester.pump();
+    expect(find.byKey(const Key('unifiedChordSearch')), findsNothing);
+    expect(
+      find.byKey(const Key('playerChordSheet'), skipOffstage: false),
+      findsOneWidget,
     );
-    await tap(tester, 'chordSearchSubmit');
-    expect(browser.currentUri!.queryParameters['q'], contains('Meu estudo'));
-    await tap(tester, 'chordBrowserClose');
+  });
+
+  testWidgets('cancelar pesquisa não abre cifra', (tester) async {
+    final browser = _Browser();
+    await tester.pumpWidget(
+      StudioVisualApp(chordBrowserFactory: () => browser),
+    );
+    await tap(tester, 'visualMainAdjustments');
+    await tap(tester, 'unifiedChooseChord');
+    await tap(tester, 'chordNativeClose');
+    expect(find.byKey(const Key('unifiedChordSearch')), findsNothing);
     expect(find.byKey(const Key('playerChordSheet')), findsNothing);
-    expect(find.byKey(const Key('visualPlayerPitchUp')), findsNothing);
-    expect(find.byKey(const Key('visualMainAdjustments')), findsOneWidget);
     expect(browser.disposed, isTrue);
   });
 
-  testWidgets(
-    'confirm imports real selected text; toggle keeps it across navigation',
-    (tester) async {
-      final browser = _Browser();
-      final youtube = FakeYouTubeSession()
-        ..state = const YouTubeMediaState(
-          videoId: 'aqz-KE-bpKQ',
-          title: 'Vídeo original',
-          hasVideo: true,
-          duration: 180,
-        );
-      await tester.pumpWidget(
-        StudioVisualApp(
-          chordBrowserFactory: () => browser,
-          youtubeSessionFactory: () => youtube,
+  testWidgets('lista de cifras usa cartões compactos de até duas linhas', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final browser = _Browser();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChordSearchPanel(
+            initialQuery: 'Estudo',
+            onCancel: () {},
+            onSelected: (_) async {},
+            sessionFactory: () => browser,
+          ),
         ),
-      );
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerEmptySearch');
-      await tap(tester, 'youtubeUseInPlayer');
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerChordPicker');
-      browser.chooseSong();
-      await tester.pump();
-      await tap(tester, 'chordBrowserImport');
-      expect(find.text('Confirmar cifra'), findsOneWidget);
-      await tap(tester, 'chordImportCancel');
-      expect(find.byKey(const Key('chordBrowserPage')), findsOneWidget);
-      await tap(tester, 'chordBrowserImport');
-      await tap(tester, 'chordImportConfirm');
-      expect(find.byKey(const Key('chordBrowserPage')), findsNothing);
-      expect(find.byKey(const Key('playerChordSheet')), findsOneWidget);
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
-      await tap(tester, 'visualMainAdjustments');
-      expect(
-        tester
-            .widget<IgnorePointer>(
-              find.byKey(const Key('visualMainControlsOverlay')),
-            )
-            .ignoring,
-        isFalse,
-      );
-      await tester.dragFrom(const Offset(10, 550), const Offset(0, -240));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
-      await tap(tester, 'visualMainAdjustments');
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsOneWidget);
-      await tap(tester, 'visualPlayerPinVideo');
-      await tester.dragFrom(const Offset(10, 550), const Offset(0, -240));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('pinnedPlayerMedia')), findsOneWidget);
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerPinVideo');
-      await tap(tester, 'visualMainAdjustments');
-      expect(find.byKey(const Key('visualMainControlsOverlay')), findsNothing);
-      expect(find.text('Estudo original'), findsOneWidget);
-      expect(find.byKey(const Key('playerChordSource')), findsOneWidget);
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerChordPicker');
-      expect(find.byKey(const Key('playerChordSheet')), findsNothing);
-      expect(find.byKey(const Key('visualPlayerPitchUp')), findsNothing);
-      expect(find.byKey(const Key('visualMainAdjustments')), findsOneWidget);
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerChordPicker');
-      expect(find.byKey(const Key('playerChordSheet')), findsOneWidget);
-      expect(find.byKey(const Key('chordBrowserPage')), findsNothing);
-      await tap(tester, 'visualTabpractice');
-      await tap(tester, 'visualTabplayer');
-      expect(find.text('Estudo original'), findsOneWidget);
-      expect(youtube.disposed, isFalse);
-      expect(youtube.commands.where((c) => c.$1 == 'play'), isEmpty);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'source change during browser selection refuses wrong association',
-    (tester) async {
-      final browser = _Browser();
-      final youtube = FakeYouTubeSession()
-        ..state = const YouTubeMediaState(
-          videoId: 'aqz-KE-bpKQ',
-          title: 'Primeira',
-          hasVideo: true,
-          duration: 180,
-        );
-      await tester.pumpWidget(
-        StudioVisualApp(
-          chordBrowserFactory: () => browser,
-          youtubeSessionFactory: () => youtube,
-        ),
-      );
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerEmptySearch');
-      await tap(tester, 'youtubeUseInPlayer');
-      await tap(tester, 'visualMainAdjustments');
-      await tap(tester, 'visualPlayerChordPicker');
-      browser.chooseSong();
-      await tester.pump();
-      await tap(tester, 'chordBrowserImport');
-      youtube.state = const YouTubeMediaState(
-        videoId: 'AAAAAAAAAAA',
-        title: 'Outra',
-        hasVideo: true,
-        duration: 180,
-      );
-      youtube.notifyListeners();
-      await tester.pump();
-      await tap(tester, 'chordImportConfirm');
-      expect(find.byKey(const Key('playerChordSheet')), findsNothing);
-      expect(find.textContaining('A música mudou'), findsOneWidget);
-    },
-  );
-
+      ),
+    );
+    await tester.pumpAndSettle();
+    final first = find.byKey(const Key('chordNativeResult0'));
+    final second = find.byKey(const Key('chordNativeResult1'));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+    expect(find.text('Cifras.com.br'), findsNothing);
+    final title = tester.widget<Text>(
+      find.textContaining('Canção muito longa'),
+    );
+    expect(title.maxLines, 2);
+    expect(title.overflow, TextOverflow.ellipsis);
+    expect(title.style?.fontSize, 14);
+    expect(tester.getSize(second).height, lessThan(70));
+    expect(
+      tester.getTopLeft(second).dy - tester.getBottomLeft(first).dy,
+      greaterThanOrEqualTo(8),
+    );
+  });
   testWidgets(
     'unsupported page errors remain visible and import can be retried',
     (tester) async {
@@ -284,14 +228,25 @@ void main() {
       );
       await tester.pumpAndSettle();
       browser.chooseSong();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.pump();
-      await tap(tester, 'chordBrowserImport');
       expect(find.byKey(const Key('chordBrowserError')), findsOneWidget);
-      expect(find.text('Confirmar cifra'), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('chordBrowserImport')))
+            .onPressed,
+        isNull,
+      );
       browser.failure = false;
-      await tap(tester, 'chordBrowserImport');
-      expect(find.text('Confirmar cifra'), findsOneWidget);
-      await tap(tester, 'chordImportCancel');
+      await tap(tester, 'chordBrowserRetry');
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('chordBrowserImport')))
+            .onPressed,
+        isNotNull,
+      );
     },
   );
 }
@@ -322,6 +277,17 @@ class _Browser extends ChordBrowserSession {
   Future<void> goBack() async {}
   @override
   Future<void> reload() async {}
+  @override
+  Future<List<ChordSearchResult>> searchResults() async => [
+    ChordSearchResult(
+      title: 'Estudo original',
+      url: Uri.parse('https://www.cifras.com.br/cifra/estudo/original'),
+    ),
+    ChordSearchResult(
+      title: 'Canção muito longa com artista e versão alternativa para testar o limite visual de duas linhas',
+      url: Uri.parse('https://www.cifras.com.br/cifra/estudo/versao'),
+    ),
+  ];
   @override
   Future<ImportedChord> extract() async {
     if (failure) throw const FormatException('Sem cifra visível.');

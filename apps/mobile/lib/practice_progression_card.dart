@@ -212,7 +212,7 @@ class _PracticeProgressionCardState extends State<PracticeProgressionCard> {
         color: studioCard,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF203246)),
+          side: const BorderSide(color: Color(0xFF353537)),
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),

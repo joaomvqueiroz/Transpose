@@ -18,14 +18,22 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(844, 390));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(app);
-    await tester.tap(find.byKey(const Key('visualPlayerMenu')));
-    await tester.pumpAndSettle();
-    final search = find.text('Pesquisar no YouTube').last;
-    await tester.ensureVisible(search);
-    await tester.tap(search);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
-    expect(find.byKey(const Key('youtubeUseInPlayer')), findsOneWidget);
+    expect(find.byKey(const Key('youtubeUseInPlayer')), findsNothing);
+  }
+
+  Future<void> chooseVideo(WidgetTester tester, _FocusSession session) async {
+    session.state = const YouTubeMediaState();
+    session.notifyListeners();
+    await tester.pump();
+    session.state = const YouTubeMediaState(
+      videoId: 'aqz-KE-bpKQ',
+      title: 'Selected video',
+      hasVideo: true,
+      duration: 180,
+    );
+    session.notifyListeners();
   }
 
   testWidgets('selected video is focused only after the final player layout', (
@@ -36,6 +44,7 @@ void main() {
     await openBrowser(
       tester,
       StudioVisualApp(
+        openSearchWhenEmpty: true,
         youtubeSessionFactory: () {
           creations++;
           return session;
@@ -53,16 +62,16 @@ void main() {
           .evaluate()
           .isNotEmpty;
       playerMounted = find
-          .byKey(const Key('visualScrollplayer'))
+          .byKey(const Key('visualMainMediaViewport'))
           .evaluate()
           .isNotEmpty;
       focusedWidth = tester
           .getSize(find.byKey(const Key('focusTestBrowser')))
           .width;
     };
-    await tester.tap(find.byKey(const Key('youtubeUseInPlayer')));
+    await chooseVideo(tester, session);
     expect(session.focuses, 0, reason: 'Do not scroll using the old viewport');
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(session.focuses, 1);
     expect(searchStillMounted, isFalse);
     expect(playerMounted, isTrue);
@@ -87,8 +96,11 @@ void main() {
       final player = _ReplaceableBrowserPlayer(first);
       addTearDown(player.dispose);
       addTearDown(replacement.dispose);
-      await openBrowser(tester, StudioVisualApp(playerController: player));
-      await tester.tap(find.byKey(const Key('youtubeUseInPlayer')));
+      await openBrowser(
+        tester,
+        StudioVisualApp(playerController: player, openSearchWhenEmpty: true),
+      );
+      await chooseVideo(tester, first);
       expect(first.focuses, 0);
       player.replacement = replacement;
       await tester.pump();
@@ -111,9 +123,12 @@ void main() {
       final session = _FocusSession();
       await openBrowser(
         tester,
-        StudioVisualApp(youtubeSessionFactory: () => session),
+        StudioVisualApp(
+          youtubeSessionFactory: () => session,
+          openSearchWhenEmpty: true,
+        ),
       );
-      await tester.tap(find.byKey(const Key('youtubeUseInPlayer')));
+      await chooseVideo(tester, session);
       expect(session.focuses, 0);
       await tester.pumpWidget(const SizedBox());
       await tester.pump();

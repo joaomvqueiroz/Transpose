@@ -8,6 +8,8 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Transpono</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O Transpono usa o microfone apenas enquanto afina um instrumento, para indicar a nota e o desvio de afinação.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

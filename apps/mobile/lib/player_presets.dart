@@ -74,8 +74,8 @@ class PlayerPreset {
         pitch > 12 ||
         speed is! num ||
         !speed.isFinite ||
-        speed < 0.5 ||
-        speed > 1.5 ||
+        speed < (m['youtube'] == true ? 0.25 : 0.5) ||
+        speed > 2 ||
         pos is! int ||
         pos < 0 ||
         m['youtube'] is! bool ||

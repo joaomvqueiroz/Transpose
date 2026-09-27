@@ -59,7 +59,7 @@ class ChordSheet {
     this.sourceTitle = '',
     this.sourceUrl = '',
     this.transpose = 0,
-    this.followAudio = true,
+    this.followAudio = false,
   });
   final String timeline, notes, sourceTitle, sourceUrl;
   final int transpose;
@@ -120,7 +120,7 @@ class ChordSheetStore {
       sourceTitle: data['sourceTitle'] ?? '',
       sourceUrl: data['sourceUrl'] ?? '',
       transpose: data['transpose'] ?? 0,
-      followAudio: data['followAudio'] ?? true,
+      followAudio: data['followAudio'] ?? false,
     );
   }
 
@@ -158,11 +158,13 @@ class ChordsPanel extends StatefulWidget {
     required this.sourceKey,
     required this.store,
     required this.onOpenPlayer,
+    this.unifiedMode = false,
   });
   final PlayerPanelModel model;
   final String sourceKey;
   final ChordSheetStore store;
   final VoidCallback onOpenPlayer;
+  final bool unifiedMode;
   @override
   State<ChordsPanel> createState() => _ChordsPanelState();
 }
@@ -294,26 +296,28 @@ class _ChordsPanelState extends State<ChordsPanel> {
                   icon: const Icon(Icons.edit),
                   label: const Text('Editar cifras e notas'),
                 ),
-                OutlinedButton.icon(
-                  key: const Key('chordsPlay'),
-                  onPressed: ready || (m.loaded && m.playing && !m.muted)
-                      ? m.playPause
-                      : null,
-                  icon: Icon(m.playing ? Icons.pause : Icons.play_arrow),
-                  label: Text(
-                    m.muted
-                        ? 'Ativar som'
-                        : m.playing
-                        ? 'Pausar'
-                        : 'Reproduzir',
+                if (!widget.unifiedMode)
+                  OutlinedButton.icon(
+                    key: const Key('chordsPlay'),
+                    onPressed: ready || (m.loaded && m.playing && !m.muted)
+                        ? m.playPause
+                        : null,
+                    icon: Icon(m.playing ? Icons.pause : Icons.play_arrow),
+                    label: Text(
+                      m.muted
+                          ? 'Ativar som'
+                          : m.playing
+                          ? 'Pausar'
+                          : 'Reproduzir',
+                    ),
                   ),
-                ),
-                OutlinedButton.icon(
-                  key: const Key('visualChordsTranspose'),
-                  onPressed: widget.onOpenPlayer,
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Tom e velocidade'),
-                ),
+                if (!widget.unifiedMode)
+                  OutlinedButton.icon(
+                    key: const Key('visualChordsTranspose'),
+                    onPressed: widget.onOpenPlayer,
+                    icon: const Icon(Icons.tune),
+                    label: const Text('Tom e velocidade'),
+                  ),
               ],
             ),
             const SizedBox(height: 16),

@@ -78,7 +78,7 @@ void main() {
   });
 
   testWidgets(
-    'linked pitch follows audio ACK; unlinked pitch is independently saved',
+    'cifra pitch is independently saved and never changes audio pitch',
     (tester) async {
       final key = GlobalKey<PlayerChordSheetState>();
       final model = _DelayedPitch();
@@ -90,31 +90,31 @@ void main() {
       await tester.pumpWidget(_app(key, model, store, 'song'));
       await tester.pumpAndSettle();
       await tap(tester, 'playerChordPitchUp');
-      expect(model.requested, 1);
-      expect(displayed(tester), startsWith('C       G/B'));
-      model.acknowledge();
-      await tester.pumpAndSettle();
       expect(displayed(tester), startsWith('C#      G#/C'));
-      await tap(tester, 'playerChordFollowAudio');
+      expect(model.requested, isNull);
       expect((await store.read('song')).followAudio, isFalse);
-      expect(displayed(tester), startsWith('C#'));
       await tap(tester, 'playerChordPitchUp');
-      expect(model.pitch, 1);
+      expect(model.pitch, 0);
       expect(displayed(tester), startsWith('D       A/C#'));
       expect((await store.read('song')).notes, 'C       G/B\nLetra original');
       await tester.pumpWidget(const SizedBox());
       await tester.pumpWidget(_app(key, model, store, 'song'));
       await tester.pumpAndSettle();
       expect(displayed(tester), startsWith('D       A/C#'));
-      await tap(tester, 'playerChordFollowAudio');
-      expect(
-        displayed(tester),
-        startsWith('D       A/C#'),
-        reason: 'Linking keeps the calibrated chord key',
-      );
       await tap(tester, 'playerChordPitchReset');
       expect(displayed(tester), 'C       G/B\nLetra original');
-      expect(model.pitch, 1, reason: 'Reset cifra must not reset the audio');
+      expect(model.pitch, 0, reason: 'Reset cifra must not change the audio');
+      expect(find.text('Tom da cifra'), findsOneWidget);
+      unawaited(model.changePitch(2));
+      await tester.pump();
+      model.acknowledge();
+      await tester.pumpAndSettle();
+      expect(model.pitch, 2);
+      expect(
+        displayed(tester),
+        startsWith('C'),
+        reason: 'Unlinked cifra keeps its key while the video pitch changes.',
+      );
     },
   );
 
@@ -132,12 +132,43 @@ void main() {
       tester
           .widget<IconButton>(find.byKey(const Key('playerChordPitchUp')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
-    await tap(tester, 'playerChordFollowAudio');
+    expect(find.byKey(const Key('playerChordVideoPitchUp')), findsNothing);
     await tap(tester, 'playerChordPitchUp');
     expect(displayed(tester), 'A#m F#');
     expect(model.pitch, 0);
+  });
+
+  testWidgets('wide chord lines fit or wrap without horizontal clipping', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = ChordSheetStore();
+    await store.save('moderate', ChordSheet(notes: 'C${' ' * 20}G'));
+    await tester.pumpWidget(
+      _app(GlobalKey<PlayerChordSheetState>(), _Model(), store, 'moderate'),
+    );
+    await tester.pumpAndSettle();
+    final text = find.byKey(const Key('playerChordText'));
+    expect(tester.widget<SelectableText>(text).style!.fontSize, lessThan(15));
+    expect(find.byKey(const Key('playerChordHorizontalScroll')), findsNothing);
+
+    await store.save('long', ChordSheet(notes: 'C${' ' * 100}G'));
+    await tester.pumpWidget(
+      _app(GlobalKey<PlayerChordSheetState>(), _Model(), store, 'long'),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<SelectableText>(text).style!.fontSize, 11);
+    expect(find.byKey(const Key('playerChordHorizontalScroll')), findsNothing);
+    expect(find.byKey(const Key('playerChordScrollHint')), findsNothing);
+    expect(tester.getSize(text).width, lessThan(320));
+    expect(tester.getSize(text).height, greaterThan(30));
+    expect(displayed(tester), 'C${' ' * 100}G');
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -222,7 +253,7 @@ void main() {
     expect(saved.notes, 'C   G\nA minha letra');
     await model.changePitch(2);
     await tester.pump();
-    expect(displayed(tester), 'D   A\nA minha letra');
+    expect(displayed(tester), 'C   G\nA minha letra');
     expect((await store.read('one')).notes, 'C   G\nA minha letra');
     expect((await store.read('two')).notes, isEmpty);
   });

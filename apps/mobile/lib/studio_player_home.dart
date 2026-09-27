@@ -11,46 +11,32 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final ChordSheetStore _chords = ChordSheetStore();
   int _collectionsRevision = 0;
   String? _selectedPresetId;
-  late final SessionRecoveryController? _recovery =
-      widget.recoveryRepository == null
-      ? null
-      : SessionRecoveryController(
-          player: _player,
-          repository: widget.recoveryRepository!,
-          presentation: () => SessionPresentation(
-            screen: _tab.name,
-            fullscreen: _fullscreen,
-            activePresetId: _selectedPresetId,
-            practice: _practice.snapshot,
-            settled: !_practice.busy,
-          ),
-          onRestored: (snapshot) {
-            if (!mounted) return;
-            _practice.restore(snapshot.practice);
-            setState(() {
-              _tab = StudioTab.values.firstWhere(
-                (tab) => tab.name == snapshot.screen,
-                orElse: () => StudioTab.player,
-              );
-              _selectedPresetId = snapshot.activePresetId;
-              // Restore a useful screen, not an immersive lock or playback.
-              _fullscreen = false;
-              _browsing = false;
-            });
-          },
-        );
-  final TextEditingController _query = TextEditingController();
   final GlobalKey _mediaKey = GlobalKey(debugLabel: 'shared-player-surface');
+  final GlobalKey<PlayerChordSheetState> _unifiedChordKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
+  final ScrollController _tabsScroll = ScrollController();
+  ScrollController? _chordTextScroll;
+  Timer? _chordAutoTimer;
+  bool _chordAutoScroll = false;
+  double _chordScrollSpeed = 1;
   StudioTab _tab = StudioTab.player;
-  bool _browsing = false, _fullscreen = false;
+  bool _browsing = false;
   bool _chordActive = false;
-  bool _videoPinned = false;
   bool _mainControlsExpanded = false;
-  bool _mainSettingsOpen = false;
+  String? _practiceTool;
+  bool _chordSearching = false;
   String _chordSource = '';
   int _chordRevision = 0;
   bool _choosingChord = false;
+  bool _browserReadyForSelection = false;
+  bool _autoSelectingVideo = false;
+  bool _browserOpening = false;
+  bool _browserOpenedFromPlayer = false;
+  bool _initialBrowserReadyReported = false;
+  String _browserOriginVideoId = '';
+  double _bassDb = 0, _midDb = 0, _trebleDb = 0, _delayMix = 0;
+  double _appliedBassDb = 0, _appliedMidDb = 0;
+  double _appliedTrebleDb = 0, _appliedDelayMix = 0;
   YouTubeBrowserSession? _browserOwner;
   Widget? _browser;
 
@@ -59,55 +45,96 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _player.addListener(_changed);
-    // Observe loop events before recovery captures progress at the same tick.
     _practice.addListener(_practiceChanged);
-    _recovery?.addListener(_changed);
     unawaited(_initializeStartPage());
   }
 
   Future<void> _initializeStartPage() async {
-    await _recovery?.initialize();
-    final pending = _recovery?.pending;
     if (!mounted ||
         !widget.openSearchWhenEmpty ||
         _player.loaded ||
-        _player.local.loaded ||
-        (pending != null && !pending.media.youtube)) {
+        _player.local.loaded) {
+      _reportInitialBrowserReady();
       return;
     }
-    setState(() => _browsing = true);
+    _browserOpening = true;
+    setState(() {
+      _browsing = true;
+      _browserReadyForSelection = false;
+      _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
+    });
     await _player.openYouTube();
+    _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
+    _browserOpening = false;
     if (mounted && _player.youtube == null) {
       setState(() => _browsing = false);
+      _reportInitialBrowserReady();
     }
   }
 
+  void _reportInitialBrowserReady() {
+    if (_initialBrowserReadyReported || widget.onInitialBrowserReady == null) {
+      return;
+    }
+    _initialBrowserReadyReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onInitialBrowserReady?.call();
+    });
+  }
+
   void _changed() {
+    final startupSession = _player.youtube;
+    if (startupSession != null && startupSession.contentReady) {
+      _reportInitialBrowserReady();
+    }
     if (_chordSource != _player.sourceKey) {
       _chordSource = _player.sourceKey;
       _chordRevision++;
       _chordActive = false;
+      _chordSearching = false;
+      _stopChordAutoScroll();
       _mainControlsExpanded = false;
-      _mainSettingsOpen = false;
+      _bassDb = _midDb = _trebleDb = _delayMix = 0;
+      _appliedBassDb = _appliedMidDb = _appliedTrebleDb = _appliedDelayMix = 0;
     }
     if (mounted) setState(() {});
+    if (!_browsing ||
+        !_player.isYouTube ||
+        _autoSelectingVideo ||
+        _browserOpening) {
+      return;
+    }
+    final media = _player.youtube?.media;
+    if (media == null || media.videoId.isEmpty || !media.hasVideo) {
+      _browserReadyForSelection = true;
+      return;
+    }
+    if ((!_browserReadyForSelection &&
+            media.videoId == _browserOriginVideoId) ||
+        media.isAd) {
+      return;
+    }
+    _autoSelectingVideo = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_browsing ||
+          !_player.isYouTube ||
+          _player.youtube?.media.videoId != media.videoId) {
+        _autoSelectingVideo = false;
+        return;
+      }
+      unawaited(_useVideo());
+    });
   }
 
   void _practiceChanged() {
     _changed();
-    _recovery?.presentationChanged();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      // The OS need not await us; periodic saves are the crash fallback.
-      unawaited(_recovery?.flush());
-      unawaited(
-        _practice.pause().whenComplete(() async {
-          await _recovery?.flush();
-        }),
-      );
+      unawaited(_practice.pause());
     }
   }
 
@@ -115,86 +142,137 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _player.removeListener(_changed);
-    _recovery?.removeListener(_changed);
-    unawaited(_recovery?.close());
     _practice.removeListener(_practiceChanged);
     _practice.dispose();
     if (widget.playerController == null) _player.dispose();
-    _query.dispose();
     _scroll.dispose();
-    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+    _tabsScroll.dispose();
+    _chordAutoTimer?.cancel();
     super.dispose();
+  }
+
+  void _stopChordAutoScroll() {
+    _chordAutoTimer?.cancel();
+    _chordAutoTimer = null;
+    _chordAutoScroll = false;
+  }
+
+  void _toggleChordAutoScroll() {
+    if (_chordAutoScroll) {
+      setState(_stopChordAutoScroll);
+      return;
+    }
+    if (!_chordActive) return;
+    setState(() => _chordAutoScroll = true);
+    _chordAutoTimer?.cancel();
+    _chordAutoTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted ||
+          !_mainControlsExpanded ||
+          !_chordActive ||
+          _tab != StudioTab.chords && _tab != StudioTab.player ||
+          _chordTextScroll?.hasClients != true) {
+        return;
+      }
+      // Move the entire Cifra interface first; keep the frame pinned once it
+      // reaches the video, then scroll its text within that fixed frame.
+      if (_scroll.hasClients &&
+          _scroll.position.pixels < _scroll.position.maxScrollExtent) {
+        _scroll.jumpTo(
+          (_scroll.position.pixels + 1.4 * _chordScrollSpeed).clamp(
+            0.0,
+            _scroll.position.maxScrollExtent,
+          ),
+        );
+        return;
+      }
+      final position = _chordTextScroll!.position;
+      if (position.maxScrollExtent <= position.pixels + .5) {
+        setState(_stopChordAutoScroll);
+        return;
+      }
+      final next = (position.pixels + 1.4 * _chordScrollSpeed).clamp(
+        0.0,
+        position.maxScrollExtent,
+      );
+      _chordTextScroll!.jumpTo(next);
+    });
   }
 
   void _notice(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 72),
+      ),
+    );
   }
 
   void _select(StudioTab tab) {
+    if (tab != StudioTab.chords && tab != StudioTab.player) {
+      _stopChordAutoScroll();
+    }
     setState(() {
-      _tab = tab;
+      _tab = tab == StudioTab.stage || tab == StudioTab.instruments
+          ? StudioTab.chords
+          : tab == StudioTab.metronome
+          ? StudioTab.practice
+          : tab == StudioTab.tuner
+          ? StudioTab.audioSettings
+          : tab;
       _browsing = false;
-      _mainSettingsOpen = false;
+      _mainControlsExpanded = true;
     });
-    _recovery?.presentationChanged();
+    if (tab == StudioTab.tuner) unawaited(_player.pause());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tabsScroll.hasClients) return;
+      final index = _visibleTabs.indexWhere((item) => item.$1 == _tab);
+      if (index < 0) return;
+      final target = (index * 80.0 - 80).clamp(
+        0.0,
+        _tabsScroll.position.maxScrollExtent,
+      );
+      unawaited(
+        _tabsScroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        ),
+      );
+    });
   }
 
   void _toggleMainAdjustments() {
+    if (_mainControlsExpanded) _stopChordAutoScroll();
     setState(() {
-      if (_chordActive) {
-        _mainSettingsOpen = !_mainSettingsOpen;
-      } else {
-        _mainControlsExpanded = !_mainControlsExpanded;
-      }
+      _mainControlsExpanded = !_mainControlsExpanded;
     });
-    if (_scroll.hasClients && _scroll.offset > 0) _scroll.jumpTo(0);
-  }
-
-  bool _onMainPlayerScroll(ScrollNotification notification) {
-    if (notification is ScrollUpdateNotification &&
-        notification.depth == 0 &&
-        notification.dragDetails != null &&
-        (notification.scrollDelta ?? 0) > 0 &&
-        _chordActive &&
-        _mainSettingsOpen) {
-      // Reading the chord sheet must not leave transport and pitch controls
-      // pinned over the video. Keep the video pin state; only close Ajustes.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _chordActive && _mainSettingsOpen) {
-          setState(() => _mainSettingsOpen = false);
-        }
-      });
-    }
-    return false;
   }
 
   Future<void> _openYouTubeSearch() async {
-    await _recovery?.flush();
     if (!mounted) return;
-    _recovery?.beginUserSource();
+    _browserOpening = true;
     setState(() {
-      _tab = StudioTab.player;
       _browsing = true;
+      _browserOpenedFromPlayer = _player.loaded;
+      _browserReadyForSelection = false;
+      _autoSelectingVideo = false;
+      _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
     });
     await _player.openYouTube();
-  }
-
-  Future<void> _search() async {
-    if (_query.text.trim().isEmpty) return;
-    FocusScope.of(context).unfocus();
-    await _recovery?.flush();
-    if (!mounted) return;
-    _recovery?.beginUserSource();
-    await _player.search(_query.text);
+    _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
+    _browserOpening = false;
   }
 
   Future<void> _useVideo() async {
     FocusScope.of(context).unfocus();
+    if (!_player.isYouTube || !_player.loaded) return;
     final session = _player.youtube;
     setState(() => _browsing = false);
+    _browserReadyForSelection = false;
+    _autoSelectingVideo = false;
     // Focus in the final viewport, not while a smooth scroll is still running
     // against the full-width search page that is about to be resized.
     await WidgetsBinding.instance.endOfFrame;
@@ -209,9 +287,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Future<void> _pickFile() async {
-    await _recovery?.flush();
     if (!mounted) return;
-    _recovery?.beginUserSource();
     await _player.pickFile();
     if (mounted && !_player.isYouTube) {
       setState(() {
@@ -224,10 +300,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Future<void> _toggleChord() async {
     if (_choosingChord) return;
     if (_chordActive) {
+      _stopChordAutoScroll();
       setState(() {
         _chordActive = false;
-        _mainSettingsOpen = false;
-        _mainControlsExpanded = false;
       });
       return;
     }
@@ -241,8 +316,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       if (sheet.notes.trim().isNotEmpty) {
         setState(() {
           _chordActive = true;
-          _mainSettingsOpen = false;
-          _mainControlsExpanded = false;
         });
       } else {
         await _searchChord();
@@ -255,23 +328,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Future<void> _searchChord() async {
+    if (_choosingChord || _chordSearching) return;
+    _stopChordAutoScroll();
+    await _player.pause();
+    if (!mounted) return;
+    setState(() => _chordSearching = true);
+  }
+
+  Future<void> _acceptChord(ImportedChord selected) async {
     if (_choosingChord) return;
     _choosingChord = true;
     final source = _player.sourceKey;
     final revision = _chordRevision;
     try {
-      // Browsing a second website must not start a second audible source.
-      await _player.pause();
-      if (!mounted || revision != _chordRevision) return;
-      final selected = await Navigator.of(context).push<ImportedChord>(
-        MaterialPageRoute(
-          builder: (_) => ChordBrowserPage(
-            initialQuery: _player.loaded ? _player.title : '',
-            sessionFactory: widget.chordBrowserFactory,
-          ),
-        ),
-      );
-      if (!mounted || selected == null) return;
       if (revision != _chordRevision || source != _player.sourceKey) {
         _notice(
           'A música mudou. Escolha a cifra novamente para a fonte atual.',
@@ -287,7 +356,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         sourceTitle: selected.title,
         sourceUrl: selected.url.toString(),
         transpose: 0,
-        followAudio: true,
+        followAudio: false,
       );
       if (source.isEmpty) {
         _chords.temporarySheet = sheet;
@@ -297,6 +366,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       if (!mounted || revision != _chordRevision) return;
       setState(() {
         _chordActive = true;
+        _chordSearching = false;
         _chordRevision++;
       });
     } on Object {
@@ -308,20 +378,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     } finally {
       _choosingChord = false;
     }
-  }
-
-  void _openFullscreen() {
-    setState(() => _fullscreen = true);
-    _recovery?.presentationChanged();
-    unawaited(
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
-    );
-  }
-
-  void _exitFullscreen() {
-    setState(() => _fullscreen = false);
-    _recovery?.presentationChanged();
-    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   }
 
   Widget _mediaSurface() {
@@ -372,98 +428,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
-  void _openMore() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _menuItem(
-                sheet,
-                Icons.search,
-                'Pesquisar no YouTube',
-                _openYouTubeSearch,
-              ),
-              _menuItem(
-                sheet,
-                Icons.folder_open,
-                'Abrir ficheiro local',
-                _pickFile,
-              ),
-              _menuItem(
-                sheet,
-                Icons.audio_file_outlined,
-                'Carregar áudio de demonstração',
-                () async {
-                  await _recovery?.flush();
-                  if (!mounted) return;
-                  _recovery?.beginUserSource();
-                  await _player.loadSample();
-                  if (mounted) {
-                    setState(() {
-                      _tab = StudioTab.player;
-                      _browsing = false;
-                    });
-                  }
-                },
-              ),
-              _menuItem(
-                sheet,
-                Icons.bookmark_add_outlined,
-                'Guardar predefinição',
-                () => _save(),
-              ),
-              _menuItem(
-                sheet,
-                Icons.queue_music,
-                'Adicionar à setlist',
-                () => _save(setlist: true),
-              ),
-              _menuItem(
-                sheet,
-                Icons.bookmarks_outlined,
-                'Predefinições guardadas',
-                () => _saved(),
-              ),
-              _menuItem(
-                sheet,
-                Icons.list_alt,
-                'Minha setlist',
-                () => _saved(setlist: true),
-              ),
-              _menuItem(sheet, Icons.fullscreen, 'Tela cheia', _openFullscreen),
-              _menuItem(
-                sheet,
-                Icons.tune,
-                'Mais ferramentas de áudio',
-                _advanced,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _menuItem(
-    BuildContext sheet,
-    IconData icon,
-    String title,
-    VoidCallback action, {
-    Key? key,
-  }) => ListTile(
-    key: key,
-    leading: Icon(icon),
-    title: Text(title),
-    onTap: () {
-      Navigator.pop(sheet);
-      action();
-    },
-  );
-
   Future<void> _save({bool setlist = false}) async {
     if (!_player.loaded) {
       _notice('Escolha uma música primeiro.');
@@ -476,13 +440,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _notice('Aguarde a conclusão do ajuste atual.');
       return;
     }
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => _PresetNameDialog(
-        initialName: _player.title,
-        title: setlist ? 'Adicionar à setlist' : 'Guardar predefinição',
-      ),
-    );
+    final name = setlist
+        ? captured.title.trim().characters.take(55).toString()
+        : await showDialog<String>(
+            context: context,
+            builder: (_) => _PresetNameDialog(
+              initialName: _player.title,
+              title: 'Guardar predefinição',
+            ),
+          );
     if (name == null || name.trim().isEmpty) return;
     final preset = PlayerPreset(
       id: captured.id,
@@ -515,9 +481,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     PlayerPreset preset, {
     bool returnToPlayer = false,
   }) async {
-    await _recovery?.flush();
     if (!mounted) return false;
-    _recovery?.beginUserSource();
     if (returnToPlayer) {
       setState(() {
         _tab = StudioTab.player;
@@ -536,7 +500,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_player.lastRestoreSucceeded) {
       if (!mounted) return false;
       setState(() => _selectedPresetId = preset.id);
-      _recovery?.presentationChanged();
     }
     return _player.lastRestoreSucceeded;
   }
@@ -561,6 +524,34 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (mounted) setState(() => _collectionsRevision++);
   }
 
+  Future<void> _moveSetlist(int direction) async {
+    try {
+      final entries = await _presets.list(setlist: true);
+      if (!mounted) return;
+      if (entries.isEmpty) {
+        _notice('A setlist ainda está vazia.');
+        return;
+      }
+      final current = entries.indexWhere(
+        (entry) => entry.id == _selectedPresetId,
+      );
+      final target = current < 0
+          ? (direction > 0 ? 0 : entries.length - 1)
+          : current + direction;
+      if (target < 0 || target >= entries.length) {
+        _notice(direction > 0 ? 'Fim da setlist.' : 'Início da setlist.');
+        return;
+      }
+      final restored = await _applyPreset(
+        entries[target],
+        returnToPlayer: true,
+      );
+      if (!restored && mounted) _notice('Não foi possível abrir esta música.');
+    } on Object {
+      _notice('Não foi possível ler a setlist.');
+    }
+  }
+
   Future<void> _tool(String tool) async {
     switch (tool) {
       case 'save':
@@ -582,258 +573,355 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         child: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    const Expanded(
-                      child: Text(
-                        'Configurações de áudio',
-                        style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Fechar configurações de áudio',
-                      onPressed: () => Navigator.pop(sheet),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text('Mixagem de canais (stems)'),
-                const SizedBox(height: 8),
-                const Text(
-                  'Voz, guitarra, baixo e bateria exigem faixas separadas. A separação automática ainda não está implementada.',
-                  style: TextStyle(color: studioMuted),
-                ),
-                const SizedBox(height: 12),
-                const Wrap(
-                  spacing: 8,
-                  children: <Widget>[
-                    Chip(label: Text('Voz · indisponível')),
-                    Chip(label: Text('Guitarra · indisponível')),
-                    Chip(label: Text('Baixo · indisponível')),
-                    Chip(label: Text('Bateria · indisponível')),
-                  ],
-                ),
-                const Divider(height: 28),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.restore),
-                  title: const Text('Repor tom, velocidade e loop'),
-                  subtitle: const Text('0 st · 1,00× · sem A/B'),
-                  enabled: _player.loaded,
-                  onTap: _player.loaded
-                      ? () {
-                          Navigator.pop(sheet);
-                          unawaited(_player.resetProcessing());
-                        }
-                      : null,
-                ),
-                const Text(
-                  'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
-                  style: TextStyle(color: studioMuted, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.pop(sheet),
-                    child: const Text('Concluir'),
-                  ),
-                ),
-              ],
-            ),
+            child: _audioSettingsContent(onClose: () => Navigator.pop(sheet)),
           ),
         ),
       ),
     );
   }
 
-  void _openSidebar() {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * .85,
+  Future<void> _setEqualizer({
+    double? bass,
+    double? mid,
+    double? treble,
+    double? delay,
+  }) async {
+    final nextBass = bass ?? _bassDb;
+    final nextMid = mid ?? _midDb;
+    final nextTreble = treble ?? _trebleDb;
+    final nextDelay = delay ?? _delayMix;
+    if (!_player.isYouTube || !_player.loaded) return;
+    final source = _player.sourceKey;
+    final session = _player.youtube!;
+    try {
+      final action = bass != null
+          ? 'bass'
+          : mid != null
+          ? 'mid'
+          : treble != null
+          ? 'treble'
+          : 'delay';
+      await session.command(action, bass ?? mid ?? treble ?? delay);
+      if (!mounted ||
+          source != _player.sourceKey ||
+          session != _player.youtube) {
+        return;
+      }
+      setState(() {
+        _bassDb = nextBass;
+        _midDb = nextMid;
+        _trebleDb = nextTreble;
+        _delayMix = nextDelay;
+        _appliedBassDb = nextBass;
+        _appliedMidDb = nextMid;
+        _appliedTrebleDb = nextTreble;
+        _appliedDelayMix = nextDelay;
+      });
+    } on Object {
+      if (mounted &&
+          source == _player.sourceKey &&
+          session == _player.youtube) {
+        setState(() {
+          _bassDb = _appliedBassDb;
+          _midDb = _appliedMidDb;
+          _trebleDb = _appliedTrebleDb;
+          _delayMix = _appliedDelayMix;
+        });
+        _notice('Não foi possível aplicar o equalizador neste vídeo.');
+      }
+    }
+  }
+
+  Widget _audioSettingsContent({VoidCallback? onClose}) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (onClose != null)
+        Align(
+          alignment: Alignment.centerRight,
+          child: IconButton(
+            tooltip: 'Fechar configurações de áudio',
+            onPressed: onClose,
+            icon: const Icon(Icons.close),
+          ),
+        ),
+      const Padding(
+        key: Key('audioTuner'),
+        padding: EdgeInsets.only(bottom: 12),
+        child: MicrophoneTunerTool(),
       ),
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              ListTile(
-                title: const Text(
-                  'Transpono',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                trailing: IconButton(
-                  key: const Key('visualSidebarClose'),
-                  tooltip: 'Fechar menu',
-                  onPressed: () => Navigator.pop(sheet),
-                  icon: const Icon(Icons.close),
-                ),
+      Container(
+        decoration: BoxDecoration(
+          color: studioCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: studioMuted.withValues(alpha: .2)),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '▥  EQUALIZADOR MASTER · 3 BANDAS',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: .7,
               ),
-              _menuItem(
-                sheet,
-                Icons.play_circle_outline,
-                'Player',
-                () => _select(StudioTab.player),
-                key: const Key('visualTabplayer'),
+            ),
+            const SizedBox(height: 10),
+            _equalizerSlider(
+              'Graves',
+              'audioBassSlider',
+              _bassDb,
+              (value) => _setEqualizer(bass: value),
+            ),
+            _equalizerSlider(
+              'Médios',
+              'audioMidSlider',
+              _midDb,
+              (value) => _setEqualizer(mid: value),
+            ),
+            _equalizerSlider(
+              'Agudos',
+              'audioTrebleSlider',
+              _trebleDb,
+              (value) => _setEqualizer(treble: value),
+            ),
+            if (!_player.isYouTube || !_player.loaded)
+              const Text(
+                'Escolha um vídeo do YouTube para ativar o equalizador.',
+                style: TextStyle(color: studioMuted, fontSize: 12),
               ),
-              _menuItem(sheet, Icons.fullscreen, 'Tela cheia', _openFullscreen),
-              _menuItem(
-                sheet,
-                Icons.graphic_eq,
-                'Prática',
-                () => _select(StudioTab.practice),
-                key: const Key('visualTabpractice'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.music_note,
-                'Acordes',
-                () => _select(StudioTab.chords),
-                key: const Key('visualTabchords'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.tune,
-                'Palco',
-                () => _select(StudioTab.stage),
-                key: const Key('visualTabstage'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.search,
-                'Pesquisar no YouTube',
-                _openYouTubeSearch,
-              ),
-              _menuItem(
-                sheet,
-                Icons.folder_open,
-                'Abrir ficheiro local',
-                _pickFile,
-              ),
-              _menuItem(
-                sheet,
-                Icons.bookmark_add_outlined,
-                'Guardar predefinição',
-                () => _save(),
-              ),
-              _menuItem(
-                sheet,
-                Icons.bookmarks_outlined,
-                'Predefinições e loops guardados',
-                () => _saved(),
-              ),
-              _menuItem(
-                sheet,
-                Icons.queue_music,
-                'Minha setlist',
-                () => _saved(setlist: true),
-              ),
-              _menuItem(
-                sheet,
-                Icons.timer_outlined,
-                'Metrônomo',
-                () => _tool('metronome'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.tune,
-                'Afinador por referência',
-                () => _tool('tuner'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.music_note,
-                'Transpor cifras',
-                () => _tool('chords'),
-              ),
-              _menuItem(
-                sheet,
-                Icons.settings,
-                'Configurações de áudio',
-                _advanced,
-              ),
-            ],
+            TextButton.icon(
+              key: const Key('audioResetEqualizer'),
+              onPressed: _player.isYouTube && _player.loaded
+                  ? () async {
+                      await _setEqualizer(bass: 0);
+                      await _setEqualizer(mid: 0);
+                      await _setEqualizer(treble: 0);
+                      await _setEqualizer(delay: 0);
+                    }
+                  : null,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Repor equalizador'),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      const Padding(
+        padding: EdgeInsets.fromLTRB(2, 4, 0, 7),
+        child: Text(
+          'EFEITOS EM TEMPO REAL',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1,
+            color: studioMuted,
           ),
         ),
       ),
-    );
-  }
+      Container(
+        decoration: BoxDecoration(
+          color: studioCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: studioMuted.withValues(alpha: .2)),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Efeito Delay de Ensaio',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            ),
+            const Text(
+              'Eco curto para prática de áudio.',
+              style: TextStyle(fontSize: 10, color: studioMuted),
+            ),
+            Row(
+              children: [
+                const Text(
+                  '0%',
+                  style: TextStyle(fontSize: 9, color: studioMuted),
+                ),
+                Expanded(
+                  child: Slider(
+                    key: const Key('audioDelaySlider'),
+                    min: 0,
+                    max: .35,
+                    divisions: 35,
+                    value: _delayMix,
+                    label: '${(_delayMix * 100).round()}%',
+                    onChanged: _player.isYouTube && _player.loaded
+                        ? (next) => setState(() => _delayMix = next)
+                        : null,
+                    onChangeEnd: _player.isYouTube && _player.loaded
+                        ? (next) => _setEqualizer(delay: next)
+                        : null,
+                  ),
+                ),
+                Text(
+                  '${(_delayMix * 100).round()}%',
+                  style: const TextStyle(fontSize: 10),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      Container(
+        decoration: BoxDecoration(
+          color: studioCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: studioMuted.withValues(alpha: .2)),
+        ),
+        padding: const EdgeInsets.all(12),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Isolador de Voz / Playback',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Indisponível no YouTube. Não é aplicado ao vídeo.',
+              style: TextStyle(fontSize: 10, color: studioMuted),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.restore),
+        title: const Text('Repor tom, velocidade e loop'),
+        subtitle: const Text('0 st · 1,00× · sem A/B'),
+        enabled: _player.loaded,
+        onTap: _player.loaded
+            ? () {
+                onClose?.call();
+                unawaited(_player.resetProcessing());
+              }
+            : null,
+      ),
+      const Text(
+        'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
+        style: TextStyle(color: studioMuted, fontSize: 12),
+      ),
+      TextButton.icon(
+        key: const Key('audioOpenLocalFile'),
+        onPressed: _pickFile,
+        icon: const Icon(Icons.folder_open),
+        label: const Text('Abrir ficheiro local'),
+      ),
+      if (onClose != null) ...[
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: onClose,
+            child: const Text('Concluir'),
+          ),
+        ),
+      ],
+    ],
+  );
+
+  Widget _equalizerSlider(
+    String label,
+    String key,
+    double value,
+    ValueChanged<double> apply,
+  ) => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                switch (label) {
+                  'Graves' => 'Graves (200 Hz)',
+                  'Médios' => 'Médios (1 kHz)',
+                  _ => 'Agudos (3 kHz)',
+                },
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)} dB',
+              style: const TextStyle(fontSize: 10, color: Colors.white),
+            ),
+          ],
+        ),
+        Slider(
+          key: Key(key),
+          min: -12,
+          max: 12,
+          divisions: 24,
+          value: value,
+          onChanged: _player.isYouTube && _player.loaded
+              ? (next) => setState(() {
+                  if (key == 'audioBassSlider') {
+                    _bassDb = next;
+                  } else if (key == 'audioMidSlider') {
+                    _midDb = next;
+                  } else {
+                    _trebleDb = next;
+                  }
+                })
+              : null,
+          onChangeEnd: _player.isYouTube && _player.loaded ? apply : null,
+        ),
+      ],
+    ),
+  );
 
   Widget _browserPage(Widget media) {
     final session = _player.youtube;
     return Column(
       children: <Widget>[
-        if (_recovery?.pending?.media.youtube == true) _recoveryBanner(),
-        Row(
-          children: <Widget>[
-            IconButton(
-              key: const Key('youtubeClose'),
-              tooltip: 'Voltar ao player',
-              onPressed: () {
-                unawaited(_player.pause());
-                setState(() => _browsing = false);
-              },
-              icon: const Icon(Icons.close),
-            ),
-            const Expanded(
-              child: Text(
-                'YouTube · Transpono',
-                style: TextStyle(fontSize: 18),
+        if (_browserOpenedFromPlayer)
+          Row(
+            children: <Widget>[
+              IconButton(
+                key: const Key('youtubeClose'),
+                tooltip: 'Voltar ao player',
+                onPressed: () {
+                  unawaited(_player.pause());
+                  setState(() => _browsing = false);
+                },
+                icon: const Icon(Icons.close),
               ),
-            ),
-            IconButton(
-              tooltip: 'Página anterior',
-              onPressed: session?.canGoBack == true
-                  ? () => _browserAction(session!.goBack)
-                  : null,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            IconButton(
-              key: const Key('youtubeReload'),
-              tooltip: 'Atualizar',
-              onPressed: session == null
-                  ? _openYouTubeSearch
-                  : () => _browserAction(session.reload),
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: TextField(
-            key: const Key('youtubeSearchInput'),
-            controller: _query,
-            autofocus: true,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _search(),
-            decoration: InputDecoration(
-              hintText: 'Pesquisar música ou artista',
-              isDense: true,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
+              const Expanded(
+                child: Text(
+                  'YouTube · Transpono',
+                  style: TextStyle(fontSize: 18),
+                ),
               ),
-              suffixIcon: IconButton(
-                key: const Key('youtubeSearchSubmit'),
-                tooltip: 'Pesquisar',
-                onPressed: _search,
-                icon: const Icon(Icons.search),
+              IconButton(
+                tooltip: 'Página anterior',
+                onPressed: session?.canGoBack == true
+                    ? () => _browserAction(session!.goBack)
+                    : null,
+                icon: const Icon(Icons.arrow_back),
               ),
-            ),
+              IconButton(
+                key: const Key('youtubeReload'),
+                tooltip: 'Atualizar',
+                onPressed: session == null
+                    ? _openYouTubeSearch
+                    : () => _browserAction(session.reload),
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
           ),
-        ),
-        if (session != null && session.progress < 100)
-          LinearProgressIndicator(value: session.progress / 100),
         if (_player.message != null)
           Padding(
             padding: const EdgeInsets.all(8),
@@ -845,21 +933,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             child: media,
           ),
         ),
-        if (_player.isYouTube &&
-            _player.loaded &&
-            MediaQuery.viewInsetsOf(context).bottom == 0)
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                key: const Key('youtubeUseInPlayer'),
-                onPressed: _useVideo,
-                icon: const Icon(Icons.tune),
-                label: const Text('Usar este vídeo no player'),
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -873,226 +946,564 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Widget _mainPanel(Widget media) {
-    final controls = MainPlayerPanel(
-      model: _player,
-      sourceKey: _player.sourceKey,
-      chordStore: _chords,
-      chordActive: _chordActive,
-      onChordToggle: _toggleChord,
-      onChordSearch: _searchChord,
-      chordRevision: _chordRevision,
-      controlsExpanded: false,
-      onControlsToggle: _toggleMainAdjustments,
-      showControlsToggle: false,
-      showTip: false,
-      showSourceButtons: false,
-      showMessage: false,
-      media: media,
-      showMedia: false,
-      mediaExtraHeight: _player.isYouTube ? 48 : 0,
-      videoPinned: _videoPinned,
-      onPinToggle: () => setState(() => _videoPinned = !_videoPinned),
-      onFullscreen: _openFullscreen,
-      onSearch: _openYouTubeSearch,
-      onOpenFile: _pickFile,
-      onTool: _tool,
-    );
     return LayoutBuilder(
       builder: (_, box) {
-        final surface = MainPlayerFullscreen(
-          model: _player,
-          media: media,
-          mainMode: true,
-          showHeader: false,
-          controlsOpen: _chordActive
-              ? _mainSettingsOpen
-              : _mainControlsExpanded,
-          onExit: _openSidebar,
-          onTool: _tool,
-          videoPinned: _videoPinned,
-          onPinToggle: () => setState(() => _videoPinned = !_videoPinned),
-          onOpenFile: _pickFile,
-          onChordToggle: _toggleChord,
-          onSearch: _openYouTubeSearch,
-          chordActive: _chordActive,
-          youtubeNativeTransport: _player.isYouTube,
-          onNativeMediaTouch: _player.isYouTube
-              ? _player.noteNativeVideoTouch
-              : null,
-        );
-        final height = _player.isYouTube
-            ? box.maxHeight * (_chordActive ? .72 : 1.0)
-            : (box.maxWidth * 9 / 16).clamp(0.0, box.maxHeight * .72);
-        if (!_videoPinned) {
-          return NotificationListener<ScrollNotification>(
-            onNotification: _onMainPlayerScroll,
-            child: SingleChildScrollView(
-              key: const Key('visualScrollplayer'),
-              controller: _scroll,
-              child: Column(
-                children: [
-                  _playerPageHeader(),
-                  SizedBox(height: height, child: surface),
-                  if (_chordActive) controls,
-                ],
+        final open = _mainControlsExpanded;
+        final localVideo = _player.local.videoController;
+        final localVideoHeight =
+            localVideo != null &&
+                localVideo.value.isInitialized &&
+                localVideo.value.aspectRatio > 0
+            ? box.maxWidth / localVideo.value.aspectRatio
+            : box.maxWidth * 9 / 16;
+        final panelTop =
+            (_player.isYouTube
+                    ? box.maxWidth * 9 / 16 + 100
+                    : localVideo != null
+                    ? (box.maxHeight + localVideoHeight) / 2
+                    : box.maxWidth * 9 / 16 + 36)
+                .clamp(0.0, box.maxHeight * (_player.isYouTube ? .55 : .65)) +
+            16;
+        final chordPanel = _tab == StudioTab.chords || _tab == StudioTab.player;
+        final videoBottom = _player.isYouTube
+            ? (box.maxWidth * 9 / 16 + 48).clamp(0.0, panelTop)
+            : panelTop;
+        final chordTopGap = panelTop - videoBottom;
+        return Stack(
+          children: [
+            SizedBox(
+              key: const Key('visualMainMediaViewport'),
+              height: box.maxHeight,
+              width: double.infinity,
+              child: MainPlayerFullscreen(
+                model: _player,
+                media: media,
+                mainMode: true,
+                showHeader: false,
+                controlsOpen: false,
+                onExit: () {},
+                onTool: _tool,
+                youtubeNativeTransport: _player.isYouTube,
+                onNativeMediaTouch: _player.isYouTube
+                    ? _player.noteNativeVideoTouch
+                    : null,
               ),
             ),
-          );
-        }
-        return NotificationListener<ScrollNotification>(
-          onNotification: _onMainPlayerScroll,
-          child: CustomScrollView(
-            key: const Key('visualScrollplayer'),
-            controller: _scroll,
-            slivers: [
-              SliverToBoxAdapter(child: _playerPageHeader()),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _PlayerVideoHeader(
-                  height: height,
-                  child: SizedBox(
-                    key: const Key('pinnedPlayerMedia'),
-                    child: surface,
+            if (open)
+              Positioned(
+                top: chordPanel
+                    ? videoBottom
+                    : box.maxHeight < 450
+                    ? (panelTop - 48).clamp(0.0, panelTop)
+                    : panelTop,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Theme(
+                  data: studioColumnTheme(Theme.of(context)),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: chordPanel
+                            ? ClipRRect(
+                                key: const Key('unifiedChordOverlay'),
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(18),
+                                ),
+                                child: _sectionContent(
+                                  media,
+                                  topGap: chordTopGap,
+                                  viewportHeight: box.maxHeight - videoBottom,
+                                ),
+                              )
+                            : ColoredBox(
+                                color: studioBg,
+                                child: _sectionContent(media),
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              if (_chordActive) SliverToBoxAdapter(child: controls),
-            ],
-          ),
+          ],
         );
       },
     );
   }
 
-  Widget _playerPageHeader() => _recoveryBanner();
+  static const _visibleTabs = <(StudioTab, String)>[
+    (StudioTab.chords, 'Cifra'),
+    (StudioTab.practice, 'Treino'),
+    (StudioTab.setlist, 'Setlist'),
+    (StudioTab.audioSettings, 'Áudio'),
+  ];
 
-  Widget _header() => ColoredBox(
-    color: _tab == StudioTab.player ? const Color(0xDF040F1C) : studioBg,
-    child: SizedBox(
-      key: const Key('visualPlayerHeader'),
-      height: 57,
+  Widget _sectionTabs() {
+    final selected = _tab == StudioTab.player ? StudioTab.chords : _tab;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1B1D),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Row(
         children: [
-          IconButton(
-            key: const Key('visualPlayerMenu'),
-            tooltip: 'Menu lateral',
-            onPressed: _openSidebar,
-            icon: const Icon(Icons.menu),
-          ),
           Expanded(
-            child: Text(
-              switch (_tab) {
-                StudioTab.player =>
-                  _player.loaded && _player.title.isNotEmpty
-                      ? _player.title
-                      : 'Transpono',
-                StudioTab.practice => 'Prática',
-                StudioTab.chords => 'Acordes',
-                StudioTab.stage => 'Palco',
-              },
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: _tab == StudioTab.player ? 17 : 21,
-                fontWeight: _tab == StudioTab.player
-                    ? FontWeight.w500
-                    : FontWeight.w800,
+            child: SingleChildScrollView(
+              key: const Key('unifiedSectionStrip'),
+              controller: _tabsScroll,
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final (tab, label) in _visibleTabs)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: OutlinedButton(
+                        key: Key('unifiedSection${tab.name}'),
+                        onPressed: () => _select(tab),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: selected == tab
+                              ? const Color(0xFF161618)
+                              : const Color(0xFFC4C4C8),
+                          side: BorderSide.none,
+                          backgroundColor: selected == tab
+                              ? Colors.white
+                              : Colors.transparent,
+                          minimumSize: const Size(70, 34),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
           IconButton(
-            key: const Key('visualPlayerSearch'),
-            tooltip: 'Pesquisar no YouTube',
-            onPressed: _openYouTubeSearch,
-            icon: const Icon(Icons.search),
-          ),
-          IconButton(
-            key: const Key('visualPlayerMore'),
-            tooltip: 'Mais opções',
-            onPressed: _openMore,
-            icon: const Icon(Icons.more_vert),
+            key: const Key('visualMainAdjustments'),
+            tooltip: 'Fechar ajustes',
+            onPressed: _toggleMainAdjustments,
+            style: IconButton.styleFrom(
+              backgroundColor: const Color(0xFF2A2A2C),
+              foregroundColor: Colors.white,
+              minimumSize: const Size(34, 34),
+              padding: EdgeInsets.zero,
+            ),
+            icon: const Icon(Icons.keyboard_arrow_down, size: 23),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _practiceToolRow({
+    required Key key,
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool expanded = false,
+    Widget? trailing,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Material(
+      color: const Color(0xFF1B1B1D),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        key: key,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            children: [
+              Icon(icon, size: 15, color: Colors.white),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              trailing ??
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 20,
+                    color: studioMuted,
+                  ),
+            ],
+          ),
+        ),
       ),
     ),
   );
 
-  Widget _secondaryPanel(Widget media) {
-    final controls = switch (_tab) {
-      StudioTab.practice => SingleChildScrollView(
-        key: const Key('visualScrollpractice'),
-        child: PracticePanel(
-          model: _player,
-          practiceController: _practice,
-          onOpenPlayer: () => _select(StudioTab.player),
-          onSaveLoop: () => _save(),
-          onOpenLoops: () => _saved(),
-          onMetronome: () => _tool('metronome'),
-        ),
-      ),
-      StudioTab.chords => ChordsPanel(
-        model: _player,
-        sourceKey: _player.sourceKey,
-        store: _chords,
-        onOpenPlayer: () => _select(StudioTab.player),
-      ),
-      StudioTab.stage => StagePanel(
-        model: _player,
-        store: _presets,
-        sourceKey: _player.sourceKey,
-        revision: _collectionsRevision,
-        selectedPresetId: _selectedPresetId,
-        onApply: _applyPreset,
-        onCollections: () => _saved(setlist: true),
-        onAdd: () => _save(setlist: true),
-        onTool: _tool,
-      ),
-      StudioTab.player => const SizedBox.shrink(),
-    };
-    return _player.isYouTube || _player.local.videoController != null
-        ? _withPinnedMedia(media, controls)
-        : controls;
-  }
-
-  Widget _withPinnedMedia(Widget media, Widget controls) {
-    // A WebView scrolled fully offscreen can pause its media even while the
-    // Flutter route remains visible. Keep YouTube visible instead of defeating
-    // the browser's visibility policy or secretly forcing playback to resume.
-    return LayoutBuilder(
-      builder: (_, box) {
-        final surface = Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: media,
-          ),
-        );
-        if (box.maxWidth >= 600 && box.maxWidth > box.maxHeight) {
-          return Row(
-            children: <Widget>[
-              // The mobile watch page reserves horizontal space in landscape.
-              // A half-width viewport can reduce its actual video to a tiny
-              // thumbnail; give the visible browser room without altering its DOM.
-              Expanded(flex: 2, child: surface),
-              Expanded(child: controls),
-            ],
-          );
-        }
-        final height = ((box.maxWidth - 32) * 9 / 16 + 48).clamp(
-          0.0,
-          box.maxHeight * .52,
-        );
-        return Column(
-          children: <Widget>[
-            SizedBox(
-              key: const Key('pinnedYouTubeMedia'),
-              height: height,
-              child: surface,
+  Widget _sectionContent(
+    Widget media, {
+    double topGap = 0,
+    double viewportHeight = 0,
+  }) {
+    if (_chordSearching) {
+      return ColoredBox(
+        color: studioBg,
+        child: Column(
+          children: [
+            _sectionTabs(),
+            Expanded(
+              child: ChordSearchPanel(
+                key: const Key('unifiedChordSearch'),
+                initialQuery: _player.loaded ? _player.title : '',
+                sessionFactory: widget.chordBrowserFactory,
+                onCancel: () => setState(() => _chordSearching = false),
+                onSelected: _acceptChord,
+              ),
             ),
-            Expanded(child: controls),
           ],
-        );
-      },
+        ),
+      );
+    }
+    if (_tab == StudioTab.setlist) {
+      return Column(
+        children: [
+          _sectionTabs(),
+          Expanded(
+            child: PlayerCollectionsPage(
+              key: const Key('unifiedSetlist'),
+              store: _presets,
+              setlist: true,
+              embedded: true,
+              onAdd: () => _save(setlist: true),
+              onPrevious: () => _moveSetlist(-1),
+              onNext: () => _moveSetlist(1),
+              onApply: (preset) async {
+                final restored = await _applyPreset(
+                  preset,
+                  returnToPlayer: true,
+                );
+                if (!restored) {
+                  throw StateError(
+                    _player.message ?? 'Não foi possível preparar esta música.',
+                  );
+                }
+              },
+            ),
+          ),
+        ],
+      );
+    }
+    if (_tab == StudioTab.audioSettings) {
+      return Column(
+        children: [
+          _sectionTabs(),
+          Expanded(
+            child: SingleChildScrollView(
+              key: const Key('unifiedAudioSettingsScroll'),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 88),
+              child: _audioSettingsContent(),
+            ),
+          ),
+        ],
+      );
+    }
+    if (_tab == StudioTab.practice) {
+      return SingleChildScrollView(
+        key: const Key('unifiedPracticeScroll'),
+        padding: const EdgeInsets.only(bottom: 88),
+        child: Column(
+          children: [
+            _sectionTabs(),
+            UnifiedPlayerAdjustments(
+              model: _player,
+              youtubeNativeTransport: _player.isYouTube,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Column(
+                children: [
+                  _practiceToolRow(
+                    key: const Key('practiceSavedLoops'),
+                    icon: Icons.bookmarks_outlined,
+                    title: 'Trechos guardados',
+                    onTap: _saved,
+                    trailing: IconButton(
+                      key: const Key('visualPracticeSaveLoop'),
+                      tooltip: 'Guardar trecho atual',
+                      onPressed:
+                          _player.loaded &&
+                              _player.markerA != null &&
+                              _player.markerB != null
+                          ? () => _save()
+                          : null,
+                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                    ),
+                  ),
+                  _practiceToolRow(
+                    key: const Key('practiceMetronome'),
+                    icon: Icons.timer_outlined,
+                    title: 'Metrônomo inteligente',
+                    onTap: () => setState(
+                      () => _practiceTool = _practiceTool == 'metronome'
+                          ? null
+                          : 'metronome',
+                    ),
+                    expanded: _practiceTool == 'metronome',
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: _practiceTool == 'metronome'
+                        ? Padding(
+                            key: const Key('practiceMetronomeContent'),
+                            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
+                            child: embeddedStudyTool('metronome'),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  _practiceToolRow(
+                    key: const Key('practiceProgression'),
+                    icon: Icons.trending_up,
+                    title: 'Progressão de velocidade',
+                    onTap: () => setState(
+                      () => _practiceTool = _practiceTool == 'progression'
+                          ? null
+                          : 'progression',
+                    ),
+                    expanded: _practiceTool == 'progression',
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: _practiceTool == 'progression'
+                        ? Padding(
+                            key: const Key('practiceProgressionContent'),
+                            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
+                            child: PracticeProgressionCard(
+                              controller: _practice,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final controls = Column(
+      children: [
+        _sectionTabs(),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('unifiedChooseChord'),
+                  onPressed: _chordActive ? _searchChord : _toggleChord,
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2A2A2C),
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFF444447)),
+                    minimumSize: const Size.fromHeight(42),
+                  ),
+                  icon: Icon(
+                    _chordActive
+                        ? Icons.swap_horiz
+                        : Icons.library_music_outlined,
+                  ),
+                  label: Text(_chordActive ? 'Trocar cifra' : 'Escolher cifra'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        UnifiedPlayerAdjustments(
+          model: _player,
+          youtubeNativeTransport: _player.isYouTube,
+          showPracticeControls: false,
+        ),
+      ],
+    );
+    final autoScrollControls = _chordActive
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: studioCard,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: studioMuted.withValues(alpha: .25)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.auto_mode, size: 17),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Rolagem automática da cifra',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('chordAutoScrollSlower'),
+                      tooltip: 'Rolar cifra mais devagar',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _chordScrollSpeed > .5
+                          ? () => setState(
+                              () => _chordScrollSpeed =
+                                  (_chordScrollSpeed - .25).clamp(.5, 2),
+                            )
+                          : null,
+                      icon: const Icon(Icons.remove, size: 18),
+                    ),
+                    Text(
+                      '${_chordScrollSpeed.toStringAsFixed(2)}×',
+                      key: const Key('chordAutoScrollSpeed'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    IconButton(
+                      key: const Key('chordAutoScrollFaster'),
+                      tooltip: 'Rolar cifra mais depressa',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _chordScrollSpeed < 2
+                          ? () => setState(
+                              () => _chordScrollSpeed =
+                                  (_chordScrollSpeed + .25).clamp(.5, 2),
+                            )
+                          : null,
+                      icon: const Icon(Icons.add, size: 18),
+                    ),
+                    IconButton.filledTonal(
+                      key: const Key('chordAutoScrollToggle'),
+                      tooltip: _chordAutoScroll
+                          ? 'Pausar rolagem da cifra'
+                          : 'Iniciar rolagem da cifra',
+                      onPressed: _toggleChordAutoScroll,
+                      icon: Icon(
+                        _chordAutoScroll ? Icons.pause : Icons.play_arrow,
+                        size: 19,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        : const SizedBox.shrink();
+    if (_chordActive) {
+      return NestedScrollView(
+        key: const Key('unifiedChordScroll'),
+        controller: _scroll,
+        headerSliverBuilder: (context, innerScrolled) => [
+          SliverToBoxAdapter(
+            child: Column(
+              children: [
+                if (topGap > 0) SizedBox(height: topGap),
+                DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: studioBg,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(18),
+                    ),
+                  ),
+                  child: controls,
+                ),
+              ],
+            ),
+          ),
+        ],
+        body: Builder(
+          builder: (innerContext) {
+            _chordTextScroll = PrimaryScrollController.of(innerContext);
+            return ColoredBox(
+              key: const Key('unifiedChordBackdrop'),
+              color: studioBg,
+              child: Padding(
+                key: const Key('unifiedChordFrame'),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF101012),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: studioCyan.withValues(alpha: .2)),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      autoScrollControls,
+                      Expanded(
+                        child: NotificationListener<ScrollStartNotification>(
+                          onNotification: (notification) {
+                            if (notification.dragDetails != null &&
+                                _chordAutoScroll) {
+                              setState(_stopChordAutoScroll);
+                            }
+                            return false;
+                          },
+                          child: SingleChildScrollView(
+                            key: const Key('unifiedChordTextScroll'),
+                            primary: true,
+                            child: PlayerChordSheet(
+                              key: _unifiedChordKey,
+                              model: _player,
+                              sourceKey: _player.sourceKey,
+                              store: _chords,
+                              onSearch: _searchChord,
+                              onHide: _toggleChord,
+                              revision: _chordRevision,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      key: const Key('unifiedChordScroll'),
+      controller: _scroll,
+      child: Column(
+        children: [
+          if (topGap > 0) SizedBox(height: topGap),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: (viewportHeight - topGap).clamp(0, double.infinity),
+            ),
+            child: DecoratedBox(
+              key: const Key('unifiedChordControlsBackdrop'),
+              decoration: const BoxDecoration(
+                color: studioBg,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+              ),
+              child: controls,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1100,191 +1511,40 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Widget build(BuildContext context) {
     final media = _mediaSurface();
     return PopScope(
-      canPop: !_fullscreen && !_browsing,
+      canPop: !_browsing,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (_fullscreen) {
-          _exitFullscreen();
-        } else {
-          unawaited(_player.pause());
-          setState(() => _browsing = false);
-        }
+        unawaited(_player.pause());
+        setState(() => _browsing = false);
       },
       child: Scaffold(
-        body: SafeArea(
-          child: _fullscreen
-              ? MainPlayerFullscreen(
-                  model: _player,
-                  media: media,
-                  onExit: _exitFullscreen,
-                  onTool: _tool,
-                  youtubeNativeTransport: _player.isYouTube,
-                  onNativeMediaTouch: _player.isYouTube
-                      ? _player.noteNativeVideoTouch
-                      : null,
-                )
-              : _browsing
-              ? _browserPage(media)
-              : Stack(
+        body: _browsing
+            ? SafeArea(child: _browserPage(media))
+            : SafeArea(
+                bottom: false,
+                child: Stack(
                   children: <Widget>[
                     Column(
-                      children: <Widget>[
-                        if (_tab != StudioTab.player) _header(),
-                        if (_tab != StudioTab.player) _recoveryBanner(),
-                        Expanded(
-                          child: _tab == StudioTab.player
-                              ? _mainPanel(media)
-                              : _secondaryPanel(media),
-                        ),
-                      ],
+                      children: <Widget>[Expanded(child: _mainPanel(media))],
                     ),
-                    if (_tab == StudioTab.player)
+                    if (!_mainControlsExpanded)
                       Positioned(
-                        bottom: 8,
+                        bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
                         left: 0,
                         right: 0,
                         child: Center(
                           child: _MainAdjustmentsBar(
-                            expanded: _chordActive
-                                ? _mainSettingsOpen
-                                : _mainControlsExpanded,
+                            expanded: false,
                             onPressed: _toggleMainAdjustments,
                           ),
                         ),
                       ),
                   ],
                 ),
-        ),
+              ),
       ),
     );
   }
-
-  Widget _recoveryBanner() {
-    final recovery = _recovery;
-    if (recovery == null) return const SizedBox.shrink();
-    final waiting = recovery.initializing || recovery.restoring;
-    if (!waiting && recovery.pending?.media.youtube == true) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          key: const Key('recoveryRestore'),
-          onPressed: () async {
-            await recovery.restorePending();
-            if (mounted && recovery.pending?.media.youtube == true) {
-              final error = recovery.message;
-              if (error != null && error.isNotEmpty) _notice(error);
-            }
-          },
-          icon: const Icon(Icons.restore),
-          label: const Text('Restaurar vídeo'),
-        ),
-      );
-    }
-    final message = recovery.message;
-    if (message == null) return const SizedBox.shrink();
-    if (recovery.pending == null && message.startsWith('Sessão recuperada')) {
-      return const SizedBox.shrink();
-    }
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * .28,
-      ),
-      child: SingleChildScrollView(
-        child: Material(
-          color: studioCardAlt,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        message,
-                        key: const Key('recoveryStatus'),
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                    if (recovery.canDismiss)
-                      IconButton(
-                        key: const Key('recoveryDismiss'),
-                        tooltip: waiting
-                            ? 'Cancelar recuperação'
-                            : 'Fechar aviso',
-                        onPressed: recovery.dismissNotice,
-                        icon: const Icon(Icons.close, size: 20),
-                      ),
-                  ],
-                ),
-                if (waiting) const LinearProgressIndicator(minHeight: 2),
-                if (!waiting &&
-                    (recovery.pending != null ||
-                        (recovery.saveFailed && !recovery.writeBlocked)))
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      if (recovery.pending != null)
-                        TextButton.icon(
-                          key: const Key('recoveryRestore'),
-                          onPressed: recovery.restorePending,
-                          icon: const Icon(Icons.restore),
-                          label: Text(
-                            recovery.pending!.media.youtube
-                                ? 'Restaurar vídeo'
-                                : 'Tentar novamente',
-                          ),
-                        ),
-                      if (recovery.pending != null &&
-                          !recovery.pending!.media.youtube)
-                        TextButton(
-                          key: const Key('recoveryOpenFile'),
-                          onPressed: _pickFile,
-                          child: const Text('Escolher ficheiro'),
-                        ),
-                      if (recovery.canUseCurrent)
-                        TextButton(
-                          key: const Key('recoveryUseCurrent'),
-                          onPressed: recovery.useCurrentSession,
-                          child: const Text('Usar sessão atual'),
-                        ),
-                      if (recovery.saveFailed && !recovery.writeBlocked)
-                        TextButton(
-                          key: const Key('recoveryRetrySave'),
-                          onPressed: recovery.retrySave,
-                          child: const Text('Tentar guardar'),
-                        ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PlayerVideoHeader extends SliverPersistentHeaderDelegate {
-  _PlayerVideoHeader({required this.height, required this.child});
-
-  final double height;
-  final Widget child;
-
-  @override
-  double get minExtent => height;
-  @override
-  double get maxExtent => height;
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) => ColoredBox(color: studioBg, child: child);
-  @override
-  bool shouldRebuild(_PlayerVideoHeader oldDelegate) =>
-      height != oldDelegate.height || child != oldDelegate.child;
 }
 
 class _PresetNameDialog extends StatefulWidget {

@@ -291,7 +291,12 @@ class MainPlayerController extends PlayerPanelModel {
   });
   @override
   Future<void> changeSpeed(double value) => _run(() async {
-    if (!value.isFinite || value < 0.5 || value > 1.5 || !canSpeed) return;
+    if (!value.isFinite ||
+        value < (_online ? .25 : .5) ||
+        value > 2 ||
+        !canSpeed) {
+      return;
+    }
     if (_online) {
       await _youtube!.command('speed', value);
     } else {

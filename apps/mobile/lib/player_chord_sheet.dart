@@ -130,6 +130,9 @@ class PlayerChordSheet extends StatefulWidget {
     required this.sourceKey,
     required this.store,
     this.onSearch,
+    this.onHide,
+    this.onPullDown,
+    this.lyricsOnly = false,
     this.revision = 0,
   });
 
@@ -137,6 +140,9 @@ class PlayerChordSheet extends StatefulWidget {
   final String sourceKey;
   final ChordSheetStore store;
   final VoidCallback? onSearch;
+  final VoidCallback? onHide;
+  final VoidCallback? onPullDown;
+  final bool lyricsOnly;
   final int revision;
 
   @override
@@ -144,6 +150,7 @@ class PlayerChordSheet extends StatefulWidget {
 }
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
+  final ScrollController _horizontalScroll = ScrollController();
   ChordSheet _sheet = const ChordSheet();
   bool _visible = true,
       _showExample = false,
@@ -152,8 +159,45 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   String? _error;
   int _revision = 0;
   bool _savingTone = false;
-  int get _displayPitch =>
-      _sheet.transpose + (_sheet.followAudio ? widget.model.pitch.round() : 0);
+  String? _measuredText;
+  double? _measuredWidth;
+  TextScaler? _measuredScaler;
+  double _fittedFontSize = 15;
+  bool _needsHorizontalScroll = false;
+
+  int get _displayPitch => _sheet.transpose;
+
+  double _fontSizeFor(String text, double width, TextScaler scaler) {
+    if (_measuredText == text &&
+        _measuredWidth == width &&
+        _measuredScaler == scaler) {
+      return _fittedFontSize;
+    }
+    final painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+      maxLines: 1,
+    );
+    var widest = 0.0;
+    for (final line in text.split('\n')) {
+      painter.text = TextSpan(
+        text: line.isEmpty ? ' ' : line,
+        style: const TextStyle(fontFamily: 'monospace', fontSize: 15),
+      );
+      painter.layout();
+      if (painter.width > widest) widest = painter.width;
+    }
+    painter.dispose();
+    final available = width.isFinite ? width.clamp(1.0, double.infinity) : 1.0;
+    _fittedFontSize = widest > available
+        ? (15 * available / widest).clamp(11.0, 15.0)
+        : 15.0;
+    _needsHorizontalScroll = widest * _fittedFontSize / 15 > available + 1;
+    _measuredText = text;
+    _measuredWidth = width;
+    _measuredScaler = scaler;
+    return _fittedFontSize;
+  }
 
   Future<void> _saveTone(int transpose, bool followAudio) async {
     if (_loading || _savingTone) return;
@@ -193,26 +237,19 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   }
 
   Future<void> _changeTone(int delta) async {
-    if (!_sheet.followAudio) {
-      await _saveTone((_sheet.transpose + delta).clamp(-24, 24), false);
-      return;
-    }
-    try {
-      // Never move the chord display before the audio model acknowledges pitch.
-      await widget.model.changePitch(
-        (widget.model.pitch + delta).clamp(-12, 12),
-      );
-    } on Object {
-      if (mounted) {
-        setState(() => _error = 'O áudio não confirmou a mudança de tom.');
-      }
-    }
+    await _saveTone((_sheet.transpose + delta).clamp(-24, 24), false);
   }
 
   @override
   void initState() {
     super.initState();
     _read();
+  }
+
+  @override
+  void dispose() {
+    _horizontalScroll.dispose();
+    super.dispose();
   }
 
   @override
@@ -226,6 +263,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   }
 
   Future<void> _read() async {
+    if (_horizontalScroll.hasClients) _horizontalScroll.jumpTo(0);
     final revision = ++_revision;
     _sheet = const ChordSheet();
     _visible = true;
@@ -314,19 +352,78 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
       builder: (context, _) {
         final pitch = _displayPitch;
         final ready = !_loading && !_savingTone;
-        final canChange =
-            ready &&
-            (!_sheet.followAudio ||
-                (widget.model.loaded &&
-                    !widget.model.busy &&
-                    widget.model.canPitch));
+        final canChange = ready;
         final original = _showExample ? _example : _sheet.notes;
         final text = transposePlayerChordText(original, pitch);
+        if (widget.lyricsOnly) {
+          return Container(
+            key: const Key('playerChordSheet'),
+            decoration: BoxDecoration(
+              color: const Color(0xFF151518),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: studioCyan.withValues(alpha: .2)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: NotificationListener<OverscrollNotification>(
+              onNotification: (notification) {
+                if (notification.metrics.axis == Axis.vertical &&
+                    notification.overscroll < -4) {
+                  widget.onPullDown?.call();
+                }
+                return false;
+              },
+              child: SingleChildScrollView(
+                key: const Key('pinnedChordTextScroll'),
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(14),
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final fontSize = _fontSizeFor(
+                      text,
+                      box.maxWidth,
+                      MediaQuery.textScalerOf(context),
+                    );
+                    return Scrollbar(
+                      controller: _horizontalScroll,
+                      thumbVisibility: _needsHorizontalScroll,
+                      child: SingleChildScrollView(
+                        controller: _horizontalScroll,
+                        scrollDirection: Axis.horizontal,
+                        child: SelectableText.rich(
+                          key: const Key('playerChordText'),
+                          TextSpan(
+                            children: [
+                              for (final (i, line) in text.split('\n').indexed)
+                                TextSpan(
+                                  text: '${i == 0 ? '' : '\n'}$line',
+                                  style: _isChordLine(line)
+                                      ? const TextStyle(
+                                          color: studioCyan,
+                                          fontWeight: FontWeight.w700,
+                                        )
+                                      : null,
+                                ),
+                            ],
+                          ),
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: fontSize,
+                            height: 1.8,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+        }
         return Container(
           key: const Key('playerChordSheet'),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF0B111E),
+            color: const Color(0xFF151518),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: studioCyan.withValues(alpha: .2)),
           ),
@@ -342,18 +439,33 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      _showExample
-                          ? 'Cifra de exemplo'
-                          : _sheet.sourceTitle.isNotEmpty
-                          ? _sheet.sourceTitle
-                          : 'Minha cifra',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _showExample
+                              ? 'Cifra de exemplo'
+                              : _sheet.sourceTitle.isNotEmpty
+                              ? _sheet.sourceTitle
+                              : 'Minha cifra',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (_sheet.sourceUrl.isNotEmpty)
+                          SelectableText(
+                            'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
+                            key: const Key('playerChordSource'),
+                            maxLines: 1,
+                            style: const TextStyle(
+                              color: studioMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   IconButton(
@@ -375,6 +487,14 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       size: 20,
                     ),
                   ),
+                  if (widget.onHide != null)
+                    IconButton(
+                      key: const Key('playerChordHide'),
+                      tooltip: 'Esconder cifra',
+                      onPressed: widget.onHide,
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.visibility_off_outlined, size: 20),
+                    ),
                 ],
               ),
               if (_showExample || widget.sourceKey.isEmpty)
@@ -386,25 +506,15 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       : widget.model.title,
                   style: const TextStyle(color: studioMuted, fontSize: 12),
                 ),
-              if (_sheet.sourceUrl.isNotEmpty)
-                SelectableText(
-                  'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
-                  key: const Key('playerChordSource'),
-                  style: const TextStyle(color: studioMuted, fontSize: 11),
-                ),
               Wrap(
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 6,
                 children: [
-                  const Text('Tom'),
+                  const Text('Tom da cifra'),
                   IconButton(
                     key: const Key('playerChordPitchDown'),
                     tooltip: 'Diminuir tonalidade da cifra',
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch > -12
-                                : _sheet.transpose > -24)
+                    onPressed: canChange && _sheet.transpose > -24
                         ? () => _changeTone(-1)
                         : null,
                     icon: const Icon(Icons.remove),
@@ -422,40 +532,17 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchUp'),
                     tooltip: 'Aumentar tonalidade da cifra',
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch < 12
-                                : _sheet.transpose < 24)
+                    onPressed: canChange && _sheet.transpose < 24
                         ? () => _changeTone(1)
                         : null,
                     icon: const Icon(Icons.add),
                   ),
-                  Tooltip(
-                    message: 'Acompanhar áudio: mudar cifra e som juntos',
-                    child: Switch(
-                      key: const Key('playerChordFollowAudio'),
-                      value: _sheet.followAudio,
-                      onChanged: ready
-                          ? (follow) => _saveTone(
-                              _displayPitch -
-                                  (follow ? widget.model.pitch.round() : 0),
-                              follow,
-                            )
-                          : null,
-                    ),
-                  ),
                 ],
               ),
-              Text(
-                _sheet.followAudio ? 'Tom ligado ao áudio' : 'Tom só da cifra',
-                style: const TextStyle(color: studioMuted, fontSize: 11),
+              const Text(
+                'Acordes · independente do áudio',
+                style: TextStyle(color: studioMuted, fontSize: 11),
               ),
-              if (_sheet.followAudio && !widget.model.canPitch)
-                const Text(
-                  'Tom de áudio indisponível. Desligue Acompanhar áudio para transpor só a cifra.',
-                  style: TextStyle(color: studioMuted, fontSize: 12),
-                ),
               const SizedBox(height: 8),
               if (_loading) const LinearProgressIndicator(),
               if (_error != null) ...[
@@ -471,33 +558,39 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF070D18),
+                  color: const Color(0xFF0D0D0F),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SelectableText.rich(
-                    key: const Key('playerChordText'),
-                    TextSpan(
-                      children: [
-                        for (final (i, line) in text.split('\n').indexed)
-                          TextSpan(
-                            text: '${i == 0 ? '' : '\n'}$line',
-                            style: _isChordLine(line)
-                                ? const TextStyle(
-                                    color: studioCyan,
-                                    fontWeight: FontWeight.w700,
-                                  )
-                                : null,
-                          ),
-                      ],
-                    ),
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 15,
-                      height: 1.8,
-                    ),
-                  ),
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final fontSize = _fontSizeFor(
+                      text,
+                      box.maxWidth,
+                      MediaQuery.textScalerOf(context),
+                    );
+                    return SelectableText.rich(
+                      key: const Key('playerChordText'),
+                      TextSpan(
+                        children: [
+                          for (final (i, line) in text.split('\n').indexed)
+                            TextSpan(
+                              text: '${i == 0 ? '' : '\n'}$line',
+                              style: _isChordLine(line)
+                                  ? const TextStyle(
+                                      color: studioCyan,
+                                      fontWeight: FontWeight.w700,
+                                    )
+                                  : null,
+                            ),
+                        ],
+                      ),
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: fontSize,
+                        height: 1.8,
+                      ),
+                    );
+                  },
                 ),
               ),
             ],

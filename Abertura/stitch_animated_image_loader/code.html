@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Transpono - Estúdio Harmônico &amp; Cifras</title>
+<!-- Tailwind CSS CDN com plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Inter / Outfit / Montserrat para acabamento tipográfico refinado -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;700;800&amp;family=Plus+Jakarta+Sans:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            brand: ['"Plus Jakarta Sans"', 'Montserrat', 'sans-serif'],
+            sub: ['Montserrat', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+<!-- BEGIN: CSS Stylesheets -->
+<style data-purpose="base-layout">
+    /* Reset e bloqueio de scroll para sensação nativa de app splash screen */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000000;
+    }
+  </style>
+<style data-purpose="metallic-and-lighting">
+    /* Efeito de iluminação radial suave central */
+    .radial-glow {
+      background: radial-gradient(circle 320px at 50% 42%, rgba(255, 255, 255, 0.08) 0%, rgba(200, 215, 235, 0.03) 40%, rgba(0, 0, 0, 0) 100%);
+    }
+
+    /* Textura cromada ultra-realista em degradê metálico escovado e chanfrado */
+    .chrome-bar {
+      background: linear-gradient(
+        135deg,
+        #7a828e 0%,
+        #e2e8f0 18%,
+        #ffffff 32%,
+        #94a3b8 48%,
+        #f8fafc 68%,
+        #64748b 85%,
+        #cbd5e1 100%
+      );
+      box-shadow: 
+        inset 1px 1px 2px rgba(255, 255, 255, 0.9),
+        inset -1px -1px 3px rgba(0, 0, 0, 0.8),
+        0 8px 24px rgba(0, 0, 0, 0.9),
+        0 0 16px rgba(255, 255, 255, 0.15);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Brilho reflexivo animado correndo diagonalmente pelas barras metálicas */
+    .chrome-bar::after {
+      content: '';
+      position: absolute;
+      top: -150%;
+      left: -150%;
+      width: 400%;
+      height: 400%;
+      background: linear-gradient(
+        60deg,
+        rgba(255, 255, 255, 0) 25%,
+        rgba(255, 255, 255, 0.45) 50%,
+        rgba(255, 255, 255, 0) 75%
+      );
+      animation: chromeShine 4.2s infinite ease-in-out;
+      pointer-events: none;
+    }
+
+    @keyframes chromeShine {
+      0% {
+        transform: translate(-100%, -100%) rotate(25deg);
+      }
+      35%, 100% {
+        transform: translate(100%, 100%) rotate(25deg);
+      }
+    }
+
+    /* Tipografia cromada e relevada */
+    .chrome-text {
+      background: linear-gradient(
+        180deg,
+        #ffffff 0%,
+        #f1f5f9 35%,
+        #cbd5e1 55%,
+        #94a3b8 90%,
+        #64748b 100%
+      );
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 4px 14px rgba(255, 255, 255, 0.18)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.9));
+    }
+  </style>
+<style data-purpose="animations">
+    /* Respiração e equalização orgânica das barras sonoras */
+    @keyframes equalizerPulse1 {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(1.08); filter: brightness(1.15); }
+    }
+    @keyframes equalizerPulse2 {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(1.14); filter: brightness(1.25); }
+    }
+    @keyframes equalizerPulse3 {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(1.09); filter: brightness(1.3); }
+    }
+
+    .bar-anim-1 { animation: equalizerPulse1 2.8s infinite ease-in-out; }
+    .bar-anim-2 { animation: equalizerPulse2 2.4s infinite ease-in-out 0.2s; }
+    .bar-anim-3 { animation: equalizerPulse3 3.1s infinite ease-in-out 0.4s; }
+    .bar-anim-4 { animation: equalizerPulse2 2.6s infinite ease-in-out 0.15s; }
+    .bar-anim-5 { animation: equalizerPulse1 2.9s infinite ease-in-out 0.35s; }
+
+    /* Barra de Progresso Carregamento Contínuo */
+    @keyframes progressLoop {
+      0% {
+        width: 0%;
+        opacity: 0.8;
+      }
+      50% {
+        width: 72%;
+        opacity: 1;
+      }
+      85% {
+        width: 100%;
+        opacity: 1;
+      }
+      100% {
+        width: 100%;
+        opacity: 0.15;
+      }
+    }
+
+    .loading-progress-fill {
+      animation: progressLoop 3.6s infinite cubic-bezier(0.4, 0.0, 0.2, 1);
+    }
+
+    /* Flare brilhante incandescente na cabeça da barra de progresso */
+    .head-flare {
+      box-shadow: 
+        0 0 10px 3px rgba(255, 255, 255, 0.95),
+        0 0 20px 6px rgba(220, 235, 255, 0.7),
+        0 0 35px 10px rgba(180, 210, 255, 0.4);
+    }
+  </style>
+<!-- END: CSS Stylesheets -->
+</head>
+<body class="bg-black text-white flex flex-col items-center justify-between min-h-screen relative overflow-hidden select-none font-brand">
+<!-- BEGIN: CanvasBackgroundParticles -->
+<!-- Canvas de partículas sutis atmosféricas ao fundo -->
+<canvas class="absolute inset-0 pointer-events-none z-0 opacity-40" data-purpose="background-canvas" id="ambient-particles"></canvas>
+<!-- END: CanvasBackgroundParticles -->
+<!-- BEGIN: AmbientLightingGlow -->
+<!-- Camada de iluminação radial suave central -->
+<div class="absolute inset-0 radial-glow pointer-events-none z-0" data-purpose="glow-overlay"></div>
+<!-- END: AmbientLightingGlow -->
+<!-- BEGIN: MainContent -->
+<main class="relative z-10 w-full flex-1 flex flex-col items-center justify-center px-6">
+<!-- BEGIN: BrandLogoContainer -->
+<div class="flex flex-col items-center justify-center transform -translate-y-4" data-purpose="transpono-identity">
+<!-- Símbolo: Ondas Sonoras / Equalizador Cromado Metálico de 5 barras -->
+<div class="flex items-center justify-center gap-[14px] mb-8" data-purpose="equalizer-waveform">
+<!-- Barra 1 (Extrema Esquerda - Mais Baixa) -->
+<div aria-hidden="true" class="chrome-bar bar-anim-1 transform origin-center transition-all duration-300" style="width: 25px; height: 78px; border-radius: 9999px;">
+</div>
+<!-- Barra 2 (Média Esquerda) -->
+<div aria-hidden="true" class="chrome-bar bar-anim-2 transform origin-center transition-all duration-300" style="width: 28px; height: 154px; border-radius: 9999px;">
+</div>
+<!-- Barra 3 (Centro - Mais Alta) -->
+<div aria-hidden="true" class="chrome-bar bar-anim-3 transform origin-center transition-all duration-300" style="width: 32px; height: 228px; border-radius: 9999px;">
+</div>
+<!-- Barra 4 (Média Direita) -->
+<div aria-hidden="true" class="chrome-bar bar-anim-4 transform origin-center transition-all duration-300" style="width: 28px; height: 140px; border-radius: 9999px;">
+</div>
+<!-- Barra 5 (Extrema Direita - Baixa) -->
+<div aria-hidden="true" class="chrome-bar bar-anim-5 transform origin-center transition-all duration-300" style="width: 25px; height: 68px; border-radius: 9999px;">
+</div>
+</div>
+<!-- Logotipo Tipográfico "Transpono." -->
+<h1 class="text-[44px] tracking-tight font-extrabold chrome-text leading-tight mb-2 text-center" data-purpose="brand-title">
+        Transpono<span class="text-slate-300">.</span>
+</h1>
+<!-- Subtítulo "ESTÚDIO HARMÔNICO & CIFRAS" -->
+<p class="font-sub text-[10px] md:text-[11px] font-normal tracking-[0.38em] text-neutral-300 uppercase opacity-85 text-center pl-1" data-purpose="brand-tagline">
+        ESTÚDIO HARMÔNICO &amp; CIFRAS
+      </p>
+</div>
+<!-- END: BrandLogoContainer -->
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: LoadingProgressSection -->
+<!-- Barra de Carregamento Inferior Fina e Minimalista com Luz Guia Flare -->
+<section class="relative z-10 w-full max-w-[340px] px-8 pb-20 flex flex-col items-center" data-purpose="loading-indicator">
+<!-- Trilho de progresso escuro e estilizado -->
+<div class="w-full h-[3px] bg-neutral-900 rounded-full overflow-visible relative border border-white/10 shadow-inner">
+<!-- Preenchimento de progresso animado metálico -->
+<div aria-label="Carregando aplicativo" aria-valuemax="100" aria-valuemin="0" aria-valuenow="65" class="loading-progress-fill absolute top-0 left-0 bottom-0 bg-gradient-to-r from-neutral-500 via-neutral-200 to-white rounded-full flex items-center justify-end" id="loading-bar-fill" role="progressbar">
+<!-- Ponto incandescente / Flare de luz brilhante na ponta do progresso -->
+<div class="head-flare w-[7px] h-[7px] -mr-[3px] bg-white rounded-full flex-shrink-0 animate-pulse"></div>
+</div>
+</div>
+<!-- Indicador de status textual sutil opcional para feedback interativo -->
+<span class="mt-4 text-[9px] uppercase tracking-[0.25em] text-neutral-600 font-sub font-medium opacity-60" data-purpose="loading-substatus">
+      Sincronizando timbres...
+    </span>
+</section>
+<!-- END: LoadingProgressSection -->
+<!-- BEGIN: JavaScriptFunctionality -->
+<script data-purpose="ambient-canvas-animation">
+    // Animação discreta de partículas estelares/luminosas flutuantes
+    (function initBackgroundCanvas() {
+      const canvas = document.getElementById('ambient-particles');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      
+      let width = (canvas.width = window.innerWidth);
+      let height = (canvas.height = window.innerHeight);
+
+      window.addEventListener('resize', () => {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+      });
+
+      const particleCount = 28;
+      const particles = [];
+
+      for (let i = 0; i < particleCount; i++) {
+        particles.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          radius: Math.random() * 1.2 + 0.3,
+          alpha: Math.random() * 0.4 + 0.1,
+          speedY: -(Math.random() * 0.25 + 0.08),
+          speedX: (Math.random() - 0.5) * 0.15
+        });
+      }
+
+      function render() {
+        ctx.clearRect(0, 0, width, height);
+
+        for (let i = 0; i < particleCount; i++) {
+          const p = particles[i];
+          p.y += p.speedY;
+          p.x += p.speedX;
+
+          if (p.y < 0) {
+            p.y = height + 10;
+            p.x = Math.random() * width;
+          }
+          if (p.x < 0) p.x = width;
+          if (p.x > width) p.x = 0;
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`;
+          ctx.fill();
+        }
+
+        requestAnimationFrame(render);
+      }
+
+      requestAnimationFrame(render);
+    })();
+  </script>
+<script data-purpose="interactive-audio-simulation">
+    // Toque na tela para acentuar sutilmente a vibração das barras sonoras
+    document.addEventListener('DOMContentLoaded', () => {
+      const bars = document.querySelectorAll('.chrome-bar');
+      
+      window.addEventListener('pointerdown', () => {
+        bars.forEach((bar, index) => {
+          bar.style.filter = 'brightness(1.5) drop-shadow(0 0 12px rgba(255,255,255,0.6))';
+          bar.style.transform = `scaleY(${1.15 + (index % 2) * 0.1})`;
+        });
+      });
+
+      window.addEventListener('pointerup', () => {
+        setTimeout(() => {
+          bars.forEach((bar) => {
+            bar.style.filter = '';
+            bar.style.transform = '';
+          });
+        }, 300);
+      });
+    });
+  </script>
+<!-- END: JavaScriptFunctionality -->
+</body></html>

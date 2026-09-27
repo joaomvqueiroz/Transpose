@@ -26,7 +26,13 @@ class SessionSnapshot {
            : practice.plan.targetPercent / 100;
 
   static const version = 2;
-  static const screens = {'player', 'practice', 'chords', 'stage'};
+  static const screens = {
+    'player',
+    'practice',
+    'chords',
+    'stage',
+    'instruments',
+  };
 
   final PlayerPreset media;
   final DateTime savedAt;

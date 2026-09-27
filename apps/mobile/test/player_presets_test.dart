@@ -26,6 +26,18 @@ void main() {
       expect(PlayerPreset.parse(invalid), isNull);
     }
   });
+  test('YouTube presets preserve 0.25x and 2x speeds', () {
+    final data = _preset('video').toJson();
+    for (final speed in [.25, 2.0]) {
+      expect(PlayerPreset.parse({...data, 'speed': speed})?.speed, speed);
+    }
+    expect(PlayerPreset.parse({...data, 'speed': .2}), isNull);
+    expect(PlayerPreset.parse({...data, 'speed': 2.1}), isNull);
+    expect(
+      PlayerPreset.parse({...data, 'youtube': false, 'speed': .25}),
+      isNull,
+    );
+  });
   test(
     'serialized writes survive re-creation without losing either collection',
     () async {

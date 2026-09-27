@@ -11,14 +11,21 @@ import 'fullscreen_player.dart';
 import 'media/native_audio_media_loader.dart';
 import 'media/video_player_media_loader.dart';
 import 'studio_visual_app.dart';
-import 'session_snapshot_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarContrastEnforced: false,
+  ));
   runApp(
-    StudioVisualApp(
-      recoveryRepository: SessionSnapshotStore(),
+    const StudioVisualApp(
       openSearchWhenEmpty: true,
+      waitForStartupBrowser: true,
     ),
   );
 }

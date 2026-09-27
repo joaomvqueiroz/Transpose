@@ -9,39 +9,28 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'player_chord_sheet.dart';
 import 'studio_native_pages.dart';
 
-enum ChordSite {
-  cifraClub('Cifra Club', 'www.cifraclub.com.br'),
-  cifras('Cifras.com.br', 'www.cifras.com.br');
-
-  const ChordSite(this.label, this.host);
-  final String label, host;
-  Uri get home => Uri.https(host, '/');
-}
+final Uri cifrasHome = Uri.https('www.cifras.com.br', '/');
 
 bool isChordSourceUri(Uri uri) =>
     uri.scheme == 'https' &&
     uri.userInfo.isEmpty &&
     uri.port == 443 &&
-    const {
-      'www.cifraclub.com.br',
-      'cifraclub.com.br',
-      'm.cifraclub.com.br',
-      'www.cifras.com.br',
-      'cifras.com.br',
-    }.contains(uri.host);
+    const {'www.cifras.com.br', 'cifras.com.br'}.contains(uri.host);
 
-/// Search remains a visible browser page, never a scraped results API.
-Uri chordSearchUri(ChordSite site, String query) {
+bool isChordPageUri(Uri uri) =>
+    isChordSourceUri(uri) &&
+    uri.pathSegments.length >= 3 &&
+    uri.pathSegments.first == 'cifra';
+
+/// Opens the site's own visible results page with its search field populated.
+Uri chordSearchUri(String query) {
   final value = query.trim();
   if (value.isEmpty || value.length > 240) {
     throw const FormatException(
       'Escreva uma música ou artista (até 240 caracteres).',
     );
   }
-  return Uri.https('www.google.com', '/search', {
-    'q': 'site:${site.host} $value',
-    'hl': 'pt-PT',
-  });
+  return Uri.https('www.cifras.com.br', '/busca', {'q': value});
 }
 
 Uri? chordNavigationUri(String value) {
@@ -51,16 +40,6 @@ Uri? chordNavigationUri(String value) {
   if (uri.scheme != 'https' || uri.userInfo.isNotEmpty || uri.port != 443) {
     return null;
   }
-  if (uri.host == 'www.google.com' || uri.host == 'google.com') {
-    if (uri.path == '/url') {
-      final target = Uri.tryParse(
-        uri.queryParameters['q'] ?? uri.queryParameters['url'] ?? '',
-      );
-      return target != null && isChordSourceUri(target) ? target : null;
-    }
-    if (uri.path == '/search' || uri.path == '/sorry/index') return uri;
-  }
-  if (uri.host == 'consent.google.com') return uri;
   return null;
 }
 
@@ -95,7 +74,7 @@ class ImportedChord {
       );
     }
     final uri = Uri.tryParse(value['url']);
-    if (uri == null || !isChordSourceUri(uri) || uri != expectedUrl) {
+    if (uri == null || !isChordPageUri(uri) || uri != expectedUrl) {
       throw const FormatException('A página mudou. Volte a tocar em importar.');
     }
     final text = validatePlayerChordText(value['text']);
@@ -123,7 +102,7 @@ class ImportedChord {
   }
 }
 
-/// Read-only DOM extraction, called only after a user presses Importar.
+/// Read-only DOM extraction of the visible chord page, before user approval.
 /// Does not fetch hidden APIs, alter the site, bypass challenges or execute HTML.
 const chordExtractionScript = r'''(() => {
   const result = {title: (document.querySelector('h1')?.innerText || document.title || '').trim().slice(0, 240),
@@ -146,6 +125,51 @@ const chordExtractionScript = r'''(() => {
   return JSON.stringify(result);
 })()''';
 
+const chordSearchResultsScrollScript = r'''(() => {
+  if (location.pathname !== '/busca' && location.pathname !== '/') return false;
+  window.scrollBy({top: window.innerHeight, left: 0, behavior: 'instant'});
+  return true;
+})()''';
+
+class ChordSearchResult {
+  const ChordSearchResult({required this.title, required this.url});
+  final String title;
+  final Uri url;
+}
+
+/// Reads only the song links rendered in the site's public search page.
+const chordResultsScript =
+    r'''(() => JSON.stringify([...document.querySelectorAll('a[href]')]
+  .filter(a => a.getClientRects().length && a.href && new URL(a.href).pathname.startsWith('/cifra/'))
+  .map(a => ({title: (a.innerText || a.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 180), url: a.href}))
+  .filter(item => item.title).slice(0, 60)))()''';
+
+List<ChordSearchResult> decodeChordSearchResults(Object raw) {
+  dynamic value = raw;
+  for (var i = 0; i < 2 && value is String; i++) {
+    if (value.length > 100000) return const [];
+    value = jsonDecode(value);
+  }
+  if (value is! List) return const [];
+  final seen = <Uri>{};
+  return value
+      .whereType<Map>()
+      .map((entry) {
+        final title = entry['title'];
+        final url = entry['url'];
+        final uri = url is String ? Uri.tryParse(url) : null;
+        if (title is! String ||
+            uri == null ||
+            !isChordPageUri(uri) ||
+            !seen.add(uri)) {
+          return null;
+        }
+        return ChordSearchResult(title: title.trim(), url: uri);
+      })
+      .whereType<ChordSearchResult>()
+      .toList(growable: false);
+}
+
 abstract class ChordBrowserSession extends ChangeNotifier {
   Uri? get currentUri;
   int get progress;
@@ -155,6 +179,7 @@ abstract class ChordBrowserSession extends ChangeNotifier {
   Future<void> goBack();
   Future<void> reload();
   Future<ImportedChord> extract();
+  Future<List<ChordSearchResult>> searchResults() async => const [];
   Widget buildView();
 }
 
@@ -195,7 +220,7 @@ class WebViewChordBrowser extends ChordBrowserSession {
           if (!request.isMainFrame) return NavigationDecision.navigate;
           final target = chordNavigationUri(request.url);
           if (target == null) {
-            _error = 'Este link não pertence aos sites de cifras suportados.';
+            _error = 'Só é possível abrir páginas do Cifras.com.br.';
             _notify();
             return NavigationDecision.prevent;
           }
@@ -232,6 +257,9 @@ class WebViewChordBrowser extends ChordBrowserSession {
             _back = back;
             _progress = 100;
             _notify();
+            if (_uri?.path == '/busca' || _uri?.path == '/') {
+              unawaited(_scrollSearchResults(revision));
+            }
           } on Object {
             // Closing the browser may destroy its platform view mid-callback.
             if (!_disposed && revision == _revision) {
@@ -242,12 +270,27 @@ class WebViewChordBrowser extends ChordBrowserSession {
         },
         onWebResourceError: (failure) {
           if (failure.isForMainFrame != true) return;
-          _error = 'Não foi possível abrir a página. Verifique a ligação ou escolha outro site.';
+          _error =
+              'Não foi possível abrir o Cifras.com.br. Verifique a ligação.';
           _progress = 100;
           _notify();
         },
       ),
     );
+  }
+
+  Future<void> _scrollSearchResults(int revision) async {
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (_disposed ||
+        revision != _revision ||
+        (_uri?.path != '/busca' && _uri?.path != '/')) {
+      return;
+    }
+    try {
+      await controller.runJavaScript(chordSearchResultsScrollScript);
+    } on Object {
+      // The site can navigate again while this page finishes rendering.
+    }
   }
 
   @override
@@ -268,7 +311,7 @@ class WebViewChordBrowser extends ChordBrowserSession {
   Future<ImportedChord> extract() async {
     final revision = _revision;
     final current = Uri.tryParse(await controller.currentUrl() ?? '');
-    if (current == null || !isChordSourceUri(current) || _disposed) {
+    if (current == null || !isChordPageUri(current) || _disposed) {
       throw const FormatException('Escolha primeiro uma página de cifra.');
     }
     final result = await controller
@@ -284,6 +327,15 @@ class WebViewChordBrowser extends ChordBrowserSession {
   }
 
   @override
+  Future<List<ChordSearchResult>> searchResults() async {
+    if (_disposed || _uri?.path != '/busca') return const [];
+    final result = await controller.runJavaScriptReturningResult(
+      chordResultsScript,
+    );
+    return decodeChordSearchResults(result);
+  }
+
+  @override
   Widget buildView() => WebViewWidget(controller: controller);
   @override
   void dispose() {
@@ -291,6 +343,282 @@ class WebViewChordBrowser extends ChordBrowserSession {
     _revision++;
     super.dispose();
   }
+}
+
+/// Native Transpono search/results UI; the site page is kept in a tiny,
+/// non-interactive WebView solely to read its publicly displayed song links.
+class ChordSearchPanel extends StatefulWidget {
+  const ChordSearchPanel({
+    super.key,
+    required this.initialQuery,
+    required this.onCancel,
+    required this.onSelected,
+    this.sessionFactory,
+  });
+
+  final String initialQuery;
+  final VoidCallback onCancel;
+  final Future<void> Function(ImportedChord) onSelected;
+  final ChordBrowserSession Function()? sessionFactory;
+
+  @override
+  State<ChordSearchPanel> createState() => _ChordSearchPanelState();
+}
+
+class _ChordSearchPanelState extends State<ChordSearchPanel> {
+  late final ChordBrowserSession _session =
+      widget.sessionFactory?.call() ?? WebViewChordBrowser();
+  late final Widget _siteView = _session.buildView();
+  late final TextEditingController _query = TextEditingController(
+    text: widget.initialQuery,
+  );
+  List<ChordSearchResult> _results = const [];
+  String? _error;
+  Uri? _lastReadyUri;
+  bool _loading = false;
+  int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _session.addListener(_changed);
+    if (_query.text.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _search());
+    }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _session.removeListener(_changed);
+    _session.dispose();
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _changed() {
+    if (!mounted) return;
+    final uri = _session.currentUri;
+    if (uri != null && _session.progress >= 100 && uri != _lastReadyUri) {
+      _lastReadyUri = uri;
+      final generation = _generation;
+      if (uri.path == '/busca') {
+        unawaited(_readResults(generation));
+      } else if (isChordPageUri(uri)) {
+        unawaited(_readChord(generation, uri));
+      }
+    }
+    setState(() {});
+  }
+
+  Future<void> _search() async {
+    final query = _query.text.trim();
+    Uri uri;
+    try {
+      uri = chordSearchUri(query);
+    } on FormatException catch (error) {
+      setState(() => _error = error.message);
+      return;
+    }
+    final generation = ++_generation;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _results = const [];
+      _lastReadyUri = null;
+    });
+    try {
+      await _session.open(uri);
+    } on Object {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _loading = false;
+          _error = 'Não foi possível pesquisar no Cifras.com.br.';
+        });
+      }
+    }
+  }
+
+  Future<void> _readResults(int generation) async {
+    for (var attempt = 0; attempt < 8; attempt++) {
+      if (!mounted || generation != _generation) return;
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+      }
+      if (!mounted ||
+          generation != _generation ||
+          _session.currentUri?.path != '/busca') {
+        return;
+      }
+      try {
+        final results = await _session.searchResults();
+        if (!mounted || generation != _generation) return;
+        if (results.isNotEmpty) {
+          setState(() {
+            _results = results;
+            _loading = false;
+            _error = null;
+          });
+          return;
+        }
+      } on Object {
+        // The dynamic results may not have finished rendering yet.
+      }
+    }
+    if (mounted && generation == _generation) {
+      setState(() {
+        _loading = false;
+        _error = _session.error ?? 'Nenhuma cifra encontrada. Experimente pesquisar por música e artista.';
+      });
+    }
+  }
+
+  Future<void> _choose(ChordSearchResult result) async {
+    final generation = ++_generation;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _lastReadyUri = null;
+    });
+    try {
+      await _session.open(result.url);
+    } on Object {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _loading = false;
+          _error = 'Não foi possível abrir esta cifra. Tente outra.';
+        });
+      }
+    }
+  }
+
+  Future<void> _readChord(int generation, Uri uri) async {
+    for (var attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+      }
+      if (!mounted || generation != _generation || _session.currentUri != uri) {
+        return;
+      }
+      try {
+        final chord = await _session.extract();
+        if (!mounted || generation != _generation) return;
+        await widget.onSelected(chord);
+        return;
+      } on Object {
+        // A visible chord can be inserted shortly after page load.
+      }
+    }
+    if (mounted && generation == _generation) {
+      setState(() {
+        _loading = false;
+        _error = 'Não foi possível ler esta cifra. Escolha outro resultado.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      Positioned(
+        left: 0,
+        right: 0,
+        top: 0,
+        height: 320,
+        child: IgnorePointer(
+          child: ExcludeSemantics(child: Opacity(opacity: 0, child: _siteView)),
+        ),
+      ),
+      SingleChildScrollView(
+        key: const Key('chordNativeResults'),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('chordNativeQuery'),
+                      controller: _query,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => _search(),
+                      decoration: const InputDecoration(
+                        labelText: 'Música ou artista',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('chordNativeSearch'),
+                    tooltip: 'Pesquisar cifras',
+                    onPressed: _search,
+                    icon: const Icon(Icons.search),
+                  ),
+                  IconButton(
+                    key: const Key('chordNativeClose'),
+                    tooltip: 'Fechar pesquisa',
+                    onPressed: widget.onCancel,
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            if (_loading || _session.progress < 100)
+              const LinearProgressIndicator(),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(_error!, key: const Key('chordNativeError')),
+              ),
+            for (var index = 0; index < _results.length; index++)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Material(
+                  color: const Color(0xFF201F21),
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    key: Key('chordNativeResult$index'),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _loading ? null : () => _choose(_results[index]),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 9,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.library_music_outlined,
+                            size: 18,
+                            color: studioCyan,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _results[index].title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                height: 1.15,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.chevron_right, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class ChordBrowserPage extends StatefulWidget {
@@ -309,20 +637,27 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
   late final ChordBrowserSession _session =
       widget.sessionFactory?.call() ?? WebViewChordBrowser();
   late final Widget _view = _session.buildView();
-  late final _query = TextEditingController(text: widget.initialQuery);
-  ChordSite _site = ChordSite.cifraClub;
-  bool _importing = false;
+  bool _preparing = false;
+  ImportedChord? _prepared;
+  Uri? _observedUri, _requestedUri;
+  int _generation = 0, _lastProgress = 0;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_run(() => _session.open(_site.home)));
+    _session.addListener(_sessionChanged);
+    final query = widget.initialQuery.trim();
+    unawaited(
+      _run(
+        () => _session.open(query.isEmpty ? cifrasHome : chordSearchUri(query)),
+      ),
+    );
   }
 
   @override
   void dispose() {
-    _query.dispose();
+    _session.removeListener(_sessionChanged);
     _session.dispose();
     super.dispose();
   }
@@ -340,95 +675,78 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
     }
   }
 
-  Future<void> _search() => _run(() async {
-    FocusScope.of(context).unfocus();
-    final query = _query.text.trim();
-    final direct = Uri.tryParse(query);
-    if (direct != null && direct.hasScheme) {
-      if (!isChordSourceUri(direct)) {
-        throw const FormatException(
-          'Use um link HTTPS do Cifra Club ou Cifras.com.br.',
-        );
-      }
-      await _session.open(direct);
-    } else {
-      await _session.open(chordSearchUri(_site, query));
+  void _sessionChanged() {
+    if (!mounted) return;
+    final uri = _session.currentUri;
+    final progress = _session.progress;
+    if (uri != _observedUri || (progress < 100 && _lastProgress == 100)) {
+      _generation++;
+      _observedUri = uri;
+      _requestedUri = null;
+      _prepared = null;
+      _preparing = false;
+      _error = null;
     }
-  });
+    _lastProgress = progress;
+    if (uri != null &&
+        isChordPageUri(uri) &&
+        progress >= 100 &&
+        _requestedUri != uri) {
+      _requestedUri = uri;
+      unawaited(_prepare(uri, _generation));
+    }
+    setState(() {});
+  }
 
-  Future<void> _import() async {
-    if (_importing) return;
+  Future<void> _prepare(Uri uri, int generation) async {
+    if (!mounted || generation != _generation) return;
     setState(() {
-      _importing = true;
+      _preparing = true;
       _error = null;
     });
-    try {
-      final chord = await _session.extract();
-      if (!mounted) return;
-      final accepted = await showDialog<bool>(
-        context: context,
-        builder: (dialog) => AlertDialog(
-          title: const Text('Confirmar cifra'),
-          content: SizedBox(
-            width: 520,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    chord.title,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    chord.url.host,
-                    style: const TextStyle(color: studioCyan),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Confira a versão e o tom. Importe apenas conteúdo que tem direito de guardar para o seu uso.',
-                  ),
-                  const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Text(
-                      chord.text,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        height: 1.6,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              key: const Key('chordImportCancel'),
-              onPressed: () => Navigator.pop(dialog, false),
-              child: const Text('Voltar'),
-            ),
-            FilledButton(
-              key: const Key('chordImportConfirm'),
-              onPressed: () => Navigator.pop(dialog, true),
-              child: const Text('Usar esta cifra'),
-            ),
-          ],
-        ),
-      );
-      if (accepted == true && mounted) Navigator.pop(context, chord);
-    } on FormatException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } on Object {
-      if (mounted) {
-        setState(
-          () => _error = 'Não foi possível importar. Abra a cifra no site; bloqueios e páginas protegidas não são contornados.',
-        );
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 450));
       }
-    } finally {
-      if (mounted) setState(() => _importing = false);
+      if (!mounted || generation != _generation || _session.currentUri != uri) {
+        return;
+      }
+      try {
+        final chord = await _session.extract();
+        if (!mounted ||
+            generation != _generation ||
+            _session.currentUri != uri) {
+          return;
+        }
+        setState(() {
+          _prepared = chord;
+          _preparing = false;
+          _error = null;
+        });
+        return;
+      } on Object {
+        // The visible chord block may appear shortly after page load.
+      }
     }
+    if (mounted && generation == _generation && _session.currentUri == uri) {
+      setState(() {
+        _preparing = false;
+        _error = 'Não foi possível ler esta cifra. Abra uma página de música com os acordes visíveis ou tente novamente.';
+      });
+    }
+  }
+
+  void _retryPreparation() {
+    final uri = _session.currentUri;
+    if (uri == null || !isChordPageUri(uri) || _preparing) return;
+    _requestedUri = uri;
+    unawaited(_prepare(uri, _generation));
+  }
+
+  void _usePrepared() {
+    final chord = _prepared;
+    if (chord == null || chord.url != _session.currentUri) return;
+    Navigator.pop(context, chord);
   }
 
   @override
@@ -449,14 +767,14 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
                 ),
                 const Expanded(
                   child: Text(
-                    'Pesquisar cifra',
+                    'Cifras.com.br',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                   ),
                 ),
                 IconButton(
                   key: const Key('chordBrowserBack'),
                   tooltip: 'Página anterior',
-                  onPressed: !_importing && _session.canGoBack
+                  onPressed: _session.canGoBack
                       ? () => _run(_session.goBack)
                       : null,
                   icon: const Icon(Icons.arrow_back),
@@ -464,81 +782,38 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
                 IconButton(
                   key: const Key('chordBrowserReload'),
                   tooltip: 'Atualizar',
-                  onPressed: _importing ? null : () => _run(_session.reload),
+                  onPressed: () => _run(_session.reload),
                   icon: const Icon(Icons.refresh),
                 ),
               ],
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: DropdownButton<ChordSite>(
-                      key: const Key('chordBrowserSite'),
-                      value: _site,
-                      isExpanded: true,
-                      items: [
-                        for (final site in ChordSite.values)
-                          DropdownMenuItem(
-                            value: site,
-                            child: Text(site.label),
-                          ),
-                      ],
-                      onChanged: _importing
-                          ? null
-                          : (site) {
-                              if (site == null) return;
-                              setState(() => _site = site);
-                              unawaited(_run(() => _session.open(site.home)));
-                            },
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _importing
-                        ? null
-                        : () => _run(() => _session.open(_site.home)),
-                    child: const Text('Início do site'),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-              child: TextField(
-                key: const Key('chordSearchInput'),
-                controller: _query,
-                enabled: !_importing,
-                textInputAction: TextInputAction.search,
-                onSubmitted: (_) => _search(),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Música, artista ou link da cifra',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    key: const Key('chordSearchSubmit'),
-                    tooltip: 'Pesquisar neste site',
-                    onPressed: _importing ? null : _search,
-                    icon: const Icon(Icons.search),
-                  ),
-                ),
-              ),
             ),
             if (_session.progress < 100)
               LinearProgressIndicator(value: _session.progress / 100),
             if (_error != null || _session.error != null)
               Padding(
                 padding: const EdgeInsets.all(8),
-                child: Text(
-                  _error ?? _session.error!,
-                  key: const Key('chordBrowserError'),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _error ?? _session.error!,
+                        key: const Key('chordBrowserError'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_error != null &&
+                        _session.currentUri != null &&
+                        isChordPageUri(_session.currentUri!))
+                      TextButton(
+                        key: const Key('chordBrowserRetry'),
+                        onPressed: _retryPreparation,
+                        child: const Text('Tentar ler'),
+                      ),
+                  ],
                 ),
               ),
-            Expanded(
-              child: AbsorbPointer(absorbing: _importing, child: _view),
-            ),
+            Expanded(child: _view),
             if (MediaQuery.viewInsetsOf(context).bottom == 0)
               Padding(
                 padding: const EdgeInsets.all(10),
@@ -547,14 +822,13 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
                   child: FilledButton.icon(
                     key: const Key('chordBrowserImport'),
                     onPressed:
-                        !_importing &&
-                            _session.currentUri != null &&
-                            isChordSourceUri(_session.currentUri!)
-                        ? _import
+                        _prepared != null &&
+                            _prepared!.url == _session.currentUri
+                        ? _usePrepared
                         : null,
-                    icon: const Icon(Icons.download_outlined),
+                    icon: const Icon(Icons.check),
                     label: Text(
-                      _importing ? 'A ler cifra…' : 'Importar esta cifra',
+                      _preparing ? 'A preparar cifra…' : 'Usar esta cifra',
                     ),
                   ),
                 ),

@@ -16,34 +16,35 @@ void main() {
         InMemorySharedPreferencesAsync.empty();
   });
 
-  testWidgets('main player does not leave a legacy strip below the video', (
+  testWidgets('player fechado não mostra faixa de controlos redundante', (
     tester,
   ) async {
     await tester.pumpWidget(const StudioVisualApp());
     await tester.pumpAndSettle();
     expect(find.byType(MainPlayerPanel), findsNothing);
-    expect(find.byKey(const Key('visualMainAdjustmentsBackdrop')), findsNothing);
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
-    expect(find.byType(MainPlayerPanel), findsNothing);
     expect(
       find.byKey(const Key('visualMainAdjustmentsBackdrop')),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedPitchUp')), findsOneWidget);
+    expect(
+      find.byKey(const Key('visualMainAdjustmentsBackdrop')),
+      findsNothing,
+    );
+    expect(find.text('Fechar ajustes'), findsNothing);
     expect(
       tester
-          .widget<ColoredBox>(
-            find.byKey(const Key('visualMainAdjustmentsBackdrop')),
-          )
-          .color,
-      const Color(0xFF040F1C),
+          .widget<IconButton>(find.byKey(const Key('visualMainAdjustments')))
+          .tooltip,
+      'Fechar ajustes',
     );
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets('recovery message remains dismissible without a top bar', (
-    tester,
-  ) async {
+  testWidgets('recovery warning does not cover the video', (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 480));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -51,19 +52,16 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('visualPlayerHeader')), findsNothing);
-    final recovery = find.byKey(const Key('recoveryStatus'));
-    expect(tester.getRect(recovery).top, greaterThanOrEqualTo(0));
-    expect(find.text('Transpono').hitTestable(), findsNothing);
-    await tester.tap(find.byKey(const Key('recoveryDismiss')));
-    await tester.pumpAndSettle();
     expect(find.byKey(const Key('recoveryStatus')), findsNothing);
+    expect(find.text('Transpono').hitTestable(), findsNothing);
+    expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
     expect(find.byKey(const Key('visualPlayerHeader')), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
   });
 
-  testWidgets('pending YouTube recovery shows only the restore action', (
+  testWidgets('pending YouTube recovery does not show a restore action', (
     tester,
   ) async {
     final session = FakeYouTubeSession();
@@ -75,9 +73,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('recoveryRestore')), findsOneWidget);
-    expect(find.byKey(const Key('youtubeSearchInput')), findsOneWidget);
-    expect(tester.testTextInput.isVisible, isTrue);
+    expect(find.byKey(const Key('recoveryRestore')), findsNothing);
+    expect(find.byKey(const Key('youtubeSearchInput')), findsNothing);
+    expect(tester.testTextInput.isVisible, isFalse);
     expect(find.byKey(const Key('recoveryStatus')), findsNothing);
     expect(find.byKey(const Key('recoveryDismiss')), findsNothing);
     expect(find.textContaining('Última sessão'), findsNothing);
@@ -87,17 +85,46 @@ void main() {
       ),
       isEmpty,
     );
-    await tester.tap(find.byKey(const Key('recoveryRestore')));
-    await tester.pumpAndSettle();
-    expect(
-      session.commands.where(
-        (command) => ['play', 'playPause', 'unmute'].contains(command.$1),
-      ),
-      isEmpty,
-    );
   });
 
-  testWidgets('only video pins; successful restore removes its button', (
+  testWidgets('choosing a video removes the pending restore button', (
+    tester,
+  ) async {
+    final session = FakeYouTubeSession()
+      ..state = const YouTubeMediaState(
+        videoId: 'different-video',
+        title: 'Vídeo escolhido',
+        hasVideo: true,
+        duration: 180,
+      );
+    await tester.pumpWidget(
+      StudioVisualApp(
+        recoveryRepository: _PendingVideoRepository(),
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: () => session,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('recoveryRestore')), findsNothing);
+    session.state = const YouTubeMediaState();
+    session.notifyListeners();
+    await tester.pump();
+    session.state = const YouTubeMediaState(
+      videoId: 'different-video',
+      title: 'Vídeo escolhido',
+      hasVideo: true,
+      duration: 180,
+    );
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
+    expect(find.byKey(const Key('recoveryRestore')), findsNothing);
+    expect(find.text('Restaurar vídeo'), findsNothing);
+    expect(session.disposed, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('fechar ajustes deixa vídeo e botão, sem fixação separada', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(320, 480));
@@ -110,30 +137,19 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('recoveryRestore')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('visualPlayerPinVideo')));
-    await tester.pumpAndSettle();
-    final scroll = tester
-        .widget<CustomScrollView>(find.byKey(const Key('visualScrollplayer')))
-        .controller!;
-    scroll.jumpTo(160);
-    await tester.pump();
-    expect(find.byKey(const Key('visualPlayerHeader')), findsNothing);
     expect(find.byKey(const Key('recoveryRestore')), findsNothing);
+    expect(find.byKey(const Key('visualPlayerPinVideo')), findsNothing);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
-
-    scroll.jumpTo(0);
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('recoveryRestore')));
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('recoveryRestore')), findsNothing);
-    expect(find.byKey(const Key('recoveryStatus')), findsNothing);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(find.byKey(const Key('visualPlayerPinVideo')), findsNothing);
     expect(session.disposed, isFalse);
     expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('touch surface keeps the same browser view across navigation', (
+  testWidgets('mesmo WebView permanece montado nas secções e ao fechar', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -142,162 +158,40 @@ void main() {
     var creations = 0;
     await tester.pumpWidget(
       StudioVisualApp(
+        openSearchWhenEmpty: true,
         youtubeSessionFactory: () {
           creations++;
           return session;
         },
       ),
     );
-    await tester.tap(find.byKey(const Key('visualPlayerMenu')));
     await tester.pumpAndSettle();
-    final searchAction = find.text('Pesquisar no YouTube').last;
-    await tester.ensureVisible(searchAction);
-    await tester.tap(searchAction);
-    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
     final browser = find.byType(_BrowserView);
     final mountedView = tester.state(browser);
-    expect(find.byType(MainPlayerFullscreen), findsNothing);
     await tester.tap(find.byKey(const Key('browserResultAction')));
     await tester.pump();
     expect(session.browserTaps, 1);
-    await tester.tap(find.byKey(const Key('youtubeUseInPlayer')));
     await tester.pumpAndSettle();
-    expect(find.byType(MainPlayerFullscreen), findsOneWidget);
-    expect(find.byKey(const Key('pinnedYouTubeMedia')), findsNothing);
     final surface = find.byKey(const Key('visualFullscreenSurface'));
-    final beforeScroll = tester.getRect(surface);
-    expect(beforeScroll.height, greaterThan(200));
+    final closedHeight = tester.getSize(surface).height;
     await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
-    expect(
-      tester.getSize(surface).height,
-      beforeScroll.height,
-      reason: 'Ajustes must not reserve an empty strip below YouTube',
-    );
-    expect(
-      tester.getRect(find.byKey(const Key('visualMainControlsOverlay'))).bottom,
-      lessThanOrEqualTo(
-        tester.getRect(find.byKey(const Key('visualMainAdjustments'))).top,
-      ),
-      reason: 'The floating Ajustes button must not cover player controls',
-    );
-    expect(
-      tester.getRect(find.byKey(const Key('visualMainAdjustmentsBackdrop'))).top,
-      tester.getRect(find.byKey(const Key('visualMainControlsOverlay'))).bottom,
-      reason: 'The dark controls background must fill the gap below controls',
-    );
-    expect(
-      tester.getSize(find.byKey(const Key('visualMainControlsOverlay'))).height,
-      greaterThan(beforeScroll.height * .4),
-      reason: 'The main Ajustes panel has 25% more height than before',
-    );
-    final marker = tester.getSize(find.byKey(const Key('visualFullscreenMarkA')));
-    expect(marker.width, lessThan(140));
-    expect(marker.height, lessThanOrEqualTo(44));
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
-    final scroll = tester
-        .widget<SingleChildScrollView>(
-          find.byKey(const Key('visualScrollplayer')),
-        )
-        .controller!;
-    scroll.jumpTo(100);
-    await tester.pump();
-    expect(tester.getRect(surface).top, beforeScroll.top - 100);
-    expect(find.byKey(const Key('visualPlayerHeader')), findsNothing);
-    scroll.jumpTo(0);
-    await tester.pump();
-
-    await tester.tap(find.byKey(const Key('visualPlayerPinVideo')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('pinnedPlayerMedia')), findsOneWidget);
-    final pinnedVideo = tester.getRect(
-      find.byKey(const Key('visualFullscreenSurface')),
-    );
-    scroll.jumpTo(100);
-    await tester.pump();
-    final pinnedAtTop = tester.getRect(
-      find.byKey(const Key('visualFullscreenSurface')),
-    );
-    expect(pinnedAtTop.top, lessThanOrEqualTo(pinnedVideo.top));
-    scroll.jumpTo(200);
-    await tester.pump();
-    expect(
-      tester.getRect(find.byKey(const Key('visualFullscreenSurface'))),
-      pinnedAtTop,
-      reason: 'Pinning holds the video while the controls scroll',
-    );
-    expect(
-      find.byKey(const Key('visualPlayerHeader')),
-      findsNothing,
-      reason: 'Only the video, not Transpono, is pinned',
-    );
-    expect(session.viewMounts, 1);
-    expect(session.viewDisposals, 0);
-    scroll.jumpTo(0);
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('visualPlayerPinVideo')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('pinnedPlayerMedia')), findsNothing);
-    expect(session.viewMounts, 1);
-    expect(session.viewDisposals, 0);
-    final releasedVideo = tester.getRect(
-      find.byKey(const Key('visualFullscreenSurface')),
-    );
-    scroll.jumpTo(100);
-    await tester.pump();
-    expect(
-      tester.getRect(find.byKey(const Key('visualFullscreenSurface'))).top,
-      releasedVideo.top - 100,
-    );
-    scroll.jumpTo(0);
-    await tester.pump();
-
-    void expectSameBrowser() {
-      expect(creations, 1);
-      expect(session.viewBuilds, 1);
+    expect(tester.getSize(surface).height, closedHeight);
+    for (final section in ['practice', 'chords', 'setlist']) {
+      await tester.tap(find.byKey(Key('unifiedSection$section')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
+      expect(identical(tester.state(browser), mountedView), isTrue);
       expect(session.viewMounts, 1);
       expect(session.viewDisposals, 0);
-      expect(session.disposed, isFalse);
-      expect(identical(tester.state(browser), mountedView), isTrue);
     }
-
-    expectSameBrowser();
-    for (final tab in ['practice', 'chords', 'stage', 'player']) {
-      await tester.tap(find.byKey(const Key('visualPlayerMenu')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(Key('visualTab$tab')));
-      await tester.pumpAndSettle();
-      expectSameBrowser();
-    }
-    await tester.tap(find.byKey(const Key('visualPlayerMenu')));
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Tela cheia').last);
-    await tester.tap(find.text('Tela cheia').last);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('visualFullscreenSurface')), findsOneWidget);
-    expectSameBrowser();
-    await tester.tap(find.byKey(const Key('visualFullscreenBack')));
-    await tester.pumpAndSettle();
-    expectSameBrowser();
-
-    await tester.tap(find.byKey(const Key('visualPlayerMenu')));
-    await tester.pumpAndSettle();
-    final searchAgain = find.text('Pesquisar no YouTube').last;
-    await tester.ensureVisible(searchAgain);
-    await tester.tap(searchAgain);
-    await tester.pumpAndSettle();
-    expect(find.byType(MainPlayerFullscreen), findsNothing);
-    await tester.tap(find.byKey(const Key('browserResultAction')));
-    await tester.pump();
-    expect(session.browserTaps, 2);
-    expectSameBrowser();
-    expect(
-      session.commands.where(
-        (command) => ['play', 'playPause', 'unmute'].contains(command.$1),
-      ),
-      isEmpty,
-    );
+    expect(tester.getSize(surface).height, closedHeight);
+    expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
+    expect(identical(tester.state(browser), mountedView), isTrue);
+    expect(creations, 1);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     expect(session.viewDisposals, 1);
@@ -387,7 +281,20 @@ class _BrowserViewState extends State<_BrowserView> {
   Widget build(BuildContext context) => Center(
     child: TextButton(
       key: const Key('browserResultAction'),
-      onPressed: () => widget.session.browserTaps++,
+      onPressed: () {
+        widget.session.browserTaps++;
+        widget.session.state = const YouTubeMediaState();
+        widget.session.notifyListeners();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          widget.session.state = const YouTubeMediaState(
+            videoId: 'aqz-KE-bpKQ',
+            title: 'Vídeo de estudo',
+            hasVideo: true,
+            duration: 180,
+          );
+          widget.session.notifyListeners();
+        });
+      },
       child: const Text('Abrir resultado do YouTube'),
     ),
   );
