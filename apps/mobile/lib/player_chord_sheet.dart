@@ -75,18 +75,18 @@ const playerChordNoteColors = <Color>[
 ];
 
 const playerChordNoteColorsLight = <Color>[
-  Color(0xFF1D5FA8),
-  Color(0xFF176985),
-  Color(0xFF16743A),
-  Color(0xFF177450),
-  Color(0xFFB42332),
-  Color(0xFF7A4A24),
-  Color(0xFF805026),
-  Color(0xFF806000),
-  Color(0xFF8A6000),
-  Color(0xFF6740A0),
-  Color(0xFF7950A2),
-  Color(0xFFA33470),
+  Color(0xFF164B84),
+  Color(0xFF0F526C),
+  Color(0xFF0D5D2C),
+  Color(0xFF0D5F40),
+  Color(0xFF8F1725),
+  Color(0xFF603716),
+  Color(0xFF673E1A),
+  Color(0xFF664B00),
+  Color(0xFF6F4B00),
+  Color(0xFF543088),
+  Color(0xFF653B8C),
+  Color(0xFF802253),
 ];
 
 Color playerChordDisplayColor(int pitchClass, StudioAppearance appearance) {
@@ -97,7 +97,7 @@ Color playerChordDisplayColor(int pitchClass, StudioAppearance appearance) {
   if (customized == null) return playerChordNoteColorsLight[pitchClass];
   for (var step = 0; step <= 8; step++) {
     final candidate = Color.lerp(customized, Colors.black, step / 10)!;
-    if (candidate.computeLuminance() <= .18) return candidate;
+    if (candidate.computeLuminance() <= .11) return candidate;
   }
   return Color.lerp(customized, Colors.black, .8)!;
 }
@@ -257,6 +257,11 @@ class PlayerChordSheet extends StatefulWidget {
 }
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
+  // The notes sit above the glass layer so their reading surface stays crisp.
+  StudioAppearanceMode get _sheetDecorationMode =>
+      widget.appearance.mode == StudioAppearanceMode.glass
+      ? StudioAppearanceMode.dark
+      : widget.appearance.mode;
   Color get _controlColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => const Color(0xFFE8EEF4),
     StudioAppearanceMode.glass => const Color(0xAA303841),
@@ -503,7 +508,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
             key: const Key('playerChordSheet'),
             decoration: studioPanelDecoration(
               radius: 26,
-              mode: widget.appearance.mode,
+              mode: _sheetDecorationMode,
             ),
             clipBehavior: Clip.antiAlias,
             child: NotificationListener<OverscrollNotification>(
@@ -544,6 +549,16 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                             fontFamily: 'monospace',
                             fontSize: fontSize,
                             height: 1.8,
+                            color:
+                                widget.appearance.mode ==
+                                    StudioAppearanceMode.light
+                                ? Colors.black
+                                : null,
+                            fontWeight:
+                                widget.appearance.mode ==
+                                    StudioAppearanceMode.light
+                                ? FontWeight.w700
+                                : null,
                           ),
                         ),
                       ),
@@ -559,7 +574,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: studioPanelDecoration(
             radius: 26,
-            mode: widget.appearance.mode,
+            mode: _sheetDecorationMode,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -731,6 +746,14 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         fontFamily: 'monospace',
                         fontSize: fontSize,
                         height: 1.8,
+                        color:
+                            widget.appearance.mode == StudioAppearanceMode.light
+                            ? Colors.black
+                            : null,
+                        fontWeight:
+                            widget.appearance.mode == StudioAppearanceMode.light
+                            ? FontWeight.w700
+                            : null,
                       ),
                     );
                   },

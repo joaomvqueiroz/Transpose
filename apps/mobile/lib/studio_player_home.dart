@@ -1559,50 +1559,54 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(
-                            sigmaX:
-                                widget.appearance.mode ==
-                                    StudioAppearanceMode.glass
-                                ? 10
-                                : 0,
-                            sigmaY:
-                                widget.appearance.mode ==
-                                    StudioAppearanceMode.glass
-                                ? 10
-                                : 0,
-                          ),
-                          child: _adjustmentsCoverVideo
-                              ? Material(
-                                  color: _background,
-                                  child: Column(
-                                    children: [
-                                      _coveredVideoTransport(box.maxHeight),
-                                      Expanded(
-                                        child: _sectionContent(
-                                          media,
-                                          viewportHeight: box.maxHeight,
+                        child: ClipRect(
+                          key: const Key('unifiedAdjustmentsBlurBounds'),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX:
+                                  widget.appearance.mode ==
+                                      StudioAppearanceMode.glass
+                                  ? 10
+                                  : 0,
+                              sigmaY:
+                                  widget.appearance.mode ==
+                                      StudioAppearanceMode.glass
+                                  ? 10
+                                  : 0,
+                            ),
+                            child: _adjustmentsCoverVideo
+                                ? Material(
+                                    color: _background,
+                                    child: Column(
+                                      children: [
+                                        _coveredVideoTransport(box.maxHeight),
+                                        Expanded(
+                                          child: _sectionContent(
+                                            media,
+                                            viewportHeight: box.maxHeight,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
+                                  )
+                                : chordPanel
+                                ? ClipRRect(
+                                    key: const Key('unifiedChordOverlay'),
+                                    borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(26),
+                                    ),
+                                    child: _sectionContent(
+                                      media,
+                                      topGap: chordTopGap,
+                                      viewportHeight:
+                                          box.maxHeight - overlayTop,
+                                    ),
+                                  )
+                                : ColoredBox(
+                                    color: _background,
+                                    child: _sectionContent(media),
                                   ),
-                                )
-                              : chordPanel
-                              ? ClipRRect(
-                                  key: const Key('unifiedChordOverlay'),
-                                  borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(26),
-                                  ),
-                                  child: _sectionContent(
-                                    media,
-                                    topGap: chordTopGap,
-                                    viewportHeight: box.maxHeight - overlayTop,
-                                  ),
-                                )
-                              : ColoredBox(
-                                  color: _background,
-                                  child: _sectionContent(media),
-                                ),
+                          ),
                         ),
                       ),
                     ],

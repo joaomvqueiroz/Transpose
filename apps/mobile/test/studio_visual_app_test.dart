@@ -148,6 +148,9 @@ void main() {
     final glassGradient =
         (glassPitch.decoration! as BoxDecoration).gradient! as LinearGradient;
     expect(glassGradient.colors.first.a, lessThan(1));
+    final blurBounds = find.byKey(const Key('unifiedAdjustmentsBlurBounds'));
+    expect(tester.widget<ClipRect>(blurBounds).child, isA<BackdropFilter>());
+    expect(tester.getTopLeft(blurBounds).dy, greaterThan(0));
   });
   testWidgets('empty startup opens YouTube without duplicate search', (
     tester,

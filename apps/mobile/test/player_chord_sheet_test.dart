@@ -60,8 +60,8 @@ void main() {
       playerChordNoteColors[7],
     );
     final light = const StudioAppearance(mode: StudioAppearanceMode.light);
-    expect(playerChordDisplayColor(7, light), const Color(0xFF806000));
-    expect(playerChordDisplayColor(9, light).computeLuminance(), lessThan(.18));
+    expect(playerChordDisplayColor(7, light), const Color(0xFF664B00));
+    expect(playerChordDisplayColor(9, light).computeLuminance(), lessThan(.11));
   });
 
   test('as 12 cores originais têm contraste nos temas escuro e claro', () {
@@ -84,6 +84,56 @@ void main() {
         reason: 'nota $index claro',
       );
     }
+  });
+
+  testWidgets('cifra clara tem letra preta em negrito e acordes escuros', (
+    tester,
+  ) async {
+    final store = ChordSheetStore()
+      ..temporarySheet = const ChordSheet(notes: 'C   G\nMinha letra');
+    await tester.pumpWidget(
+      _app(
+        GlobalKey<PlayerChordSheetState>(),
+        _Model(),
+        store,
+        '',
+        appearance: const StudioAppearance(mode: StudioAppearanceMode.light),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final text = tester.widget<SelectableText>(
+      find.byKey(const Key('playerChordText')),
+    );
+    expect(text.style!.color, Colors.black);
+    expect(text.style!.fontWeight, FontWeight.w700);
+    final chords = text.textSpan!.children!.cast<TextSpan>();
+    expect(
+      chords.where((span) => span.text == 'C').single.style!.color,
+      playerChordNoteColorsLight[0],
+    );
+  });
+
+  testWidgets('cifra fica opaca acima do desfoque no modo Vidro', (
+    tester,
+  ) async {
+    final store = ChordSheetStore()
+      ..temporarySheet = const ChordSheet(notes: 'C\nMinha letra');
+    await tester.pumpWidget(
+      _app(
+        GlobalKey<PlayerChordSheetState>(),
+        _Model(),
+        store,
+        '',
+        appearance: const StudioAppearance(mode: StudioAppearanceMode.glass),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final sheet = tester.widget<Container>(
+      find.byKey(const Key('playerChordSheet')),
+    );
+    final gradient =
+        (sheet.decoration! as BoxDecoration).gradient! as LinearGradient;
+    expect(gradient.colors.every((color) => color.a == 1), isTrue);
   });
 
   test('nomes enarmónicos recebem exatamente a mesma cor', () {
@@ -538,8 +588,9 @@ Widget _app(
   GlobalKey<PlayerChordSheetState> key,
   PlayerPanelModel model,
   ChordSheetStore store,
-  String source,
-) => MaterialApp(
+  String source, {
+  StudioAppearance appearance = const StudioAppearance(),
+}) => MaterialApp(
   theme: ThemeData.dark(),
   home: Scaffold(
     body: SingleChildScrollView(
@@ -548,6 +599,7 @@ Widget _app(
         model: model,
         sourceKey: source,
         store: store,
+        appearance: appearance,
       ),
     ),
   ),
