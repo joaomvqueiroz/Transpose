@@ -1,8 +1,9 @@
 # Características rítmicas ambiente — protótipo QA (2026-09-28)
 
 Estado: **base técnica experimental, apenas no pacote `com.example.transpose_mobile.qa`**.
-A cadeia sintética de saída nativa foi executada uma vez no Samsung, conforme
-registo abaixo; a captação rítmica ambiente não foi testada em telemóvel.
+A cadeia sintética de saída nativa e a captação acústica dos seus próprios
+cliques foram testadas no Samsung, conforme registo abaixo. A captação de
+música ambiente para criar um mapa rítmico não foi testada em telemóvel.
 Não há análise de vídeo YouTube em produção, nem alinhamento comprovado entre
 música e metrónomo.
 
@@ -145,6 +146,16 @@ O volume foi restaurado a 1/15 e a permissão `RECORD_AUDIO` do pacote QA foi
 revogada após a prova. O pacote de produção permaneceu instalado e intacto.
 Isto valida cliques locais gerados pela app **num** Samsung, não a sincronia
 audível com música YouTube ou com um segundo telemóvel.
+
+A correspondência acústica recebeu um controlo negativo independente: além da
+janela de cada batida, o analisador procura energia a meio tempo entre batidas.
+Testes unitários rejeitam silêncio, ruído uniforme e cliques deslocados meio
+tempo. Nova execução no mesmo Samsung a 6/15: 20/20 batidas, 0/20 janelas de
+controlo, razão mediana batida/lacuna 6,31, atraso mediano estimado 19,21 ms
+e dispersão p95 quantizada 0 ms. As janelas continuam a ter 10 ms: o último
+valor não demonstra jitter físico nulo. A rota foi `VOICE_RECOGNITION`,
+qualidade `availableForReview`, sem AEC/NS ativos; AGC não reportado. O volume
+voltou a 1/15 e a permissão do microfone QA foi revogada após a repetição.
 
 Na primeira execução, o APK QA antigo tinha assinatura incompatível. O Flutter
 Drive desinstalou-o automaticamente e instalou o novo pacote `.qa`; os dados
