@@ -8,6 +8,7 @@ import 'chord_sheet.dart';
 import 'player_panel_model.dart';
 import 'studio_native_pages.dart';
 import 'study_tools.dart';
+import 'studio_appearance.dart';
 
 const int playerChordTextLimit = 10000;
 const int _fileByteLimit = 40000;
@@ -57,6 +58,110 @@ String decodePlayerChordFile(List<int> bytes) {
 final _chordSymbol = RegExp(
   r'^([A-G])([#b♯♭]?)((?:(?:maj|min|dim|aug|sus|add|m|M|Δ|ø|°|\+|-)\d*|\d+|[#b♯♭]\d+|\([^\s()]*\))*)(?:/([A-G])([#b♯♭]?))?$',
 );
+
+const playerChordNoteColors = <Color>[
+  Color(0xFF5CA9FF), // C: azul
+  Color(0xFF7AC7FF), // C#/Db: azul claro
+  Color(0xFF5DD47A), // D: verde
+  Color(0xFF80D9A3), // D#/Eb: verde menta
+  Color(0xFFFF6B6B), // E: vermelho
+  Color(0xFFC89362), // F: marrom
+  Color(0xFFD9AC7A), // F#/Gb: marrom claro
+  Color(0xFFFFD34F), // G: amarelo
+  Color(0xFFF2B84B), // G#/Ab: amarelo âmbar
+  Color(0xFFB695F5), // A: roxo
+  Color(0xFFD0A8F5), // A#/Bb: roxo claro
+  Color(0xFFF48FC7), // B: rosa
+];
+
+const playerChordNoteColorsLight = <Color>[
+  Color(0xFF1D5FA8),
+  Color(0xFF176985),
+  Color(0xFF16743A),
+  Color(0xFF177450),
+  Color(0xFFB42332),
+  Color(0xFF7A4A24),
+  Color(0xFF805026),
+  Color(0xFF806000),
+  Color(0xFF8A6000),
+  Color(0xFF6740A0),
+  Color(0xFF7950A2),
+  Color(0xFFA33470),
+];
+
+Color playerChordDisplayColor(int pitchClass, StudioAppearance appearance) {
+  final customized = appearance.noteColors[pitchClass];
+  if (appearance.mode != StudioAppearanceMode.light) {
+    return customized ?? playerChordNoteColors[pitchClass];
+  }
+  if (customized == null) return playerChordNoteColorsLight[pitchClass];
+  for (var step = 0; step <= 8; step++) {
+    final candidate = Color.lerp(customized, Colors.black, step / 10)!;
+    if (candidate.computeLuminance() <= .18) return candidate;
+  }
+  return Color.lerp(customized, Colors.black, .8)!;
+}
+
+int? playerChordPitchClass(String chord) {
+  final match = _chordSymbol.firstMatch(chord);
+  if (match == null) return null;
+  final root = switch (match[1]) {
+    'C' => 0,
+    'D' => 2,
+    'E' => 4,
+    'F' => 5,
+    'G' => 7,
+    'A' => 9,
+    'B' => 11,
+    _ => 0,
+  };
+  final accidental = switch (match[2]) {
+    '#' || '♯' => 1,
+    'b' || '♭' => -1,
+    _ => 0,
+  };
+  return (root + accidental + 12) % 12;
+}
+
+List<InlineSpan> playerChordColorSpans(
+  String text, {
+  Map<int, Color> noteColors = const {},
+  StudioAppearanceMode mode = StudioAppearanceMode.dark,
+}) {
+  final spans = <InlineSpan>[];
+  for (final (index, line) in text.split('\n').indexed) {
+    if (index > 0) spans.add(const TextSpan(text: '\n'));
+    final chordLine = _isChordLine(line);
+    var cursor = 0;
+    for (final match in RegExp(r'\[[^\[\]]+\]|[^\s|,;]+').allMatches(line)) {
+      final token = match[0]!;
+      final embedded = token.startsWith('[') && token.endsWith(']');
+      final chord = embedded ? token.substring(1, token.length - 1) : token;
+      final pitchClass = (chordLine || embedded)
+          ? playerChordPitchClass(chord)
+          : null;
+      if (pitchClass == null) continue;
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: line.substring(cursor, match.start)));
+      }
+      spans.add(
+        TextSpan(
+          text: token,
+          style: TextStyle(
+            color: playerChordDisplayColor(
+              pitchClass,
+              StudioAppearance(mode: mode, noteColors: noteColors),
+            ),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+      cursor = match.end;
+    }
+    if (cursor < line.length) spans.add(TextSpan(text: line.substring(cursor)));
+  }
+  return spans;
+}
 
 bool _isChordLine(String line) {
   final withoutSection = line.replaceFirst(
@@ -134,6 +239,7 @@ class PlayerChordSheet extends StatefulWidget {
     this.onPullDown,
     this.lyricsOnly = false,
     this.revision = 0,
+    this.appearance = const StudioAppearance(),
   });
 
   final PlayerPanelModel model;
@@ -144,6 +250,7 @@ class PlayerChordSheet extends StatefulWidget {
   final VoidCallback? onPullDown;
   final bool lyricsOnly;
   final int revision;
+  final StudioAppearance appearance;
 
   @override
   PlayerChordSheetState createState() => PlayerChordSheetState();
@@ -159,13 +266,15 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   String? _error;
   int _revision = 0;
   bool _savingTone = false;
+  bool _changingAudioPitch = false;
   String? _measuredText;
   double? _measuredWidth;
   TextScaler? _measuredScaler;
   double _fittedFontSize = 15;
   bool _needsHorizontalScroll = false;
 
-  int get _displayPitch => _sheet.transpose;
+  int get _displayPitch =>
+      _sheet.transpose + (_sheet.followAudio ? widget.model.pitch.round() : 0);
 
   double _fontSizeFor(String text, double width, TextScaler scaler) {
     if (_measuredText == text &&
@@ -237,6 +346,23 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   }
 
   Future<void> _changeTone(int delta) async {
+    if (_sheet.followAudio) {
+      if (_changingAudioPitch) return;
+      setState(() => _changingAudioPitch = true);
+      try {
+        // The visible cifra follows only the pitch acknowledged by the engine.
+        await widget.model.changePitch(
+          (widget.model.pitch + delta).clamp(-12, 12),
+        );
+      } on Object {
+        if (mounted) {
+          setState(() => _error = 'O áudio não confirmou a mudança de tom.');
+        }
+      } finally {
+        if (mounted) setState(() => _changingAudioPitch = false);
+      }
+      return;
+    }
     await _saveTone((_sheet.transpose + delta).clamp(-24, 24), false);
   }
 
@@ -352,13 +478,22 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
       builder: (context, _) {
         final pitch = _displayPitch;
         final ready = !_loading && !_savingTone;
-        final canChange = ready;
+        final canChange =
+            ready &&
+            !_changingAudioPitch &&
+            (!_sheet.followAudio ||
+                (widget.model.loaded &&
+                    !widget.model.busy &&
+                    widget.model.canPitch));
         final original = _showExample ? _example : _sheet.notes;
         final text = transposePlayerChordText(original, pitch);
         if (widget.lyricsOnly) {
           return Container(
             key: const Key('playerChordSheet'),
-            decoration: studioPanelDecoration(radius: 26),
+            decoration: studioPanelDecoration(
+              radius: 26,
+              mode: widget.appearance.mode,
+            ),
             clipBehavior: Clip.antiAlias,
             child: NotificationListener<OverscrollNotification>(
               onNotification: (notification) {
@@ -388,18 +523,11 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         child: SelectableText.rich(
                           key: const Key('playerChordText'),
                           TextSpan(
-                            children: [
-                              for (final (i, line) in text.split('\n').indexed)
-                                TextSpan(
-                                  text: '${i == 0 ? '' : '\n'}$line',
-                                  style: _isChordLine(line)
-                                      ? const TextStyle(
-                                          color: studioCyan,
-                                          fontWeight: FontWeight.w700,
-                                        )
-                                      : null,
-                                ),
-                            ],
+                            children: playerChordColorSpans(
+                              text,
+                              noteColors: widget.appearance.noteColors,
+                              mode: widget.appearance.mode,
+                            ),
                           ),
                           style: TextStyle(
                             fontFamily: 'monospace',
@@ -418,7 +546,10 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
         return Container(
           key: const Key('playerChordSheet'),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: studioPanelDecoration(radius: 26),
+          decoration: studioPanelDecoration(
+            radius: 26,
+            mode: widget.appearance.mode,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -518,7 +649,11 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     style: IconButton.styleFrom(
                       backgroundColor: const Color(0xFF303034),
                     ),
-                    onPressed: canChange && _sheet.transpose > -24
+                    onPressed:
+                        canChange &&
+                            (_sheet.followAudio
+                                ? widget.model.pitch > -12
+                                : _sheet.transpose > -24)
                         ? () => _changeTone(-1)
                         : null,
                     icon: const Icon(Icons.remove),
@@ -539,16 +674,22 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     style: IconButton.styleFrom(
                       backgroundColor: const Color(0xFF303034),
                     ),
-                    onPressed: canChange && _sheet.transpose < 24
+                    onPressed:
+                        canChange &&
+                            (_sheet.followAudio
+                                ? widget.model.pitch < 12
+                                : _sheet.transpose < 24)
                         ? () => _changeTone(1)
                         : null,
                     icon: const Icon(Icons.add),
                   ),
                 ],
               ),
-              const Text(
-                'Acordes · independente do áudio',
-                style: TextStyle(color: studioMuted, fontSize: 11),
+              Text(
+                _sheet.followAudio
+                    ? 'Acordes · acompanham o áudio'
+                    : 'Acordes · independente do áudio',
+                style: const TextStyle(color: studioMuted, fontSize: 11),
               ),
               const SizedBox(height: 8),
               if (_loading) const LinearProgressIndicator(),
@@ -565,7 +706,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0D0D0F),
+                  color: widget.appearance.mode == StudioAppearanceMode.light
+                      ? const Color(0xFFFFFFFF)
+                      : const Color(0xFF0D0D0F),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: LayoutBuilder(
@@ -578,18 +721,11 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     return SelectableText.rich(
                       key: const Key('playerChordText'),
                       TextSpan(
-                        children: [
-                          for (final (i, line) in text.split('\n').indexed)
-                            TextSpan(
-                              text: '${i == 0 ? '' : '\n'}$line',
-                              style: _isChordLine(line)
-                                  ? const TextStyle(
-                                      color: studioCyan,
-                                      fontWeight: FontWeight.w700,
-                                    )
-                                  : null,
-                            ),
-                        ],
+                        children: playerChordColorSpans(
+                          text,
+                          noteColors: widget.appearance.noteColors,
+                          mode: widget.appearance.mode,
+                        ),
                       ),
                       style: TextStyle(
                         fontFamily: 'monospace',

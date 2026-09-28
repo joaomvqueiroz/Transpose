@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import 'microphone_tuner.dart';
+import 'band_session.dart';
+import 'band_panel.dart';
+import 'rhythm_panel.dart';
 
 /// Opens the study tool attached to the current player's pitch.
 Future<void> showStudyTool(
@@ -62,8 +65,21 @@ Future<void> showStudyTool(
 }
 
 /// Reuses the same working tool inside the player's horizontally browsable tabs.
-Widget embeddedStudyTool(String tool) => switch (tool) {
-  'metronome' => const _MetronomeTool(),
+Widget embeddedStudyTool(
+  String tool, {
+  Future<void> Function()? beforePreview,
+  BandSession? bandSession,
+  Future<void> Function(Uint8List)? onApprovedRhythm,
+  Future<void> Function()? onStopRhythm,
+  bool rhythmPlaying = false,
+}) => switch (tool) {
+  'metronome' => _MetronomeTool(
+    beforePreview: beforePreview,
+    bandSession: bandSession,
+    onApprovedRhythm: onApprovedRhythm,
+    onStopRhythm: onStopRhythm,
+    rhythmPlaying: rhythmPlaying,
+  ),
   'tuner' => const _InstrumentTunerTool(),
   _ => throw ArgumentError.value(tool, 'tool'),
 };
@@ -248,7 +264,7 @@ class _StudySound extends ChangeNotifier with WidgetsBindingObserver {
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> play(Uint8List bytes) {
+  Future<void> play(Uint8List bytes, {bool loop = true}) {
     final int generation = ++_generation;
     busy = true;
     error = null;
@@ -270,7 +286,7 @@ class _StudySound extends ChangeNotifier with WidgetsBindingObserver {
           await _release();
           return;
         }
-        await player.setLooping(true);
+        await player.setLooping(loop);
         if (_disposed || generation != _generation) {
           await _release();
           return;
@@ -284,9 +300,18 @@ class _StudySound extends ChangeNotifier with WidgetsBindingObserver {
         if (!playing || player.value.hasError) {
           throw StateError('Reference playback did not start.');
         }
+        player.addListener(() {
+          if (_disposed || generation != _generation || busy) return;
+          if (playing != player.value.isPlaying) {
+            playing = player.value.isPlaying;
+            _notify();
+          }
+        });
       } on Object {
         await _release();
-        error = 'Não foi possível tocar. Tente novamente.';
+        if (!_disposed && generation == _generation) {
+          error = 'Não foi possível tocar. Tente novamente.';
+        }
       } finally {
         if (generation == _generation) busy = false;
         _notify();
@@ -346,33 +371,80 @@ class _StudySound extends ChangeNotifier with WidgetsBindingObserver {
 }
 
 class _MetronomeTool extends StatefulWidget {
-  const _MetronomeTool();
+  const _MetronomeTool({
+    this.beforePreview,
+    this.bandSession,
+    this.onApprovedRhythm,
+    this.onStopRhythm,
+    this.rhythmPlaying = false,
+  });
+  final Future<void> Function()? beforePreview;
+  final BandSession? bandSession;
+  final Future<void> Function(Uint8List)? onApprovedRhythm;
+  final Future<void> Function()? onStopRhythm;
+  final bool rhythmPlaying;
   @override
   State<_MetronomeTool> createState() => _MetronomeToolState();
 }
 
 class _MetronomeToolState extends State<_MetronomeTool> {
   final _StudySound _sound = _StudySound();
+  late final BandSession _band = widget.bandSession ?? BandSession();
   int _bpm = 100;
   int _beats = 4;
+  bool _previewing = false;
+  int _mediaGeneration = 0;
 
-  Future<void> _start() =>
-      _sound.play(buildMetronomeWav(bpm: _bpm, beatsPerBar: _beats));
+  @override
+  void initState() {
+    super.initState();
+    if (_band.connected) {
+      _bpm = _band.plan.bpm;
+      _beats = _band.plan.beatsPerBar;
+    }
+  }
+
+  bool get _playing =>
+      _band.connected ? _band.plan.playing : (_sound.playing && !_previewing);
+  bool get _canEdit => !_sound.busy && (!_band.connected || _band.isHost);
+
+  Future<void> _start() async {
+    ++_mediaGeneration;
+    _previewing = false;
+    await widget.onStopRhythm?.call();
+    if (!mounted) return;
+    if (_band.connected) {
+      _band.setTransport(bpm: _bpm, beats: _beats, playing: true);
+    } else {
+      await _sound.play(buildMetronomeWav(bpm: _bpm, beatsPerBar: _beats));
+    }
+  }
+
+  Future<void> _stop() async {
+    ++_mediaGeneration;
+    _previewing = false;
+    if (_band.connected) {
+      _band.setTransport(bpm: _bpm, beats: _beats, playing: false);
+    } else {
+      await _sound.stop();
+    }
+  }
 
   void _setTempo(int value) {
     setState(() => _bpm = value.clamp(40, 240));
-    if (_sound.playing) unawaited(_start());
+    if (_playing) unawaited(_start());
   }
 
   @override
   void dispose() {
+    if (widget.bandSession == null) _band.dispose();
     _sound.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _sound,
+    listenable: Listenable.merge([_sound, _band]),
     builder: (BuildContext context, _) => Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -383,18 +455,18 @@ class _MetronomeToolState extends State<_MetronomeTool> {
           children: <Widget>[
             IconButton(
               tooltip: 'Diminuir BPM',
-              onPressed: !_sound.busy && _bpm > 40
+              onPressed: _canEdit && _bpm > 40
                   ? () => _setTempo(_bpm - 1)
                   : null,
               icon: const Icon(Icons.remove),
             ),
             Text(
-              '$_bpm BPM',
+              '${_band.connected && !_band.isHost ? _band.plan.bpm : _bpm} BPM',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             IconButton(
               tooltip: 'Aumentar BPM',
-              onPressed: !_sound.busy && _bpm < 240
+              onPressed: _canEdit && _bpm < 240
                   ? () => _setTempo(_bpm + 1)
                   : null,
               icon: const Icon(Icons.add),
@@ -408,44 +480,82 @@ class _MetronomeToolState extends State<_MetronomeTool> {
           value: _bpm.toDouble(),
           label: '$_bpm BPM',
           semanticFormatterCallback: (double value) => '${value.round()} BPM',
-          onChanged: _sound.busy
+          onChanged: !_canEdit
               ? null
               : (double v) => setState(() => _bpm = v.round()),
           onChangeEnd: (_) {
-            if (_sound.playing) unawaited(_start());
+            if (_playing) unawaited(_start());
           },
         ),
         DropdownButtonFormField<int>(
-          initialValue: _beats,
+          key: ValueKey(
+            _band.connected && !_band.isHost ? _band.plan.beatsPerBar : 0,
+          ),
+          initialValue: _band.connected && !_band.isHost
+              ? _band.plan.beatsPerBar
+              : _beats,
           decoration: const InputDecoration(labelText: 'Batidas por compasso'),
           items: <DropdownMenuItem<int>>[
             for (int value = 1; value <= 12; value++)
               DropdownMenuItem(value: value, child: Text('$value')),
           ],
-          onChanged: _sound.busy
+          onChanged: !_canEdit
               ? null
               : (int? value) {
                   if (value == null) return;
                   setState(() => _beats = value);
-                  if (_sound.playing) unawaited(_start());
+                  if (_playing) unawaited(_start());
                 },
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
           key: const Key('metronomePlayback'),
-          onPressed: _sound.busy
-              ? null
-              : () => _sound.playing ? _sound.stop() : _start(),
-          icon: Icon(_sound.playing ? Icons.stop : Icons.play_arrow),
+          onPressed: !_canEdit ? null : () => _playing ? _stop() : _start(),
+          icon: Icon(_playing ? Icons.stop : Icons.play_arrow),
           label: Text(
             _sound.busy
                 ? 'A preparar…'
-                : _sound.playing
+                : _playing
                 ? 'Parar metrônomo'
                 : 'Iniciar metrônomo',
           ),
         ),
         if (_sound.error != null) Text(_sound.error!),
+        if (Platform.isAndroid)
+          BandPanel(
+            session: _band,
+            beforeConnect: () async {
+              ++_mediaGeneration;
+              await _sound.stop();
+              await widget.onStopRhythm?.call();
+            },
+          ),
+        RhythmPanel(
+          enabled: !_band.connected,
+          playing: widget.onApprovedRhythm != null
+              ? widget.rhythmPlaying
+              : _previewing && _sound.playing,
+          onStop: widget.onStopRhythm ?? _sound.stop,
+          onPreview: (bytes) async {
+            final generation = ++_mediaGeneration;
+            await widget.beforePreview?.call();
+            if (!mounted || generation != _mediaGeneration || _band.connected) {
+              return;
+            }
+            if (widget.onApprovedRhythm != null) {
+              await _sound.stop();
+              if (!mounted ||
+                  generation != _mediaGeneration ||
+                  _band.connected) {
+                return;
+              }
+              await widget.onApprovedRhythm!(bytes);
+              return;
+            }
+            _previewing = true;
+            await _sound.play(bytes, loop: false);
+          },
+        ),
       ],
     ),
   );

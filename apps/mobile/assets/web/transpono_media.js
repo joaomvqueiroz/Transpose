@@ -33,6 +33,9 @@
   let delay = 0;
   let reverb = 0;
   let reverbImpulse = null;
+  let effectsEpoch = 0;
+  let restoringEffectsEpoch = -1;
+  const effectIntents = new Map();
   const keyDetector = window.TransponoKeyDetector
     ? new window.TransponoKeyDetector.KeyDetector() : null;
   let keyCapture = null;
@@ -62,6 +65,9 @@
   let disposed = false;
   let lastPosted = '';
   let snapshotRevision = 0;
+  let timelineSeekEpoch = 0;
+  let timelineRateEpoch = 0;
+  let timelineSourceEpoch = 0;
   let transportRevision = 0;
   let playbackIntent = null;
   let pitchCommandIntent = null;
@@ -92,9 +98,17 @@
     return match ? match[1] : null;
   };
   const title = () => {
-    const heading = document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title');
-    return ((heading && heading.textContent) || document.title || '')
-      .replace(/\s*[-–]\s*YouTube\s*$/, '').trim();
+    const candidates = [
+      document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title')?.textContent,
+      document.querySelector('meta[property="og:title"]')?.getAttribute('content'),
+      document.querySelector('meta[name="title"]')?.getAttribute('content'),
+      document.title,
+    ];
+    for (const candidate of candidates) {
+      const value = (candidate || '').replace(/\s*[-–]\s*YouTube\s*$/i, '').trim();
+      if (value && !/^(?:youtube|vídeo do youtube)$/i.test(value)) return value;
+    }
+    return '';
   };
 
   function timeout(promise, milliseconds, message) {
@@ -159,7 +173,9 @@
   }
 
   function connectEffects(graph) {
-    graph.low.connect(graph.mid).connect(graph.high).connect(graph.master).connect(audioContext.destination);
+    graph.low.connect(graph.mid).connect(graph.high).connect(graph.master);
+    if (graph.probeFinal) graph.master.connect(graph.probeFinal).connect(audioContext.destination);
+    else graph.master.connect(audioContext.destination);
     graph.high.connect(graph.echoDelay);
     graph.echoDelay.connect(graph.echoGain).connect(graph.master);
     graph.echoDelay.connect(graph.feedbackGain).connect(graph.echoDelay);
@@ -180,6 +196,7 @@
     graph.mid.disconnect();
     graph.high.disconnect();
     graph.master.disconnect();
+    if (graph.probeFinal) graph.probeFinal.disconnect();
     graph.echoDelay.disconnect();
     graph.echoGain.disconnect();
     graph.feedbackGain.disconnect();
@@ -403,6 +420,7 @@
     loopEventHandlers = {
       seeking() {
         if (element !== video || disposed) return;
+        timelineSeekEpoch += 1;
         refresh();
         const pending = pendingLoopReturn;
         // currentTime is changed synchronously, but seeking/seeked are queued.
@@ -460,6 +478,11 @@
         invalidateLoopObservation();
         post();
       },
+      ratechange() {
+        if (element !== video || disposed) return;
+        timelineRateEpoch += 1;
+        post();
+      },
     };
     for (const [name, handler] of Object.entries(loopEventHandlers)) {
       element.addEventListener(name, handler);
@@ -481,6 +504,7 @@
   }
 
   function resetPractice(previous) {
+    effectsEpoch += 1;
     revision += 1;
     invalidatePlaybackIntent();
     invalidateLoopObservation();
@@ -522,10 +546,13 @@
       ? document.querySelector('video.html5-main-video') || document.querySelector('video')
       : null;
     if (id !== videoId) {
+      timelineSourceEpoch += 1;
       resetPractice(video);
       videoId = id;
     }
     if (next !== video) {
+      timelineSourceEpoch += 1;
+      effectsEpoch += 1;
       resetKeyDetection();
       invalidatePlaybackIntent();
       dry(video && graphs.get(video), true);
@@ -542,6 +569,8 @@
     }
     const nextSource = sourceOf(video);
     if (nextSource !== observedSource) {
+      timelineSourceEpoch += 1;
+      effectsEpoch += 1;
       observedSource = nextSource;
       invalidatePlaybackIntent();
       invalidateLoopObservation();
@@ -551,6 +580,7 @@
     }
     const nextAd = !!document.querySelector('.ad-showing, .ad-interrupting');
     if (nextAd !== isAd) {
+      effectsEpoch += 1;
       isAd = nextAd;
       invalidatePlaybackIntent();
       invalidateLoopObservation();
@@ -581,6 +611,7 @@
     if (graph && !safeSource(video)) {
       unavailable('Este vídeo não permite alterar o tom. Reabra o vídeo se o áudio não voltar.');
     }
+    restoreEffects();
     const duration = durationOf(video);
     if (!isAd && loopB !== null && (duration === 0 || loopB > duration)) {
       loopB = null;
@@ -589,17 +620,81 @@
     }
   }
 
+  function desiredEffects() {
+    return {bass, mid, treble, gain, chorus, feedback, delay, reverb};
+  }
+
+  function effectNodes(graph) {
+    return {bass: graph.low.gain, mid: graph.mid.gain, treble: graph.high.gain,
+      gain: graph.master.gain, chorus: graph.chorusGain.gain,
+      feedback: graph.feedbackGain.gain, delay: graph.echoGain.gain,
+      reverb: graph.reverbGain.gain};
+  }
+
+  function validEffectsContext(epoch, element, id, source) {
+    return !disposed && !isAd && effectsEpoch === epoch && video === element &&
+      videoId === id && sourceOf(element) === source && safeSource(element);
+  }
+
+  function restoreEffects() {
+    if (!video || disposed || isAd || !safeSource(video)) return;
+    const graph = graphs.get(video);
+    if (graph?.effectsFailed || graph?.effectsEpoch === effectsEpoch) return;
+    if (!graph && !Object.values(desiredEffects()).some(value => value !== 0)) return;
+    if (graph && !graph.retired) {
+      const nodes = effectNodes(graph);
+      for (const [action, value] of Object.entries(desiredEffects())) {
+        setEffectParam(nodes[action], action === 'gain' ? decibelGain(value) : value);
+      }
+      graph.effectsEpoch = effectsEpoch;
+      return;
+    }
+    if (video.muted || video.volume === 0 || restoringEffectsEpoch === effectsEpoch) return;
+    const epoch = effectsEpoch, element = video, id = videoId, source = sourceOf(video);
+    restoringEffectsEpoch = epoch;
+    void prepareGraph(element, false).then(restored => {
+      if (!validEffectsContext(epoch, element, id, source) || restored.effectsFailed) return;
+      // Values may have changed while preparation awaited AudioContext.resume.
+      restored.effectsEpoch = -1;
+      restoreEffects();
+      post();
+    }).catch(() => {
+      // Keep the native route; a new context or explicit adjustment can retry.
+      // Snapshots report zero until there is an applicable processing graph.
+    });
+  }
+
+  function appliedEffects(graph) {
+    const values = {bass: 0, mid: 0, treble: 0, gain: 0,
+      chorus: 0, feedback: 0, delay: 0, reverb: 0};
+    if (!graph || graph.effectsFailed || graph.retired || disposed || isAd ||
+        graph.effectsEpoch !== effectsEpoch || !safeSource(video)) return values;
+    const nodes = effectNodes(graph);
+    for (const action of Object.keys(values)) {
+      const value = nodes[action].value;
+      values[action] = action === 'gain' ? 20 * Math.log10(value) : value;
+    }
+    return values;
+  }
+
   function snapshot() {
     refresh();
     const graph = video && graphs.get(video);
+    const sampleTimeMs = now();
+    const mediaPosition = positionOf(video);
     return {
       snapshotRevision: ++snapshotRevision,
+      sampleTimeMs,
+      timelineSeekEpoch,
+      timelineRateEpoch,
+      timelineSourceEpoch,
       videoId,
       title: video ? title() : '',
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
+      seeking: !!video && video.seeking,
       muted: !!video && (video.muted || video.volume === 0),
-      position: positionOf(video),
+      position: mediaPosition,
       duration: durationOf(video),
       speed: video && !isAd ? finite(video.playbackRate, speed) : speed,
       // During a live pitch change, keep showing the tone still audible on
@@ -608,6 +703,7 @@
       pendingPitch: pitchStatus === 'loading' ? pitch : null,
       pitchStatus,
       pitchMessage,
+      audioEffects: appliedEffects(graph),
       keyRoot,
       keyMode,
       keyStatus: keyDetector ? keyStatus : 'unavailable',
@@ -710,14 +806,23 @@
         reverbGain.gain.value = reverb;
         const master = audioContext.createGain();
         master.gain.value = decibelGain(gain);
+        // Test-only observation of the actual mixed output, including bypass/EQ.
+        const probeFinal = probeEnabled ? audioContext.createAnalyser() : null;
+        if (probeFinal) {
+          probeFinal.fftSize = 8192;
+          probeFinal.smoothingTimeConstant = 0;
+        }
         dryGain.gain.value = 1;
         wetGain.gain.value = 0;
         input.connect(keyAnalyser).connect(dryGain).connect(low);
-        if (stretch) input.connect(stretch).connect(output).connect(wetGain).connect(low);
+        // EQ/effects may create this graph before pitch is first requested.
+        // Keep its wet output wired even when the processor is attached later.
+        wetGain.connect(low);
+        if (stretch) input.connect(stretch).connect(output).connect(wetGain);
         // Last irreversible operation, after the entire output graph is ready.
         const source = audioContext.createMediaElementSource(element);
         const graph = {
-          element, source, input, output, keyAnalyser,
+          element, source, input, output, keyAnalyser, probeFinal,
           keySpectrum: new Float32Array(keyAnalyser.frequencyBinCount),
           stretch, dry: dryGain, wet: wetGain,
           low, mid: midFilter, high, master, echoDelay, echoGain, feedbackGain,
@@ -725,6 +830,7 @@
           retired: false, lfoStarted: false,
           samples: new Float32Array(512), audible: false, failed: false, dspConnected: !!stretch,
           appliedPitch: pitch, acknowledged: false, silentSince: null,
+          effectsEpoch, effectsFailed: false,
           ...(probeEnabled ? {
             probeSpectrum: new Float32Array(4096), probeWave: new Float32Array(8192),
           } : {}),
@@ -740,6 +846,7 @@
           source.disconnect();
           source.connect(audioContext.destination);
           graph.failed = true;
+          graph.effectsFailed = true;
           throw error;
         }
         connected = true;
@@ -889,12 +996,16 @@
     const graph = video && graphs.get(video);
     const input = graph ? probeMeasurement(graph.input, graph) : {hz: null, rms: null};
     const output = graph ? probeMeasurement(graph.output, graph) : {hz: null, rms: null};
+    const finalOutput = graph && graph.probeFinal
+      ? probeMeasurement(graph.probeFinal, graph) : {hz: null, rms: null};
     return {
       inputHz: input.hz, outputHz: output.hz, inputRms: input.rms, outputRms: output.rms,
+      finalHz: finalOutput.hz, finalRms: finalOutput.rms,
       sampleRate: audioContext ? audioContext.sampleRate : null,
       contextState: audioContext ? audioContext.state : 'absent',
       dryGain: graph ? graph.dry.gain.value : null,
       wetGain: graph ? graph.wet.gain.value : null,
+      dspConnected: graph ? graph.dspConnected : false,
       effects: graph ? {
         gain: graph.master.gain.value,
         chorus: graph.chorusGain.gain.value,
@@ -989,6 +1100,16 @@
     if (disposed || !allowedPage()) throw new Error('O navegador de prática está fechado.');
     refresh();
     if (!request || typeof request.action !== 'string') throw new TypeError('Comando inválido.');
+    const effectIntent = {epoch: effectsEpoch, element: video, id: videoId,
+      source: sourceOf(video), commandId: activeDispatchId};
+    if (Object.hasOwn(desiredEffects(), request.action)) effectIntents.set(request.action, effectIntent);
+    function checkEffect(graph) {
+      refresh();
+      if (effectIntents.get(request.action) !== effectIntent || graph.effectsFailed ||
+          !validEffectsContext(effectIntent.epoch, effectIntent.element, effectIntent.id, effectIntent.source)) {
+        throw new Error('O ajuste de áudio foi substituído ou o vídeo mudou.');
+      }
+    }
     switch (request.action) {
       case 'pause':
         invalidatePlaybackIntent();
@@ -1031,17 +1152,16 @@
           throw new Error('Este vídeo não disponibiliza áudio para o equalizador neste dispositivo.');
         requireSound(video);
         const graph = await prepareGraph(video, false);
-        if (disposed || graph.element !== video || isAd)
-          throw new Error('A seleção de vídeo mudou. Tente novamente.');
+        checkEffect(graph);
         if (request.action === 'bass') {
-          bass = value;
           graph.low.gain.setValueAtTime(value, audioContext.currentTime);
+          bass = value;
         } else if (request.action === 'mid') {
-          mid = value;
           graph.mid.gain.setValueAtTime(value, audioContext.currentTime);
+          mid = value;
         } else {
-          treble = value;
           graph.high.gain.setValueAtTime(value, audioContext.currentTime);
+          treble = value;
         }
         break;
       }
@@ -1061,28 +1181,27 @@
           throw new Error('Este vídeo não disponibiliza áudio para efeitos neste dispositivo.');
         requireSound(video);
         const graph = await prepareGraph(video, false);
-        if (disposed || graph.element !== video || isAd)
-          throw new Error('A seleção de vídeo mudou. Tente novamente.');
+        checkEffect(graph);
         switch (request.action) {
           case 'gain':
-            gain = value;
             setEffectParam(graph.master.gain, decibelGain(value), true);
+            gain = value;
             break;
           case 'chorus':
-            chorus = value;
             setEffectParam(graph.chorusGain.gain, value, true);
+            chorus = value;
             break;
           case 'feedback':
-            feedback = value;
             setEffectParam(graph.feedbackGain.gain, value, true);
+            feedback = value;
             break;
           case 'delay':
-            delay = value;
             setEffectParam(graph.echoGain.gain, value, true);
+            delay = value;
             break;
           case 'reverb':
-            reverb = value;
             setEffectParam(graph.reverbGain.gain, value, true);
+            reverb = value;
             break;
         }
         break;
@@ -1221,6 +1340,9 @@
   function cancelCommand(id) {
     if (commandResults.get(id)?.status !== 'pending') return false;
     commandResults.set(id, {status: 'error', error: 'Comando cancelado.'});
+    for (const [action, intent] of effectIntents) {
+      if (intent.commandId === id) effectIntents.delete(action);
+    }
     if (playbackIntent && playbackIntent.commandId === id) {
       const element = playbackIntent.element;
       invalidatePlaybackIntent();

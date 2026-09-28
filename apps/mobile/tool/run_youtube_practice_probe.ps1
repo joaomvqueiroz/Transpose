@@ -13,14 +13,20 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-zA-Z0-9_.:-]+$')]
     [string] $DeviceId,
+    [ValidateSet('practice', 'transport')]
+    [string] $Probe = 'practice',
     [ValidateNotNullOrEmpty()]
     [string] $FlutterPath = (Join-Path $env:LOCALAPPDATA 'Codex\Toolchains\flutter\bin\flutter.bat')
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $mobileRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$probeTarget = 'integration_test/youtube_practice_probe_test.dart'
-$probeDriver = 'test_driver/youtube_practice_probe_test.dart'
+$probeTarget = if ($Probe -eq 'transport') {
+    'integration_test/youtube_transport_probe_test.dart'
+} else { 'integration_test/youtube_practice_probe_test.dart' }
+$probeDriver = if ($Probe -eq 'transport') {
+    'test_driver/youtube_transport_probe_test.dart'
+} else { 'test_driver/youtube_practice_probe_test.dart' }
 $qaApplicationId = 'com.example.transpose_mobile.qa'
 if (-not (Test-Path -LiteralPath $FlutterPath -PathType Leaf)) {
     throw "Flutter executable not found: $FlutterPath"

@@ -55,6 +55,9 @@ android {
                 val rubberBandSourceDir = (System.getenv("TRANSPOSE_RUBBERBAND_SOURCE_DIR") ?: "")
                     .replace('\\', '/')
                 arguments("-DTRANSPOSE_RUBBERBAND_SOURCE_DIR=$rubberBandSourceDir")
+                val demucsSourceDir = (System.getenv("TRANSPOSE_DEMUCS_SOURCE_DIR") ?: "")
+                    .replace('\\', '/')
+                arguments("-DTRANSPOSE_DEMUCS_SOURCE_DIR=$demucsSourceDir")
             }
         }
     }

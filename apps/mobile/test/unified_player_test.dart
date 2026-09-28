@@ -160,10 +160,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('colunas adicionais são acessíveis ao arrastar a faixa', (
+  testWidgets('quatro colunas cabem sem arrastar a faixa', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(390, 844);
+    tester.view.physicalSize = const Size(350, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -173,8 +173,13 @@ void main() {
     final viewport = find.byKey(const Key('visualMainMediaViewport'));
     final mediaHeight = tester.getSize(viewport).height;
     final strip = find.byKey(const Key('unifiedSectionStrip'));
-    await tester.drag(strip, const Offset(-260, 0));
-    await tester.pumpAndSettle();
+    final stripRect = tester.getRect(strip);
+    for (final tab in ['chords', 'practice', 'setlist', 'audioSettings']) {
+      final rect = tester.getRect(find.byKey(Key('unifiedSection$tab')));
+      expect(rect.left, greaterThanOrEqualTo(stripRect.left));
+      expect(rect.right, lessThanOrEqualTo(stripRect.right));
+    }
+    expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.byKey(const Key('unifiedSectionsetlist')));
     await tester.tap(find.byKey(const Key('unifiedSectionsetlist')));
     await tester.pumpAndSettle();
@@ -337,6 +342,45 @@ void main() {
     session.pending[2].complete();
     await tester.pump();
     expect(tester.widget<Slider>(bass).value, 7);
+    session.state = const YouTubeMediaState(
+      videoId: 'audio-order',
+      hasVideo: true,
+      duration: 180,
+      audioEffects: {'bass': 0, 'mid': 0},
+    );
+    session.notifyListeners();
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(bass).value,
+      0,
+      reason:
+          'Same-song video replacement must not retain obsolete slider values',
+    );
+    session.state = const YouTubeMediaState(
+      videoId: 'audio-order',
+      hasVideo: true,
+      duration: 180,
+      audioEffects: {'bass': 7, 'mid': 6},
+    );
+    session.notifyListeners();
+    await tester.pump();
+    expect(tester.widget<Slider>(bass).value, 7);
+    tester.widget<Slider>(bass).onChanged?.call(3);
+    session.notifyListeners();
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(bass).value,
+      3,
+      reason: 'Polling cannot interrupt an active slider drag',
+    );
+    tester.widget<Slider>(bass).onChangeEnd?.call(3);
+    session.pending.last.completeError(StateError('unsupported source'));
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(bass).value,
+      7,
+      reason: 'Rejected adjustment returns to the engine value',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -393,12 +437,16 @@ void main() {
 
 class _DelayedAudioSession extends FakeYouTubeSession {
   final List<Completer<void>> pending = <Completer<void>>[];
+  final Map<String, int> versions = <String, int>{};
 
   @override
   Future<void> command(String action, [num? value]) async {
     final completer = Completer<void>();
+    final version = (versions[action] ?? 0) + 1;
+    versions[action] = version;
     pending.add(completer);
     await completer.future;
+    if (versions[action] != version) return;
     await super.command(action, value);
   }
 }

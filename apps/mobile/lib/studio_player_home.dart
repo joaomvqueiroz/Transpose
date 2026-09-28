@@ -2,19 +2,22 @@ part of 'studio_visual_app.dart';
 
 class _StudioVisualHomeState extends State<StudioVisualHome>
     with WidgetsBindingObserver {
+  Color get _background => widget.appearance.mode == StudioAppearanceMode.light
+      ? const Color(0xFFF4F7FB)
+      : studioBg;
   late final MainPlayerController _player =
       widget.playerController ??
       MainPlayerController(youtubeFactory: widget.youtubeSessionFactory);
   late final PlayerPresetStore _presets =
       widget.presetStore ?? PlayerPresetStore();
   late final PracticeController _practice = PracticeController(_player);
+  final BandSession _bandSession = BandSession();
   final ChordSheetStore _chords = ChordSheetStore();
   int _collectionsRevision = 0;
   String? _selectedPresetId;
   final GlobalKey _mediaKey = GlobalKey(debugLabel: 'shared-player-surface');
   final GlobalKey<PlayerChordSheetState> _unifiedChordKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
-  final ScrollController _tabsScroll = ScrollController();
   final GlobalKey _adjustmentButtonAnchorKey = GlobalKey();
   OverlayEntry? _adjustmentChoicesOverlay;
   Size _adjustmentButtonSize = const Size(40, 40);
@@ -46,10 +49,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   String _browserOriginVideoId = '';
   double _bassDb = 0, _midDb = 0, _trebleDb = 0, _gainDb = 0;
   double _chorusMix = 0, _feedbackMix = 0, _delayMix = 0, _reverbMix = 0;
-  double _appliedBassDb = 0, _appliedMidDb = 0, _appliedTrebleDb = 0;
-  double _appliedGainDb = 0, _appliedChorusMix = 0, _appliedFeedbackMix = 0;
-  double _appliedDelayMix = 0, _appliedReverbMix = 0;
   final Map<String, int> _audioCommandVersions = <String, int>{};
+  final Set<String> _audioDragging = <String>{};
+  int _audioSourceRevision = 0;
   YouTubeBrowserSession? _browserOwner;
   Widget? _browser;
   late final HomeWidgetBridge _homeWidgets;
@@ -157,11 +159,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _seekPreviewMs = null;
       _bassDb = _midDb = _trebleDb = _gainDb = 0;
       _chorusMix = _feedbackMix = _delayMix = _reverbMix = 0;
-      _appliedBassDb = _appliedMidDb = _appliedTrebleDb = _appliedGainDb = 0;
-      _appliedChorusMix = _appliedFeedbackMix = _appliedDelayMix =
-          _appliedReverbMix = 0;
       _audioCommandVersions.clear();
+      _audioDragging.clear();
+      _audioSourceRevision++;
     }
+    _syncAudioValues();
     if (mounted) {
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         _lastForegroundWidgetState = _widgetSnapshot();
@@ -322,6 +324,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       unawaited(_practice.pause());
+      unawaited(_player.pause());
       _homeWidgets.schedule({
         ...?_lastForegroundWidgetState,
         'playing': false,
@@ -348,10 +351,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _player.removeListener(_changed);
     _practice.removeListener(_practiceChanged);
     _practice.dispose();
+    _bandSession.dispose();
     _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();
-    _tabsScroll.dispose();
     _chordAutoTimer?.cancel();
     super.dispose();
   }
@@ -433,22 +436,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _adjustmentChoicesVisible = false;
     });
     if (tab == StudioTab.tuner) unawaited(_player.pause());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_tabsScroll.hasClients) return;
-      final index = _visibleTabs.indexWhere((item) => item.$1 == _tab);
-      if (index < 0) return;
-      final target = (index * 80.0 - 80).clamp(
-        0.0,
-        _tabsScroll.position.maxScrollExtent,
-      );
-      unawaited(
-        _tabsScroll.animateTo(
-          target,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-        ),
-      );
-    });
   }
 
   void _toggleMainAdjustments() {
@@ -768,6 +755,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _notice('Escolha uma música primeiro.');
       return;
     }
+    if (_player.isRhythmPreview) {
+      _notice('Prévia temporária não pode ser guardada.');
+      return;
+    }
     // Capture before opening the dialog: a changing YouTube page cannot silently
     // save a different song under the name the user is currently typing.
     final captured = _player.snapshot(_player.title);
@@ -843,6 +834,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => PlayerCollectionsPage(
+          appearance: widget.appearance,
           store: _presets,
           setlist: setlist,
           onApply: (preset) async {
@@ -915,43 +907,48 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
-  double _appliedAudioValue(String action) => switch (action) {
-    'bass' => _appliedBassDb,
-    'mid' => _appliedMidDb,
-    'treble' => _appliedTrebleDb,
-    'gain' => _appliedGainDb,
-    'chorus' => _appliedChorusMix,
-    'feedback' => _appliedFeedbackMix,
-    'delay' => _appliedDelayMix,
-    'reverb' => _appliedReverbMix,
-    _ => throw ArgumentError.value(action, 'action'),
-  };
+  void _syncAudioValues() {
+    final effects = _player.isYouTube
+        ? _player.youtube?.media.audioEffects
+        : null;
+    for (final action in <String>[
+      'bass',
+      'mid',
+      'treble',
+      'gain',
+      'chorus',
+      'feedback',
+      'delay',
+      'reverb',
+    ]) {
+      if (!_audioDragging.contains(action)) {
+        _assignAudioValue(action, effects?[action] ?? 0);
+      }
+    }
+  }
 
-  void _assignAudioValue(String action, double value, {required bool applied}) {
+  void _previewAudioValue(String action, double value) {
+    _audioDragging.add(action);
+    _assignAudioValue(action, value);
+  }
+
+  void _assignAudioValue(String action, double value) {
     switch (action) {
       case 'bass':
-        if (applied) _appliedBassDb = value;
         _bassDb = value;
       case 'mid':
-        if (applied) _appliedMidDb = value;
         _midDb = value;
       case 'treble':
-        if (applied) _appliedTrebleDb = value;
         _trebleDb = value;
       case 'gain':
-        if (applied) _appliedGainDb = value;
         _gainDb = value;
       case 'chorus':
-        if (applied) _appliedChorusMix = value;
         _chorusMix = value;
       case 'feedback':
-        if (applied) _appliedFeedbackMix = value;
         _feedbackMix = value;
       case 'delay':
-        if (applied) _appliedDelayMix = value;
         _delayMix = value;
       case 'reverb':
-        if (applied) _appliedReverbMix = value;
         _reverbMix = value;
       default:
         throw ArgumentError.value(action, 'action');
@@ -959,36 +956,151 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Future<void> _setAudioControl(String action, double value) async {
+    _audioDragging.remove(action);
     if (!_player.isYouTube || !_player.loaded) return;
     final version = (_audioCommandVersions[action] ?? 0) + 1;
     _audioCommandVersions[action] = version;
     final source = _player.sourceKey;
     final session = _player.youtube!;
+    final sourceRevision = _audioSourceRevision;
     try {
       await session.command(action, value);
       if (!mounted ||
           source != _player.sourceKey ||
           session != _player.youtube ||
+          sourceRevision != _audioSourceRevision ||
           _audioCommandVersions[action] != version) {
         return;
       }
-      setState(() => _assignAudioValue(action, value, applied: true));
+      setState(_syncAudioValues);
     } on Object {
       if (mounted &&
           source == _player.sourceKey &&
           session == _player.youtube &&
+          sourceRevision == _audioSourceRevision &&
           _audioCommandVersions[action] == version) {
-        setState(
-          () => _assignAudioValue(
-            action,
-            _appliedAudioValue(action),
-            applied: false,
-          ),
-        );
+        setState(_syncAudioValues);
         _notice('Não foi possível aplicar este ajuste de áudio no vídeo.');
       }
     }
   }
+
+  Future<void> _chooseNoteColor(int pitchClass) async {
+    final selected = await showDialog<int?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Cor da nota ${_noteNames[pitchClass]}'),
+        content: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (var index = 0; index < playerChordNoteColors.length; index++)
+              IconButton(
+                key: Key('noteColorChoice$index'),
+                tooltip: 'Escolher cor ${index + 1}',
+                onPressed: () => Navigator.pop(context, index),
+                icon: Icon(
+                  Icons.circle,
+                  color: playerChordNoteColors[index],
+                  size: 32,
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            key: const Key('noteColorDefault'),
+            onPressed: () => Navigator.pop(context, -1),
+            child: const Text('Cor original'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final colors = Map<int, Color>.of(widget.appearance.noteColors);
+    if (selected < 0) {
+      colors.remove(pitchClass);
+    } else {
+      colors[pitchClass] = playerChordNoteColors[selected];
+    }
+    widget.onAppearanceChanged?.call(
+      widget.appearance.copyWith(noteColors: colors),
+    );
+  }
+
+  static const _noteNames = [
+    'C',
+    'C♯',
+    'D',
+    'D♯',
+    'E',
+    'F',
+    'F♯',
+    'G',
+    'G♯',
+    'A',
+    'A♯',
+    'B',
+  ];
+
+  Widget _appearanceSettingsContent() => Container(
+    key: const Key('appearanceSettings'),
+    decoration: studioPanelDecoration(mode: widget.appearance.mode),
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('APARÊNCIA', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final (mode, label) in const [
+              (StudioAppearanceMode.dark, 'Escuro'),
+              (StudioAppearanceMode.light, 'Claro'),
+              (StudioAppearanceMode.glass, 'Vidro'),
+            ])
+              ChoiceChip(
+                key: Key('appearanceMode${mode.name}'),
+                label: Text(label),
+                selected: widget.appearance.mode == mode,
+                onSelected: (_) => widget.onAppearanceChanged?.call(
+                  widget.appearance.copyWith(mode: mode),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const Text(
+          'CORES DAS NOTAS',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        const Text('Toque numa nota para escolher a sua cor nas cifras.'),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (var index = 0; index < _noteNames.length; index++)
+              ActionChip(
+                key: Key('appearanceNote$index'),
+                tooltip: 'Alterar cor da nota ${_noteNames[index]}',
+                label: Text(
+                  _noteNames[index],
+                  style: TextStyle(
+                    color: playerChordDisplayColor(index, widget.appearance),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                onPressed: () => _chooseNoteColor(index),
+              ),
+          ],
+        ),
+      ],
+    ),
+  );
 
   Widget _audioSettingsContent({VoidCallback? onClose}) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -1003,13 +1115,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             icon: const Icon(Icons.close),
           ),
         ),
-      const Padding(
-        key: Key('audioTuner'),
-        padding: EdgeInsets.only(bottom: 12),
-        child: MicrophoneTunerTool(),
+      Padding(
+        key: const Key('audioTuner'),
+        padding: const EdgeInsets.only(bottom: 12),
+        child: MicrophoneTunerTool(appearance: widget.appearance),
       ),
       Container(
-        decoration: studioPanelDecoration(),
+        decoration: studioPanelDecoration(mode: widget.appearance.mode),
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1029,7 +1141,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _gainDb,
               -12,
               6,
-              (value) => _gainDb = value,
+              (value) => _previewAudioValue('gain', value),
               (value) => _setAudioControl('gain', value),
             ),
             _audioControlRow(
@@ -1038,7 +1150,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _bassDb,
               -12,
               12,
-              (value) => _bassDb = value,
+              (value) => _previewAudioValue('bass', value),
               (value) => _setAudioControl('bass', value),
             ),
             _audioControlRow(
@@ -1047,7 +1159,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _midDb,
               -12,
               12,
-              (value) => _midDb = value,
+              (value) => _previewAudioValue('mid', value),
               (value) => _setAudioControl('mid', value),
             ),
             _audioControlRow(
@@ -1056,7 +1168,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _trebleDb,
               -12,
               12,
-              (value) => _trebleDb = value,
+              (value) => _previewAudioValue('treble', value),
               (value) => _setAudioControl('treble', value),
             ),
             if (!_player.isYouTube || !_player.loaded)
@@ -1072,7 +1184,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
       const SizedBox(height: 12),
       Container(
-        decoration: studioPanelDecoration(),
+        decoration: studioPanelDecoration(mode: widget.appearance.mode),
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1092,7 +1204,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _chorusMix,
               0,
               .5,
-              (value) => _chorusMix = value,
+              (value) => _previewAudioValue('chorus', value),
               (value) => _setAudioControl('chorus', value),
             ),
             _audioControlRow(
@@ -1101,7 +1213,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _feedbackMix,
               0,
               .55,
-              (value) => _feedbackMix = value,
+              (value) => _previewAudioValue('feedback', value),
               (value) => _setAudioControl('feedback', value),
             ),
             _audioControlRow(
@@ -1110,7 +1222,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _delayMix,
               0,
               .35,
-              (value) => _delayMix = value,
+              (value) => _previewAudioValue('delay', value),
               (value) => _setAudioControl('delay', value),
             ),
             _audioControlRow(
@@ -1119,7 +1231,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               _reverbMix,
               0,
               .4,
-              (value) => _reverbMix = value,
+              (value) => _previewAudioValue('reverb', value),
               (value) => _setAudioControl('reverb', value),
             ),
           ],
@@ -1127,7 +1239,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
       const SizedBox(height: 12),
       Container(
-        decoration: studioPanelDecoration(),
+        decoration: studioPanelDecoration(mode: widget.appearance.mode),
         padding: const EdgeInsets.all(12),
         child: const Row(
           children: [
@@ -1418,7 +1530,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       Positioned.fill(
                         child: _adjustmentsCoverVideo
                             ? Material(
-                                color: studioBg,
+                                color: _background,
                                 child: Column(
                                   children: [
                                     _coveredVideoTransport(box.maxHeight),
@@ -1444,7 +1556,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                 ),
                               )
                             : ColoredBox(
-                                color: studioBg,
+                                color: _background,
                                 child: _sectionContent(media),
                               ),
                       ),
@@ -1463,6 +1575,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     (StudioTab.practice, 'Treino'),
     (StudioTab.setlist, 'Setlist'),
     (StudioTab.audioSettings, 'Áudio'),
+    (StudioTab.appearanceSettings, 'Config.'),
   ];
 
   Widget _coveredVideoTransport(double availableHeight) {
@@ -1494,7 +1607,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       height: height,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: studioPanelDecoration(radius: 28),
+        decoration: studioPanelDecoration(
+          radius: 28,
+          mode: widget.appearance.mode,
+        ),
         padding: EdgeInsets.fromLTRB(12, topInset, 12, 0),
         child: Column(
           children: [
@@ -1580,37 +1696,45 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   Widget _sectionTabs() {
     final selected = _tab == StudioTab.player ? StudioTab.chords : _tab;
-    final width = MediaQuery.sizeOf(context).width;
-    final tabWidth = ((width - 80) / 4).clamp(43.0, 82.0);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(4),
-      decoration: studioPanelDecoration(radius: 26),
+      decoration: studioPanelDecoration(
+        radius: 26,
+        mode: widget.appearance.mode,
+      ),
       child: Row(
         children: [
           Expanded(
-            child: SingleChildScrollView(
+            child: Row(
               key: const Key('unifiedSectionStrip'),
-              controller: _tabsScroll,
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final (tab, label) in _visibleTabs)
-                    Padding(
+              children: [
+                for (final (tab, label) in _visibleTabs)
+                  Expanded(
+                    child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 1),
                       child: OutlinedButton(
                         key: Key('unifiedSection${tab.name}'),
                         onPressed: () => _select(tab),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: selected == tab
-                              ? const Color(0xFF161618)
+                              ? widget.appearance.mode ==
+                                        StudioAppearanceMode.light
+                                    ? Colors.white
+                                    : const Color(0xFF161618)
+                              : widget.appearance.mode ==
+                                    StudioAppearanceMode.light
+                              ? const Color(0xFF344054)
                               : const Color(0xFFC4C4C8),
                           side: BorderSide.none,
                           backgroundColor: selected == tab
-                              ? Colors.white
+                              ? widget.appearance.mode ==
+                                        StudioAppearanceMode.light
+                                    ? const Color(0xFF163E51)
+                                    : Colors.white
                               : Colors.transparent,
-                          minimumSize: Size(tabWidth, 36),
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 1),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(19),
                           ),
@@ -1623,6 +1747,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                               StudioTab.practice => Icons.graphic_eq,
                               StudioTab.setlist => Icons.queue_music,
                               StudioTab.audioSettings => Icons.equalizer,
+                              StudioTab.appearanceSettings => Icons.tune,
                               _ => Icons.music_note_outlined,
                             }, size: 12),
                             const SizedBox(width: 3),
@@ -1641,8 +1766,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         ),
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
           if (_adjustmentChoicesVisible)
@@ -1760,14 +1885,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }) {
     if (_chordSearching) {
       return ColoredBox(
-        color: studioBg,
+        color: _background,
         child: Column(
           children: [
             _sectionTabs(),
             Expanded(
               child: ChordSearchPanel(
                 key: const Key('unifiedChordSearch'),
-                initialQuery: _player.loaded ? _player.title : '',
+                initialQuery: _player.loaded
+                    ? chordQueryFromVideoTitle(_player.title)
+                    : '',
                 sessionFactory: widget.chordBrowserFactory,
                 onCancel: () => setState(() => _chordSearching = false),
                 onSelected: _acceptChord,
@@ -1783,6 +1910,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           _sectionTabs(),
           Expanded(
             child: PlayerCollectionsPage(
+              appearance: widget.appearance,
               key: const Key('unifiedSetlist'),
               store: _presets,
               setlist: true,
@@ -1817,7 +1945,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _audioSettingsContent(),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: StemPanel(onBeforePreview: _player.pause),
+            ),
           ],
+        ),
+      );
+    }
+    if (_tab == StudioTab.appearanceSettings) {
+      return SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          key: const Key('unifiedAppearanceSettingsScroll'),
+          padding: const EdgeInsets.only(bottom: 88),
+          child: Column(
+            children: [
+              _sectionTabs(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _appearanceSettingsContent(),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -1866,7 +2016,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     content: Padding(
                       key: const Key('practiceMetronomeContent'),
                       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                      child: embeddedStudyTool('metronome'),
+                      child: embeddedStudyTool(
+                        'metronome',
+                        beforePreview: _player.pause,
+                        bandSession: _bandSession,
+                        onApprovedRhythm: Platform.isAndroid
+                            ? _player.loadApprovedRhythmPreview
+                            : null,
+                        onStopRhythm: Platform.isAndroid
+                            ? _player.stopRhythmPreview
+                            : null,
+                        rhythmPlaying:
+                            _player.isRhythmPreview && _player.playing,
+                      ),
                     ),
                   ),
                   _practiceToolRow(
@@ -1957,7 +2119,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: DecoratedBox(
               key: const Key('chordAutoScrollCard'),
-              decoration: studioPanelDecoration(),
+              decoration: studioPanelDecoration(mode: widget.appearance.mode),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
@@ -2032,9 +2194,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 if (topGap > 0) SizedBox(height: topGap),
                 DecoratedBox(
                   key: const Key('unifiedChordControlsBackdrop'),
-                  decoration: const BoxDecoration(
-                    color: studioBg,
-                    borderRadius: BorderRadius.vertical(
+                  decoration: BoxDecoration(
+                    color: _background,
+                    borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(26),
                     ),
                   ),
@@ -2055,12 +2217,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             _chordTextScroll = PrimaryScrollController.of(innerContext);
             return ColoredBox(
               key: const Key('unifiedChordBackdrop'),
-              color: studioBg,
+              color: _background,
               child: Padding(
                 key: const Key('unifiedChordFrame'),
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 child: Container(
-                  decoration: studioPanelDecoration(radius: 26),
+                  decoration: studioPanelDecoration(
+                    radius: 26,
+                    mode: widget.appearance.mode,
+                  ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
@@ -2084,6 +2249,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                               onSearch: _searchChord,
                               onHide: _toggleChord,
                               revision: _chordRevision,
+                              appearance: widget.appearance,
                             ),
                           ),
                         ),
@@ -2109,9 +2275,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
             child: DecoratedBox(
               key: const Key('unifiedChordControlsBackdrop'),
-              decoration: const BoxDecoration(
-                color: studioBg,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+              decoration: BoxDecoration(
+                color: _background,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(26),
+                ),
               ),
               child: controls,
             ),

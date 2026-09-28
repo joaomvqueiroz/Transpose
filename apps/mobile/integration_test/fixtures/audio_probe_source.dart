@@ -79,20 +79,22 @@ const audioProbeSource = r'''
       if (!window.TransponoMedia) throw new Error('Inject the media bridge before running a case.');
       const requestedPitch = parameters.pitch === undefined ? 3 : parameters.pitch;
       const requestedSpeed = parameters.speed === undefined ? 1 : parameters.speed;
-      if (requestedPitch === 0) throw new Error('Use a nonzero pitch to test the processed graph.');
       await window.TransponoMedia.command({action: 'clearLoop'});
       video.currentTime = 2;
       await video.play();
+      // Deliberately create the filters before the first pitch processor (E2).
+      await window.TransponoMedia.command({action: 'bass', value: 3});
       await window.TransponoMedia.command({action: 'pitch', value: requestedPitch});
       await window.TransponoMedia.command({action: 'speed', value: requestedSpeed});
       const deadline = performance.now() + 12000;
+      const expectedStatus = requestedPitch === 0 ? 'idle' : 'active';
       let snapshot;
       do {
         await sleep(200);
         snapshot = window.TransponoMedia.snapshot();
         if (snapshot.pitchStatus === 'unavailable') throw new Error(snapshot.pitchMessage);
-      } while (snapshot.pitchStatus !== 'active' && performance.now() < deadline);
-      if (snapshot.pitchStatus !== 'active') throw new Error('No processed signal was observed.');
+      } while (snapshot.pitchStatus !== expectedStatus && performance.now() < deadline);
+      if (snapshot.pitchStatus !== expectedStatus) throw new Error('Expected audio route was not observed.');
       // Flush initial analyser history and the browser's speed-change transition.
       await sleep(1200);
       const measurements = [];
@@ -107,15 +109,27 @@ const audioProbeSource = r'''
       snapshot = measurements.at(-1);
       const inputHz = median(measurements.map(value => value.probe.inputHz));
       const outputHz = median(measurements.map(value => value.probe.outputHz));
+      const finalHz = median(measurements.map(value => value.probe.finalHz));
+      const finalRms = median(measurements.map(value => value.probe.finalRms));
       const expectedHz = frequency * Math.pow(2, requestedPitch / 12);
-      const centsError = outputHz ? 1200 * Math.log2(outputHz / expectedHz) : null;
+      const centsError = finalHz ? 1200 * Math.log2(finalHz / expectedHz) : null;
+      // Chromium can retain the last rendered AudioParam value in a disconnected
+      // branch. Bypass is verified by disconnection AND measured final audio,
+      // not by the stale wet gain of a branch no longer producing any samples.
+      const routePassed = requestedPitch === 0
+        ? !snapshot.probe.dspConnected && snapshot.probe.dryGain === 1 &&
+          snapshot.probe.outputRms === 0
+        : snapshot.probe.dspConnected && snapshot.probe.wetGain === 1 &&
+          snapshot.probe.dryGain === 0;
       return {
-        requestedPitch, requestedSpeed, inputHz, outputHz, expectedHz, centsError,
+        requestedPitch, requestedSpeed, inputHz, outputHz, finalHz, finalRms, expectedHz, centsError,
+        routePassed,
         actualSpeed, sampleCount: measurements.length,
         passed: inputHz !== null && Math.abs(inputHz - frequency) < 4 &&
           centsError !== null && Math.abs(centsError) < 15 &&
           Math.abs(actualSpeed - requestedSpeed) < 0.15 &&
-          snapshot.probe.wetGain === 1 && snapshot.probe.dryGain === 0 &&
+          finalRms !== null && finalRms > 0.01 &&
+          routePassed &&
           snapshot.probe.sourceCount === 1 && snapshot.pitch === requestedPitch,
         snapshot,
       };

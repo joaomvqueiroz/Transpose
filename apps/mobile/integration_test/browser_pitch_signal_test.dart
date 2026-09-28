@@ -50,10 +50,20 @@ void main() {
       );
     }
     final List<dynamic> cases = <dynamic>[];
+    binding.reportData = <String, dynamic>{'cases': cases};
+    addTearDown(() async {
+      await session.controller.runJavaScript(
+        'window.TransponoAudioProbe?.cleanup()',
+      );
+    });
     for (final (int pitch, double speed) in <(int, double)>[
       (12, 1),
       (-5, 0.75),
       (3, 1.25),
+      (0, 1),
+      (-12, 1),
+      (0, 0.5),
+      (7, 1.5),
     ]) {
       await session.controller.runJavaScript('''
         window.__probeResult = null;
@@ -74,7 +84,9 @@ void main() {
         }
         result = value;
       }
-      debugPrint('TRANSPO_PITCH_SIGNAL ${jsonEncode(result)}');
+      debugPrint(
+        'TRANSPO_PITCH_SIGNAL ${jsonEncode(result is Map ? (Map<String, dynamic>.from(result)..remove('snapshot')) : result)}',
+      );
       cases.add(result);
       expect(result, isNotNull);
       expect(result['error'], isNull);

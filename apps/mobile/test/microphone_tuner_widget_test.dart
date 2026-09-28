@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:transpose_mobile/microphone_tuner.dart';
@@ -16,11 +18,34 @@ class _FakePianoReferencePlayer implements PianoReferencePlayer {
   Future<void> dispose() async {}
 }
 
+class _DelayedPianoReferencePlayer extends _FakePianoReferencePlayer {
+  final ready = Completer<void>();
+  int stops = 0;
+
+  @override
+  Future<void> play(String note) {
+    played.add(note);
+    return ready.future;
+  }
+
+  @override
+  Future<void> stop() async {
+    stops++;
+  }
+}
+
 void main() {
   test('afinador usa verde, laranja e vermelho conforme a afinação', () {
     expect(tunerFeedbackColor(0, inTune: true), const Color(0xFF4ADE80));
     expect(tunerFeedbackColor(18, inTune: false), const Color(0xFFFB923C));
     expect(tunerFeedbackColor(-45, inTune: false), const Color(0xFFF87171));
+  });
+
+  test('base do ponteiro fica no traço acima da margem inferior', () {
+    final pivot = tunerGaugePivot(const Size(300, 132));
+    expect(pivot.dx, 150);
+    expect(pivot.dy, closeTo(108.24, .01));
+    expect(pivot.dy, lessThan(132 * .9));
   });
 
   testWidgets('ponteiro atravessa o mostrador e acende verde ao afinar', (
@@ -104,5 +129,29 @@ void main() {
     expect(find.text('A2'), findsWidgets);
     expect(find.text('Nota de referência · piano'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('piano atrasado não reativa a pré-escuta após suspensão', (
+    tester,
+  ) async {
+    final piano = _DelayedPianoReferencePlayer();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MicrophoneTunerTool(referencePlayer: piano)),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('tunerStringA2')));
+    await tester.pump();
+    expect(find.text('Nota de referência · piano'), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(piano.stops, 1);
+    expect(find.text('Nota de referência · piano'), findsNothing);
+    piano.ready.complete();
+    await tester.pump();
+    expect(find.text('Nota de referência · piano'), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
   });
 }

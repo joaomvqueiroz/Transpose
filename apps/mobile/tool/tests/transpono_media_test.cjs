@@ -51,6 +51,14 @@ function fixture(options = {}) {
     connect(target) { this.connections.push(target); return target; }
     disconnect(target) { this.connections = target ? this.connections.filter(node => node !== target) : []; }
   }
+  function parameter(value = 0) {
+    return {
+      value,
+      cancelScheduledValues() {},
+      setValueAtTime(value) { this.value = value; },
+      setTargetAtTime(value) { this.value = value; },
+    };
+  }
   class Context {
     constructor() {
       this.currentTime = 1;
@@ -61,25 +69,39 @@ function fixture(options = {}) {
       state.contexts.push(this);
     }
     async resume() { this.state = 'running'; }
+    createOscillator() {
+      const node = new Node('oscillator');
+      node.frequency = parameter();
+      node.start = () => { node.started = true; };
+      node.stop = () => { node.started = false; };
+      return node;
+    }
+    createConvolver() { return new Node('convolver'); }
+    createBuffer(channels, length, sampleRate) {
+      const data = Array.from({length: channels}, () => new Float32Array(length));
+      return {numberOfChannels: channels, length, sampleRate,
+        getChannelData(channel) { return data[channel]; }};
+    }
     createGain() {
       const node = new Node('gain');
-      node.gain = {value: 1, cancelScheduledValues() {}, setValueAtTime(value) { this.value = value; }};
+      node.gain = parameter(1);
       return node;
     }
     createBiquadFilter() {
       const node = new Node('filter');
-      node.frequency = {value: 0};
-      node.Q = {value: 0};
-      node.gain = {value: 0, setValueAtTime(value) { this.value = value; }};
+      node.frequency = parameter();
+      node.Q = parameter();
+      node.gain = parameter();
       return node;
     }
     createDelay() {
       const node = new Node('delay');
-      node.delayTime = {value: 0};
+      node.delayTime = parameter();
       return node;
     }
     createAnalyser() {
       const node = new Node(this.analyzers++ % 2 === 0 ? 'input' : 'output');
+      Object.defineProperty(node, 'frequencyBinCount', {get() { return this.fftSize / 2; }});
       node.getFloatTimeDomainData = samples => samples.fill(
         node.kind === 'input' ? state.inputSignal : state.outputSignal);
       node.getFloatFrequencyData = samples => {
@@ -125,11 +147,17 @@ function fixture(options = {}) {
   };
   window.top = options.frame ? {} : window;
   const document = {
-    title: 'A song - YouTube',
+    title: options.documentTitle ?? 'A song - YouTube',
     querySelector(selector) {
       if (selector === 'video.html5-main-video') return options.mainVideo === false ? null : selected;
       if (selector === 'video') return options.genericVideo || selected;
       if (selector === '.ad-showing, .ad-interrupting') return ad ? {} : null;
+      if (selector.startsWith('h1.ytd-watch-metadata'))
+        return options.heading ? {textContent: options.heading} : null;
+      if (selector === 'meta[property="og:title"]')
+        return options.ogTitle ? {getAttribute: () => options.ogTitle} : null;
+      if (selector === 'meta[name="title"]')
+        return options.metaTitle ? {getAttribute: () => options.metaTitle} : null;
       return null;
     },
   };
@@ -163,6 +191,188 @@ function fixture(options = {}) {
     gains() { return state.nodes.filter(node => node.kind === 'gain').slice(0, 2).map(node => node.gain.value); },
   };
 }
+
+test('video title prefers watch metadata and never publishes generic YouTube', () => {
+  const heading = fixture({heading: 'Santo Pra Sempre', documentTitle: 'YouTube'});
+  assert.equal(heading.api.snapshot().title, 'Santo Pra Sempre');
+  const metadata = fixture({ogTitle: 'Outra música - YouTube', documentTitle: 'YouTube'});
+  assert.equal(metadata.api.snapshot().title, 'Outra música');
+  const loading = fixture({documentTitle: 'YouTube'});
+  assert.equal(loading.api.snapshot().title, '');
+  const fallback = fixture({documentTitle: 'Canção real - YouTube'});
+  assert.equal(fallback.api.snapshot().title, 'Canção real');
+});
+
+test('timeline snapshots expose monotonic time and explicit seek/rate epochs', () => {
+  const f = fixture();
+  const first = f.api.snapshot();
+  assert.equal(first.sampleTimeMs, 0);
+  assert.equal(first.position, 10);
+  assert.equal(first.seeking, false);
+  f.advance(120);
+  assert.equal(f.api.snapshot().sampleTimeMs, 120);
+  f.beginSeek(25);
+  const seeking = f.api.snapshot();
+  assert.equal(seeking.seeking, true);
+  assert.equal(seeking.playbackReady, false);
+  assert.ok(seeking.timelineSeekEpoch > first.timelineSeekEpoch);
+  f.finishSeek();
+  assert.equal(f.api.snapshot().seeking, false);
+  f.video.playbackRate = 1.5;
+  f.video.dispatch('ratechange');
+  const faster = f.api.snapshot();
+  assert.equal(faster.speed, 1.5);
+  assert.ok(faster.timelineRateEpoch > first.timelineRateEpoch);
+  f.video.pause();
+  assert.equal(f.api.snapshot().playing, false);
+  f.setAd(true);
+  assert.equal(f.api.snapshot().isAd, true);
+  assert.equal(f.api.snapshot().playbackReady, false);
+});
+
+// Count active routes, including the final destination rather than only the
+// signal analyser upstream of the wet gain. Ignore feedback cycles per path.
+function outputRoutes(node, destination, visited = new Set()) {
+  if (node === destination) return 1;
+  if (!node || visited.has(node) || (node.kind === 'gain' && node.gain.value === 0)) return 0;
+  const nextVisited = new Set(visited).add(node);
+  return (node.connections || []).reduce((count, next) =>
+    count + outputRoutes(next, destination, nextVisited), 0);
+}
+
+for (const [action, value] of [
+  ['bass', 6], ['mid', -3], ['treble', 4], ['gain', -6],
+  ['chorus', .2], ['feedback', .2], ['delay', .2], ['reverb', .2],
+]) {
+  test(`${action} before pitch keeps the processed route connected through repeated bypass`, async () => {
+    const f = fixture();
+    await f.api.command({action, value});
+    const destination = f.contexts[0].destination;
+    const initialRoutes = outputRoutes(f.sources[0], destination);
+    assert.ok(initialRoutes > 0);
+    for (const pitch of [3, 0, -4, 6, 0, 2]) {
+      await f.api.command({action: 'pitch', value: pitch});
+      f.advance();
+      assert.equal(f.api.snapshot().pitch, pitch);
+      assert.deepEqual(f.gains(), pitch === 0 ? [1, 0] : [0, 1]);
+      assert.equal(outputRoutes(f.sources[0], destination), initialRoutes,
+        'Changing pitch preserves all effect routes without adding a second source route');
+      assert.equal(outputRoutes(f.worklets[0], destination), pitch === 0 ? 0 : initialRoutes);
+      assert.equal(f.sources.length, 1);
+      assert.equal(f.worklets.length, 1);
+    }
+  });
+}
+
+test('pitch before EQ retains one dry/wet route, and processor failure restores original audio', async () => {
+  const f = fixture();
+  await f.api.command({action: 'pitch', value: 3});
+  f.advance();
+  for (const action of ['bass', 'mid', 'treble', 'gain']) {
+    await f.api.command({action, value: -3});
+    assert.equal(outputRoutes(f.sources[0], f.contexts[0].destination), 1);
+    assert.equal(outputRoutes(f.worklets[0], f.contexts[0].destination), 1);
+  }
+  f.worklets[0].events.processorerror();
+  assert.deepEqual(f.gains(), [1, 0]);
+  assert.equal(outputRoutes(f.sources[0], f.contexts[0].destination), 1);
+  assert.equal(outputRoutes(f.worklets[0], f.contexts[0].destination), 0);
+});
+
+test('all audio effects are reapplied to a replacement element for the same song', async () => {
+  const f = fixture();
+  const settings = {bass: 6, mid: -3, treble: 4, gain: -6,
+    chorus: .2, feedback: .2, delay: .15, reverb: .1};
+  for (const [action, value] of Object.entries(settings)) await f.api.command({action, value});
+  const replacement = {...f.video, currentSrc: 'blob:https://m.youtube.com/replacement'};
+  f.video.isConnected = false;
+  f.navigate('one', replacement);
+  assert.equal(f.api.snapshot().audioEffects.bass, 0, 'No applied value before the new graph exists');
+  await new Promise(setImmediate);
+  for (const [action, value] of Object.entries(settings)) {
+    assert.ok(Math.abs(f.api.snapshot().audioEffects[action] - value) < 1e-5, action);
+  }
+  assert.equal(f.sources.length, 2);
+  assert.equal(outputRoutes(f.sources[0], f.contexts[0].destination), 0);
+  assert.ok(outputRoutes(f.sources[1], f.contexts[0].destination) > 0);
+  f.navigate('another', replacement);
+  for (const value of Object.values(f.api.snapshot().audioEffects)) assert.equal(value, 0);
+});
+
+test('ads bypass effects and restore them on a replacement without native autoplay', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: 5});
+  f.setAd(true);
+  assert.equal(f.api.snapshot().audioEffects.bass, 0);
+  const replacement = {...f.video, paused: true, currentSrc: 'blob:https://m.youtube.com/after-ad'};
+  f.video.isConnected = false;
+  f.navigate('one', replacement);
+  await new Promise(setImmediate);
+  assert.equal(f.sources.length, 1, 'No graph is created for the ad');
+  f.setAd(false);
+  await new Promise(setImmediate);
+  assert.equal(f.api.snapshot().audioEffects.bass, 5);
+  assert.equal(replacement.paused, true);
+});
+
+test('unsupported replacement reports neutral applied effects and retries on a valid source', async () => {
+  const f = fixture();
+  await f.api.command({action: 'mid', value: 4});
+  const replacement = {...f.video, currentSrc: 'https://example.org/protected.mp4'};
+  f.video.isConnected = false;
+  f.navigate('one', replacement);
+  await new Promise(setImmediate);
+  assert.equal(f.api.snapshot().audioEffects.mid, 0);
+  assert.equal(f.sources.length, 1);
+  replacement.currentSrc = 'blob:https://m.youtube.com/compatible';
+  f.advance();
+  await new Promise(setImmediate);
+  assert.equal(f.api.snapshot().audioEffects.mid, 4);
+});
+
+test('pending effect commands cannot change another song on the same element', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: 2});
+  const pending = f.api.command({action: 'bass', value: 8});
+  const rejected = assert.rejects(pending, /vídeo mudou/);
+  f.navigate('another');
+  await rejected;
+  assert.equal(f.api.snapshot().audioEffects.bass, 0);
+});
+
+test('newer adjustments and cancellation invalidate pending effect requests', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: 2});
+  const older = f.api.command({action: 'bass', value: 5});
+  const rejected = assert.rejects(older, /substituído/);
+  const newer = f.api.command({action: 'bass', value: 8});
+  await Promise.all([rejected, newer]);
+  assert.equal(f.api.snapshot().audioEffects.bass, 8);
+  f.api.dispatch('cancel-bass', {action: 'bass', value: -4});
+  assert.equal(f.api.cancelCommand('cancel-bass'), true);
+  await new Promise(setImmediate);
+  assert.equal(f.api.snapshot().audioEffects.bass, 8);
+  assert.equal(f.api.commandResult('cancel-bass').status, 'error');
+});
+
+test('a failed restoration stays native and an explicit adjustment can retry', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: 3});
+  const context = f.contexts[0];
+  const resume = context.resume;
+  let attempts = 0;
+  context.resume = async () => { attempts++; throw new Error('context unavailable'); };
+  const replacement = {...f.video, currentSrc: 'blob:https://m.youtube.com/new'};
+  f.video.isConnected = false;
+  f.navigate('one', replacement);
+  await new Promise(setImmediate);
+  f.advance(); f.advance();
+  assert.equal(attempts, 1, 'Failed restoration does not loop on every snapshot');
+  assert.equal(f.api.snapshot().audioEffects.bass, 0);
+  context.resume = resume;
+  await f.api.command({action: 'bass', value: 4});
+  assert.equal(f.api.snapshot().audioEffects.bass, 4);
+});
 
 test('host and top-level boundary excludes lookalike domains and subframes', () => {
   assert.equal(fixture({url: 'https://youtube.com.attacker.test/watch?v=one'}).api, undefined);
@@ -410,17 +620,45 @@ test('stale return timeouts and disposal cannot become phantom repetitions', asy
 test('spectral diagnostics are opt-in and interpolate known synthetic FFT peaks', async () => {
   const normal = fixture();
   assert.equal(Object.hasOwn(normal.api.snapshot(), 'probe'), false);
+  await normal.api.command({action: 'bass', value: 3});
+  assert.equal(normal.contexts[0].analyzers, 3, 'No extra analyser in production');
   const f = fixture({probe: true});
   await f.api.command({action: 'pitch', value: 3});
   f.advance();
   const diagnostic = f.api.snapshot().probe;
   assert.ok(Math.abs(diagnostic.inputHz - 440) < 0.01);
   assert.ok(Math.abs(diagnostic.outputHz - 440 * 2 ** (3 / 12)) < 0.01);
+  assert.ok(Math.abs(diagnostic.finalHz - diagnostic.outputHz) < 0.01);
+  assert.ok(Math.abs(diagnostic.finalRms - 0.1) < 0.0001);
   assert.equal(diagnostic.sampleRate, 48000);
   assert.equal(diagnostic.sourceCount, 1);
   assert.equal(diagnostic.dryGain, 0);
   assert.equal(diagnostic.wetGain, 1);
+  assert.equal(diagnostic.dspConnected, true);
   assert.ok(Math.abs(diagnostic.inputRms - 0.1) < 0.0001);
+});
+
+test('final-output probe has one destination route across bypass and retire/revive', async () => {
+  const f = fixture({probe: true});
+  await f.api.command({action: 'bass', value: 3});
+  const destination = f.contexts[0].destination;
+  const finalAnalyser = f.nodes.find(node => node.connections.includes(destination));
+  assert.ok(finalAnalyser);
+  assert.equal(f.contexts[0].analyzers, 4);
+  for (const pitch of [4, 0, -5, 0]) {
+    await f.api.command({action: 'pitch', value: pitch});
+    f.advance();
+    assert.equal(f.api.snapshot().probe.dspConnected, pitch !== 0);
+    assert.equal(outputRoutes(f.sources[0], destination), 1);
+  }
+  f.video.isConnected = false;
+  f.navigate('one', null);
+  assert.equal(finalAnalyser.connections.length, 0);
+  f.video.isConnected = true;
+  f.navigate('one', f.video);
+  await f.api.command({action: 'bass', value: 3});
+  assert.equal(outputRoutes(f.sources[0], destination), 1);
+  assert.equal(f.sources.length, 1);
 });
 
 test('pitch starts dry, becomes active only with output, and uses one source across updates', async () => {
@@ -450,6 +688,32 @@ test('pitch starts dry, becomes active only with output, and uses one source acr
   await f.api.command({action: 'pitch', value: 0});
   assert.deepEqual(f.gains(), [1, 0]);
   assert.equal(f.api.snapshot().pitchStatus, 'idle');
+});
+
+test('rapid pitch requests during preparation keep only the latest intent and independent speed', async () => {
+  for (const lastPitch of [-5, 0]) {
+    const f = fixture();
+    let finishFactory;
+    f.state.deferFactory = new Promise(resolve => { finishFactory = resolve; });
+    const first = f.api.command({action: 'pitch', value: 3});
+    await new Promise(resolve => setImmediate(resolve));
+    const second = f.api.command({action: 'pitch', value: 7});
+    await f.api.command({action: 'speed', value: 0.75});
+    const last = f.api.command({action: 'pitch', value: lastPitch});
+    finishFactory();
+    await Promise.all([first, second, last]);
+    f.advance();
+    assert.equal(f.api.snapshot().pitch, lastPitch);
+    assert.equal(f.api.snapshot().pitchStatus, lastPitch === 0 ? 'idle' : 'active');
+    assert.equal(f.video.playbackRate, 0.75);
+    assert.equal(f.video.preservesPitch, true);
+    assert.equal(f.video.paused, false);
+    assert.equal(f.sources.length, lastPitch === 0 ? 0 : 1);
+    if (lastPitch !== 0) {
+      assert.equal(f.worklets[0].schedules.at(-1).semitones, lastPitch);
+      assert.equal(outputRoutes(f.sources[0], f.contexts[0].destination), 1);
+    }
+  }
 });
 
 test('direct, cross-origin blob and protected media never acquire an audio source', async () => {
@@ -623,8 +887,9 @@ test('three-band EQ and delay filter the selected video without duplicating its 
   assert.equal(filters[1].gain.value, -4);
   await f.api.command({action: 'delay', value: 0.2});
   const echo = f.nodes.filter(node => node.kind === 'delay');
-  assert.equal(echo.length, 1);
+  assert.equal(echo.length, 2, 'Echo and chorus have separate delay nodes');
   assert.equal(echo[0].delayTime.value, 0.28);
+  assert.equal(echo[1].delayTime.value, 0.018);
   const echoOutput = echo[0].connections[0];
   assert.equal(echoOutput.gain.value, 0.2);
   assert.equal(f.sources.length, 1);

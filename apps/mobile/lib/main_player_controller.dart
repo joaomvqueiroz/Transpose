@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:player_core/player_core.dart';
 
@@ -27,6 +28,7 @@ class MainPlayerController extends PlayerPanelModel {
   Completer<void>? _restoreCancellation;
   int _pending = 0;
   int _pauseRevision = 0;
+  int _sourceIntentRevision = 0;
   int _manualControlRevision = 0, _automatedControlDepth = 0;
   int get manualControlRevision => _manualControlRevision;
   int get interruptionRevision => local.interruptionRevision;
@@ -44,6 +46,8 @@ class MainPlayerController extends PlayerPanelModel {
   String? _message;
   Future<void> _tail = Future<void>.value();
   bool get isYouTube => _online;
+  bool get isRhythmPreview =>
+      !_online && local.sourceId.startsWith('rhythm-preview-');
   @override
   LoopObservation? get loopObservation => !_online
       ? local.loopObservation
@@ -169,6 +173,7 @@ class MainPlayerController extends PlayerPanelModel {
   }
 
   Future<void> openYouTube() {
+    ++_sourceIntentRevision;
     _cancelRestore();
     _youtubePauseRequested = false;
     _lastNativeVideoTouch = null;
@@ -182,6 +187,7 @@ class MainPlayerController extends PlayerPanelModel {
 
   Future<void> search(String query) {
     if (query.trim().isEmpty) return Future<void>.value();
+    ++_sourceIntentRevision;
     _cancelRestore();
     _youtubePauseRequested = false;
     _lastNativeVideoTouch = null;
@@ -195,6 +201,7 @@ class MainPlayerController extends PlayerPanelModel {
   }
 
   Future<void> pickFile() {
+    ++_sourceIntentRevision;
     _cancelRestore();
     _youtubePauseRequested = true;
     return _run(() async {
@@ -206,6 +213,7 @@ class MainPlayerController extends PlayerPanelModel {
   }
 
   Future<void> loadSample() {
+    ++_sourceIntentRevision;
     _cancelRestore();
     _youtubePauseRequested = true;
     return _run(() async {
@@ -214,6 +222,43 @@ class MainPlayerController extends PlayerPanelModel {
       await local.loadSample();
       _online = false;
     });
+  }
+
+  /// Loads an approved, already mixed local WAV on the shared transport.
+  /// Newer media choices and lifecycle pause cannot start an old preview.
+  Future<void> loadApprovedRhythmPreview(Uint8List bytes) {
+    final intent = ++_sourceIntentRevision;
+    final pauseRevision = _pauseRevision;
+    final videoId = _online ? _media.videoId : null;
+    _cancelRestore();
+    bool active() =>
+        !_disposed &&
+        intent == _sourceIntentRevision &&
+        (videoId == null || !_online || _media.videoId == videoId);
+    return _run(() async {
+      if (!active()) return;
+      await _youtube?.command('pause');
+      if (!active()) return;
+      final loaded = await local.loadGeneratedPreview(bytes, canCommit: active);
+      if (!loaded) {
+        if (active()) _message = local.message;
+        return;
+      }
+      if (!active()) return;
+      _online = false;
+      _youtubePauseRequested = true;
+      _changed();
+      if (pauseRevision != _pauseRevision) return;
+      await local.playPause();
+    });
+  }
+
+  Future<void> stopRhythmPreview() {
+    ++_sourceIntentRevision;
+    if (!isRhythmPreview) return Future<void>.value();
+    ++_pauseRevision;
+    _youtubePauseRequested = true;
+    return local.pause();
   }
 
   @override
@@ -358,6 +403,7 @@ class MainPlayerController extends PlayerPanelModel {
 
   PlayerPreset? snapshot(String name) {
     if (!loaded ||
+        isRhythmPreview ||
         busy ||
         (_online && (_media.isAd || _media.pitchStatus == 'loading'))) {
       return null;
@@ -420,6 +466,7 @@ class MainPlayerController extends PlayerPanelModel {
   }
 
   Future<void> restore(PlayerPreset preset) {
+    ++_sourceIntentRevision;
     _lastRestoreSucceeded = false;
     _cancelRestore();
     final cancellation = Completer<void>();

@@ -16,6 +16,33 @@ class LocalMediaImporter {
 
   final Future<Directory> Function() _supportDirectory;
 
+  Future<GeneratedLocalMedia> importGeneratedPreview(Uint8List bytes) async {
+    if (bytes.isEmpty || bytes.length > 64 * 1024 * 1024) {
+      throw const FileSystemException(
+        'Prévia WAV inválida ou demasiado grande.',
+      );
+    }
+    final root = await _mediaDirectory();
+    final directory = await root.createTemp('rhythm-preview-');
+    final file = File('${directory.path}${Platform.pathSeparator}preview.wav');
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      return GeneratedLocalMedia(
+        source: LocalFileSource.fromPath(
+          id: 'rhythm-preview-${directory.uri.pathSegments.where((p) => p.isNotEmpty).last}',
+          displayName: 'Gravação com metrónomo',
+          path: file.path,
+        ),
+        file: file,
+        directory: directory,
+      );
+    } on Object {
+      if (await file.exists()) await file.delete();
+      if (await directory.exists()) await directory.delete();
+      rethrow;
+    }
+  }
+
   Future<Directory> _mediaDirectory() async {
     final support = await _supportDirectory();
     return Directory('${support.path}${Platform.pathSeparator}transpono_media')
@@ -102,5 +129,22 @@ class LocalMediaImporter {
       // Only the unique staging directory created above is ever removed.
       if (await working.exists()) await working.delete();
     }
+  }
+}
+
+/// Only files created for a generated preview may be removed by this lease.
+class GeneratedLocalMedia {
+  GeneratedLocalMedia({
+    required this.source,
+    required this.file,
+    required this.directory,
+  });
+  final LocalFileSource source;
+  final File file;
+  final Directory directory;
+
+  Future<void> dispose() async {
+    if (await file.exists()) await file.delete();
+    if (await directory.exists()) await directory.delete();
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:player_core/player_core.dart';
@@ -293,6 +294,67 @@ void main() {
       expect(player.isYouTube, isFalse);
       expect(player.loaded, isTrue);
       expect(youtube.media.playing, isFalse);
+      player.dispose();
+    },
+  );
+
+  test('new YouTube request wins over pending rhythm preview', () async {
+    final events = <String>[];
+    final youtube = _YouTube(events)..state = _video();
+    final local = _Local(events)..previewGate = Completer<void>();
+    final player = MainPlayerController(
+      local: local,
+      youtubeFactory: () => youtube,
+    );
+    await player.openYouTube();
+    final preview = player.loadApprovedRhythmPreview(Uint8List.fromList([1]));
+    await local.previewEntered.future;
+    final search = player.search('new video');
+    local.previewGate!.complete();
+    await Future.wait([preview, search]);
+    expect(player.isYouTube, isTrue);
+    expect(local.previewCommits, 0);
+    expect(events, isNot(contains('local.play')));
+    player.dispose();
+  });
+
+  test('latest rhythm preview wins and only it starts playback', () async {
+    final events = <String>[];
+    final local = _Local(events)..previewGate = Completer<void>();
+    final player = MainPlayerController(local: local);
+    final first = player.loadApprovedRhythmPreview(Uint8List.fromList([1]));
+    await local.previewEntered.future;
+    final second = player.loadApprovedRhythmPreview(Uint8List.fromList([2]));
+    local.previewGate!.complete();
+    await Future.wait([first, second]);
+    expect(local.previewCommits, 1);
+    expect(events.where((e) => e == 'local.play').length, 1);
+    player.dispose();
+  });
+
+  test(
+    'rhythm stop leaves normal YouTube playing and pauses only preview',
+    () async {
+      final events = <String>[];
+      final youtube = _YouTube(events)..state = _video(playing: true);
+      final local = _Local(events);
+      final player = MainPlayerController(
+        local: local,
+        youtubeFactory: () => youtube,
+      );
+      await player.openYouTube();
+      events.clear();
+      await player.stopRhythmPreview();
+      expect(events, isEmpty);
+      expect(player.isYouTube, isTrue);
+
+      await player.loadApprovedRhythmPreview(Uint8List.fromList([1]));
+      expect(player.isRhythmPreview, isTrue);
+      expect(player.snapshot('temporary'), isNull);
+      events.clear();
+      await player.stopRhythmPreview();
+      expect(events, contains('local.pause'));
+      expect(events, isNot(contains('youtube.pause')));
       player.dispose();
     },
   );
@@ -598,11 +660,17 @@ class _Local extends LocalPlayerController {
   _Local(this.events);
   final List<String> events;
   Completer<void>? releaseGate;
+  Completer<void>? previewGate;
+  final previewEntered = Completer<void>();
+  int previewCommits = 0;
+  String? previewSourceId;
   bool releaseFails = false, loadFails = false;
   bool _loaded = true, _owned = true;
   String? failure;
   @override
   bool get loaded => _loaded;
+  @override
+  String get sourceId => previewSourceId ?? super.sourceId;
   @override
   bool get hasResource => _owned;
   @override
@@ -615,10 +683,27 @@ class _Local extends LocalPlayerController {
     await releaseGate?.future;
     if (releaseFails) return;
     _loaded = _owned = false;
+    previewSourceId = null;
   }
 
   @override
   Future<void> pause() async => events.add('local.pause');
+  @override
+  Future<void> playPause() async => events.add('local.play');
+  @override
+  Future<bool> loadGeneratedPreview(
+    Uint8List bytes, {
+    bool Function()? canCommit,
+  }) async {
+    if (!previewEntered.isCompleted) previewEntered.complete();
+    await previewGate?.future;
+    if (canCommit?.call() == false) return false;
+    previewCommits++;
+    _loaded = _owned = true;
+    previewSourceId = 'rhythm-preview-fake';
+    return true;
+  }
+
   @override
   Future<void> loadSample() async {
     events.add('local.sample');

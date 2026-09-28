@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'piano_reference_player.dart';
 import 'pitch_detector.dart';
 import 'studio_native_pages.dart';
+import 'studio_appearance.dart';
 
 /// Feedback follows the measured distance from the selected string, not a
 /// repeating decorative animation.
@@ -19,10 +20,15 @@ Color tunerFeedbackColor(double? cents, {required bool inTune}) {
 }
 
 class MicrophoneTunerTool extends StatefulWidget {
-  const MicrophoneTunerTool({super.key, this.referencePlayer});
+  const MicrophoneTunerTool({
+    super.key,
+    this.referencePlayer,
+    this.appearance = const StudioAppearance(),
+  });
 
   /// Optional injection for tests; production uses bundled piano recordings.
   final PianoReferencePlayer? referencePlayer;
+  final StudioAppearance appearance;
 
   @override
   State<MicrophoneTunerTool> createState() => _MicrophoneTunerToolState();
@@ -53,6 +59,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   String? _previewNote;
   Timer? _previewTimer;
   int _previewRequest = 0;
+  int _captureRequest = 0;
 
   static const _strings = <(String, double)>[
     ('E2', 82.41),
@@ -92,11 +99,12 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
     if (state != AppLifecycleState.resumed) {
       unawaited(_referencePlayer?.stop());
       _finishPreview();
-      if (_active) unawaited(_stop());
+      if (_active || _starting) unawaited(_stop());
     }
   }
 
   void _finishPreview() {
+    ++_previewRequest;
     _previewTimer?.cancel();
     _previewTimer = null;
     if (mounted) setState(() => _previewNote = null);
@@ -133,6 +141,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
 
   Future<void> _start() async {
     if (_active || _starting) return;
+    final request = ++_captureRequest;
     setState(() {
       _starting = true;
       _error = null;
@@ -141,6 +150,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
       if (!await _recorder.hasPermission()) {
         throw StateError('Autorize o microfone nas definições do dispositivo.');
       }
+      if (!mounted || request != _captureRequest) return;
       final stream = await _recorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
@@ -151,7 +161,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
           noiseSuppress: false,
         ),
       );
-      if (!mounted) {
+      if (!mounted || request != _captureRequest) {
         await _recorder.stop();
         return;
       }
@@ -235,6 +245,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   }
 
   Future<void> _stop() async {
+    ++_captureRequest;
     _silenceTimer?.cancel();
     _silenceTimer = null;
     final subscription = _subscription;
@@ -262,6 +273,8 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ++_captureRequest;
+    ++_previewRequest;
     _silenceTimer?.cancel();
     _previewTimer?.cancel();
     unawaited(_referencePlayer?.dispose());
@@ -292,7 +305,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
     return Container(
       key: const Key('chromaticTunerCard'),
       padding: const EdgeInsets.all(12),
-      decoration: studioPanelDecoration(),
+      decoration: studioPanelDecoration(mode: widget.appearance.mode),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -489,6 +502,9 @@ class TunerGauge extends StatelessWidget {
   );
 }
 
+/// The needle begins on the gauge's horizontal baseline, above the panel edge.
+Offset tunerGaugePivot(Size size) => Offset(size.width / 2, size.height * .82);
+
 class _TunerGaugePainter extends CustomPainter {
   const _TunerGaugePainter({required this.cents, required this.green});
   final double? cents;
@@ -496,8 +512,8 @@ class _TunerGaugePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * .95);
-    final radius = math.min(size.width * .39, size.height * .88);
+    final center = tunerGaugePivot(size);
+    final radius = math.min(size.width * .39, size.height * .75);
     final arc = Rect.fromCircle(center: center, radius: radius);
     final needleColor = cents == null
         ? tunerFeedbackColor(null, inTune: false)

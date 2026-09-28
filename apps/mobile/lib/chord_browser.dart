@@ -33,6 +33,19 @@ Uri chordSearchUri(String query) {
   return Uri.https('www.cifras.com.br', '/busca', {'q': value});
 }
 
+String chordQueryFromVideoTitle(String title) {
+  final value = title
+      .replaceFirst(RegExp(r'\s*[-–]\s*YouTube\s*$', caseSensitive: false), '')
+      .trim();
+  if (RegExp(
+    r'^(?:YouTube|Vídeo do YouTube)$',
+    caseSensitive: false,
+  ).hasMatch(value)) {
+    return '';
+  }
+  return value.length <= 240 ? value : value.substring(0, 240).trimRight();
+}
+
 Uri? chordNavigationUri(String value) {
   final uri = Uri.tryParse(value);
   if (uri == null) return null;
@@ -543,18 +556,20 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
                       controller: _query,
                       textInputAction: TextInputAction.search,
                       onSubmitted: (_) => _search(),
-                      decoration: const InputDecoration(
-                        labelText: 'Música ou artista',
+                      decoration: InputDecoration(
+                        hintText: 'Pesquisar música ou artista',
                         isDense: true,
-                        border: OutlineInputBorder(),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        suffixIcon: IconButton(
+                          key: const Key('chordNativeSearch'),
+                          tooltip: 'Pesquisar cifras',
+                          onPressed: _search,
+                          icon: const Icon(Icons.search),
+                        ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('chordNativeSearch'),
-                    tooltip: 'Pesquisar cifras',
-                    onPressed: _search,
-                    icon: const Icon(Icons.search),
                   ),
                   IconButton(
                     key: const Key('chordNativeClose'),

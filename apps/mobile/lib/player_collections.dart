@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'player_presets.dart';
 import 'studio_native_pages.dart';
+import 'studio_appearance.dart';
 
 /// User-owned, persistent collections. Choosing an entry asks the existing
 /// player to restore it; this screen never creates a second media session.
@@ -15,6 +16,7 @@ class PlayerCollectionsPage extends StatefulWidget {
     this.onAdd,
     this.onPrevious,
     this.onNext,
+    this.appearance = const StudioAppearance(),
   });
 
   final PlayerPresetStore store;
@@ -23,6 +25,7 @@ class PlayerCollectionsPage extends StatefulWidget {
   final Future<void> Function()? onAdd;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
+  final StudioAppearance appearance;
   final Future<void> Function(PlayerPreset preset) onApply;
 
   @override
@@ -214,7 +217,10 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
       return Container(
         key: ValueKey('collection-${item.id}'),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-        decoration: studioPanelDecoration(radius: 23),
+        decoration: studioPanelDecoration(
+          radius: 23,
+          mode: widget.appearance.mode,
+        ),
         clipBehavior: Clip.antiAlias,
         child: Material(
           color: Colors.transparent,
@@ -353,7 +359,10 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
                     key: const Key('setlistHeader'),
                     margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                     padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
-                    decoration: studioPanelDecoration(radius: 26),
+                    decoration: studioPanelDecoration(
+                      radius: 26,
+                      mode: widget.appearance.mode,
+                    ),
                     child: Row(
                       children: [
                         if (widget.setlist) ...[

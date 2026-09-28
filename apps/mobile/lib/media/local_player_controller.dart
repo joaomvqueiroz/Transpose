@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -37,6 +38,7 @@ class LocalPlayerController extends ChangeNotifier {
   Timer? _refresh;
   VideoPlayerController? _video;
   NativeAudioLoadedMedia? _audio;
+  GeneratedLocalMedia? _ownedPreview;
   int _pending = 0;
   bool _disposed = false;
   bool _picking = false;
@@ -87,18 +89,148 @@ class LocalPlayerController extends ChangeNotifier {
   VideoPlayerController? get videoController => _video;
   String? get message => _message;
 
-  Future<void> load(LocalFileSource source) => _run(() => _load(source));
+  Future<void> load(LocalFileSource source) => _run(() async {
+    await _load(source);
+    await _clearOwnedPreview();
+  });
+
+  /// A generated WAV replaces the source only after it is staged. On decoder
+  /// failure, restore the prior local selection and controls without autoplay.
+  Future<bool> loadGeneratedPreview(
+    Uint8List bytes, {
+    bool Function()? canCommit,
+  }) async {
+    var committed = false;
+    await _run(() async {
+      final previous = _session.source;
+      final previousPitch = _pitch, previousSpeed = _speed;
+      final previousPosition = position;
+      final previousA = _markerA, previousB = _markerB;
+      final previousLoop = loopEnabled;
+      final staged = await _importer.importGeneratedPreview(bytes);
+      bool active() => !_disposed && (canCommit?.call() ?? true);
+      if (!active()) {
+        await staged.dispose();
+        return;
+      }
+      try {
+        await _load(staged.source);
+        if (!active()) {
+          throw StateError('A newer media request superseded the preview.');
+        }
+        final old = _ownedPreview;
+        _ownedPreview = staged;
+        committed = true;
+        try {
+          await old?.dispose();
+        } on FileSystemException {
+          // Playback is already committed; cache cleanup can be retried later.
+        }
+      } on Object {
+        // PlayerSession releases the previous decoder before loading. Reopen
+        // its still-existing file and restore the controls in a paused state.
+        if (!_disposed &&
+            previous is LocalFileSource &&
+            !identical(_session.source, previous)) {
+          try {
+            await _load(previous);
+            if (canSpeed) {
+              await _setParameters(pitch: previousPitch, speed: previousSpeed);
+            }
+            _markerA = previousA;
+            _markerB = previousB;
+            if (previousLoop && previousA != null && previousB != null) {
+              await _applyLoop(previousA, previousB);
+            }
+            await _session.seek(
+              previousPosition > duration ? duration : previousPosition,
+            );
+          } on Object {
+            _message = 'A prévia falhou e não foi possível restaurar a faixa anterior.';
+          }
+        }
+        if (identical(_session.source, staged.source)) {
+          try {
+            _detach();
+            await _session.unload();
+          } on Object {
+            // Keep the lease if the decoder still owns the generated file.
+          }
+        }
+        if (identical(_session.source, staged.source)) {
+          final old = _ownedPreview;
+          _ownedPreview = staged;
+          try {
+            await old?.dispose();
+          } on FileSystemException {
+            // The old decoder was released before this source was loaded.
+          }
+          _message =
+              'A prévia foi cancelada, mas a saída ainda está a ser libertada.';
+        } else {
+          try {
+            await staged.dispose();
+          } on FileSystemException {
+            // The generated copy is disposable after decoder release.
+          }
+        }
+        if (identical(_session.source, previous) && !_disposed) {
+          _pitch = previousPitch;
+          _speed = previousSpeed;
+          _markerA = previousA;
+          _markerB = previousB;
+          _videoLoop = previousLoop;
+          _attachCurrent();
+        }
+        _message ??=
+            'Não foi possível abrir a prévia; a faixa anterior foi mantida.';
+      }
+    });
+    return committed;
+  }
+
+  Future<void> _clearOwnedPreview() async {
+    final old = _ownedPreview;
+    _ownedPreview = null;
+    try {
+      await old?.dispose();
+    } on FileSystemException {
+      // A released decoder may briefly hold the file on some devices.
+    }
+  }
+
+  @visibleForTesting
+  void debugSeedProcessing({
+    required double pitch,
+    required double speed,
+    required Duration markerA,
+    required Duration markerB,
+    required bool loop,
+  }) {
+    _pitch = pitch;
+    _speed = speed;
+    _markerA = markerA;
+    _markerB = markerB;
+    _videoLoop = loop;
+  }
+
+  @visibleForTesting
+  bool get debugVideoLoop => _videoLoop;
 
   Future<void> _load(LocalFileSource source) async {
     _detach();
     _resetValues();
     await _session.load(source);
+    _attachCurrent();
+  }
+
+  void _attachCurrent() {
+    if (_refresh != null || _disposed) return;
     final MediaLoader loader = _loader;
     if (loader is VideoPlayerMediaLoader) {
       _video = loader.currentController;
       _audio = loader.currentAudio;
     }
-    if (_disposed) return;
     _video?.addListener(_notify);
     _refresh = Timer.periodic(
       const Duration(milliseconds: 250),
@@ -109,7 +241,10 @@ class LocalPlayerController extends ChangeNotifier {
   Future<void> loadSample() => _run(() async {
     final ByteData data = await rootBundle.load('assets/qa_tone.wav');
     final source = await _importer.importSample(data);
-    if (!_disposed) await _load(source);
+    if (!_disposed) {
+      await _load(source);
+      await _clearOwnedPreview();
+    }
   });
 
   Future<void> pickFile() async {
@@ -133,6 +268,7 @@ class LocalPlayerController extends ChangeNotifier {
         if (_disposed) return;
         _message = null;
         await _load(source);
+        await _clearOwnedPreview();
       });
     } finally {
       _picking = false;
@@ -299,6 +435,7 @@ class LocalPlayerController extends ChangeNotifier {
   Future<void> close() => _run(() async {
     _detach();
     await _session.unload();
+    await _clearOwnedPreview();
     _resetValues();
   });
 
@@ -377,7 +514,14 @@ class LocalPlayerController extends ChangeNotifier {
     _disposed = true;
     _detach();
     unawaited(_states.cancel());
-    unawaited(_tail.then((_) => _session.dispose()).catchError((Object _) {}));
+    unawaited(
+      _tail
+          .then((_) async {
+            await _session.dispose();
+            await _clearOwnedPreview();
+          })
+          .catchError((Object _) {}),
+    );
     super.dispose();
   }
 }

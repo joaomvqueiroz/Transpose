@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 import 'package:transpose_mobile/player_presets.dart';
 import 'package:transpose_mobile/studio_native_pages.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
@@ -14,6 +15,64 @@ void main() {
   setUp(() {
     SharedPreferencesAsyncPlatform.instance =
         InMemorySharedPreferencesAsync.empty();
+  });
+
+  testWidgets('quinta coluna cabe e guarda tema e cor da nota', (tester) async {
+    tester.view.physicalSize = const Size(350, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    final strip = tester.getRect(find.byKey(const Key('unifiedSectionStrip')));
+    final settingsTab = find.byKey(
+      const Key('unifiedSectionappearanceSettings'),
+    );
+    expect(tester.getRect(settingsTab).right, lessThanOrEqualTo(strip.right));
+    expect(tester.takeException(), isNull);
+    await tester.tap(settingsTab);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('appearanceModeglass')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('appearanceNote7')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('noteColorChoice2')));
+    await tester.pumpAndSettle();
+    expect(
+      (await StudioAppearanceStore().read()).mode,
+      StudioAppearanceMode.glass,
+    );
+    expect(
+      (await StudioAppearanceStore().read()).noteColors[7],
+      const Color(0xFF5DD47A),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ChoiceChip>(find.byKey(const Key('appearanceModeglass')))
+          .selected,
+      isTrue,
+    );
+    await tester.tap(find.byKey(const Key('appearanceModelight')));
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byKey(const Key('appearanceSettings'))))
+          .brightness,
+      Brightness.light,
+    );
+    expect(
+      (await StudioAppearanceStore().read()).mode,
+      StudioAppearanceMode.light,
+    );
+    expect(tester.takeException(), isNull);
   });
   testWidgets('empty startup opens YouTube without duplicate search', (
     tester,

@@ -184,6 +184,169 @@ void main() {
   );
 
   test(
+    'generated preview decode failure restores prior selection paused',
+    () async {
+      final support = await Directory.systemTemp.createTemp(
+        'transpono-preview-test-',
+      );
+      addTearDown(() => support.delete(recursive: true));
+      final loader = _Loader();
+      final player = LocalPlayerController(
+        loader: loader,
+        importer: LocalMediaImporter(supportDirectory: () async => support),
+      );
+      await player.load(_source('current'));
+      await player.seek(const Duration(seconds: 5));
+      await player.playPause();
+      loader.failNext = true;
+      final committed = await player.loadGeneratedPreview(
+        Uint8List.fromList([1, 2, 3]),
+      );
+      expect(committed, isFalse);
+      expect(player.sourceId, 'current');
+      expect(player.position, const Duration(seconds: 5));
+      expect(player.playing, isFalse);
+      expect(player.message, isNotNull);
+      expect(loader.events.where((e) => e == 'load:current').length, 2);
+      final mediaRoot = Directory(
+        '${support.path}${Platform.pathSeparator}transpono_media',
+      );
+      expect(await mediaRoot.list().toList(), isEmpty);
+
+      expect(
+        await player.loadGeneratedPreview(Uint8List.fromList([4, 5, 6])),
+        isTrue,
+      );
+      expect(player.sourceId, startsWith('rhythm-preview-'));
+      final preview = File.fromUri(Uri.parse(player.locator!));
+      expect(await preview.exists(), isTrue);
+      await player.close();
+      expect(await preview.exists(), isFalse);
+      player.dispose();
+    },
+  );
+
+  test(
+    'cancelled generated preview keeps source and removes staged copy',
+    () async {
+      final support = await Directory.systemTemp.createTemp(
+        'transpono-preview-cancel-',
+      );
+      addTearDown(() => support.delete(recursive: true));
+      final loader = _Loader();
+      final player = LocalPlayerController(
+        loader: loader,
+        importer: LocalMediaImporter(supportDirectory: () async => support),
+      );
+      await player.load(_source('current'));
+      expect(
+        await player.loadGeneratedPreview(
+          Uint8List.fromList([1, 2, 3]),
+          canCommit: () => false,
+        ),
+        isFalse,
+      );
+      expect(player.sourceId, 'current');
+      expect(loader.events, ['load:current']);
+      final mediaRoot = Directory(
+        '${support.path}${Platform.pathSeparator}transpono_media',
+      );
+      expect(await mediaRoot.list().toList(), isEmpty);
+      await player.close();
+      player.dispose();
+    },
+  );
+
+  test(
+    'cancel after first preview load releases decoder before deleting file',
+    () async {
+      final support = await Directory.systemTemp.createTemp(
+        'transpono-preview-first-',
+      );
+      addTearDown(() => support.delete(recursive: true));
+      final player = LocalPlayerController(
+        loader: _Loader(),
+        importer: LocalMediaImporter(supportDirectory: () async => support),
+      );
+      var checks = 0;
+      expect(
+        await player.loadGeneratedPreview(
+          Uint8List.fromList([1, 2, 3]),
+          canCommit: () => ++checks == 1,
+        ),
+        isFalse,
+      );
+      expect(player.hasResource, isFalse);
+      final mediaRoot = Directory(
+        '${support.path}${Platform.pathSeparator}transpono_media',
+      );
+      expect(await mediaRoot.list().toList(), isEmpty);
+      player.dispose();
+    },
+  );
+
+  test('failed decoder release retains generated file for retry', () async {
+    final support = await Directory.systemTemp.createTemp(
+      'transpono-preview-release-',
+    );
+    addTearDown(() => support.delete(recursive: true));
+    final loader = _Loader()..failPreviewRelease = true;
+    final player = LocalPlayerController(
+      loader: loader,
+      importer: LocalMediaImporter(supportDirectory: () async => support),
+    );
+    var checks = 0;
+    expect(
+      await player.loadGeneratedPreview(
+        Uint8List.fromList([1, 2, 3]),
+        canCommit: () => ++checks == 1,
+      ),
+      isFalse,
+    );
+    expect(player.hasResource, isTrue);
+    final file = File.fromUri(Uri.parse(player.locator!));
+    expect(await file.exists(), isTrue);
+    loader.current!.failRelease = false;
+    await player.close();
+    expect(await file.exists(), isFalse);
+    player.dispose();
+  });
+
+  test('failed prior release retains pitch speed and loop settings', () async {
+    final support = await Directory.systemTemp.createTemp(
+      'transpono-preview-prior-',
+    );
+    addTearDown(() => support.delete(recursive: true));
+    final loader = _Loader();
+    final player = LocalPlayerController(
+      loader: loader,
+      importer: LocalMediaImporter(supportDirectory: () async => support),
+    );
+    await player.load(_source('current'));
+    player.debugSeedProcessing(
+      pitch: 3,
+      speed: .75,
+      markerA: const Duration(seconds: 2),
+      markerB: const Duration(seconds: 7),
+      loop: true,
+    );
+    loader.current!.failRelease = true;
+    expect(
+      await player.loadGeneratedPreview(Uint8List.fromList([1, 2, 3])),
+      isFalse,
+    );
+    expect(player.sourceId, 'current');
+    expect(player.pitch, 3);
+    expect(player.speed, .75);
+    expect(player.markerA, const Duration(seconds: 2));
+    expect(player.markerB, const Duration(seconds: 7));
+    expect(player.debugVideoLoop, isTrue);
+    loader.current!.failRelease = false;
+    await player.close();
+    player.dispose();
+  });
+
+  test(
     'failed close retains ownership until release succeeds on retry',
     () async {
       final _Loader loader = _Loader();
@@ -265,6 +428,7 @@ class _Loader implements MediaLoader {
   final List<String> events = <String>[];
   Completer<void>? gate;
   bool failNext = false;
+  bool failPreviewRelease = false;
   _Media? current;
 
   @override
@@ -275,7 +439,11 @@ class _Loader implements MediaLoader {
       failNext = false;
       throw StateError('Decoder failed');
     }
-    return current = _Media(source.id, events);
+    current = _Media(source.id, events);
+    if (failPreviewRelease && source.id.startsWith('rhythm-preview-')) {
+      current!.failRelease = true;
+    }
+    return current!;
   }
 }
 

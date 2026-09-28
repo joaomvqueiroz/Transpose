@@ -466,9 +466,16 @@ class _ChordEditorState extends State<_ChordEditor> {
       _error = null;
     });
     try {
+      final latest = await widget.store.read(widget.source);
+      if (latest.timeline != widget.initial.timeline ||
+          latest.notes != widget.initial.notes) {
+        throw const FormatException(
+          'A cifra mudou noutro painel. Copie as suas alterações e reabra a edição para evitar perder dados.',
+        );
+      }
       await widget.store.save(
         widget.source,
-        widget.initial.copyWith(timeline: _timeline.text, notes: _notes.text),
+        latest.copyWith(timeline: _timeline.text, notes: _notes.text),
       );
       if (mounted) Navigator.pop(context);
     } on FormatException catch (e) {

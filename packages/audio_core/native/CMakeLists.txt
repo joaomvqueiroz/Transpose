@@ -9,6 +9,16 @@ target_compile_options(audio_core PRIVATE -fvisibility=hidden)
 set_source_files_properties(src/audio_core_c.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 target_link_libraries(audio_core PRIVATE oboe::oboe log)
 
+set(STEMS_NATIVE "${CMAKE_CURRENT_SOURCE_DIR}/../../stems_core/native")
+if(ANDROID_ABI STREQUAL "arm64-v8a" AND TRANSPOSE_DEMUCS_SOURCE_DIR)
+    set(DEMUCS_SOURCE "${TRANSPOSE_DEMUCS_SOURCE_DIR}")
+    set(TRANSPONO_STEMS_ANDROID ON)
+    add_subdirectory("${STEMS_NATIVE}" "${CMAKE_CURRENT_BINARY_DIR}/stems")
+else()
+    add_library(transpono_stems SHARED "${STEMS_NATIVE}/stems_jni.cpp")
+    target_compile_features(transpono_stems PRIVATE cxx_std_17)
+endif()
+
 # Explicit, local-only GPL/commercial-license evaluation. The normal APK must
 # compile without this source until publication licensing is resolved.
 if(TRANSPOSE_RUBBERBAND_SOURCE_DIR)

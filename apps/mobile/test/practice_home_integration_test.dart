@@ -153,6 +153,28 @@ void main() {
     },
   );
 
+  testWidgets('background pauses ordinary playback without auto-resume', (
+    tester,
+  ) async {
+    addTearDown(() => foreground(tester));
+    final player = _Player();
+    foreground(tester);
+    await tester.pumpWidget(StudioVisualApp(playerController: player));
+    await tester.pumpAndSettle();
+    await player.playPause();
+    expect(player.playing, isTrue);
+
+    background(tester);
+    await tester.pumpAndSettle();
+    expect(player.playing, isFalse);
+    final plays = player.playCalls;
+    foreground(tester);
+    await tester.pumpAndSettle();
+    expect(player.playing, isFalse);
+    expect(player.playCalls, plays);
+    await unmount(tester, player);
+  });
+
   testWidgets(
     'background during preparation cancels pending play at home level',
     (tester) async {

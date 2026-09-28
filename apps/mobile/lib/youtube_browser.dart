@@ -38,6 +38,7 @@ class YouTubeMediaState {
     this.keyRoot,
     this.keyMode = '',
     this.keyStatus = 'waiting',
+    this.audioEffects = const <String, double>{},
   });
 
   factory YouTubeMediaState.fromJson(Map<String, dynamic> json) {
@@ -59,7 +60,26 @@ class YouTubeMediaState {
 
     final int? loopCount = counter('loopCount');
     final int? loopEpoch = counter('loopEpoch');
+    final rawEffects = json['audioEffects'];
+    const effectLimits = <String, (double, double)>{
+      'bass': (-12, 12),
+      'mid': (-12, 12),
+      'treble': (-12, 12),
+      'gain': (-12, 6),
+      'chorus': (0, .5),
+      'feedback': (0, .55),
+      'delay': (0, .35),
+      'reverb': (0, .4),
+    };
+    final effects = <String, double>{};
+    for (final entry in effectLimits.entries) {
+      final value = rawEffects is Map ? rawEffects[entry.key] : null;
+      effects[entry.key] = value is num && value.isFinite
+          ? value.toDouble().clamp(entry.value.$1, entry.value.$2)
+          : 0;
+    }
     return YouTubeMediaState(
+      audioEffects: Map<String, double>.unmodifiable(effects),
       videoId: string('videoId'),
       title: string('title'),
       hasVideo: json['hasVideo'] == true,
@@ -99,6 +119,171 @@ class YouTubeMediaState {
   final double? loopA, loopB;
   final int? keyRoot;
   final String keyMode, keyStatus;
+  final Map<String, double> audioEffects;
+}
+
+/// Observation of the *player clock*, not the time its sound reaches a speaker.
+/// The browser's performance.now() has a different origin from Dart's clock;
+/// the host midpoint only brackets the JavaScript evaluation, within half RTT.
+@immutable
+class YouTubeTimelineSample {
+  const YouTubeTimelineSample({
+    required this.videoId,
+    required this.revision,
+    required this.epoch,
+    required this.positionMs,
+    required this.speed,
+    required this.browserTimeMs,
+    required this.hostMidpointUs,
+    required this.uncertaintyMs,
+  });
+
+  final String videoId;
+  final int revision, epoch, hostMidpointUs;
+  final double positionMs, speed, browserTimeMs, uncertaintyMs;
+}
+
+/// Validates a single video's sampled timeline. No media samples are captured.
+class YouTubeTimelineTracker {
+  YouTubeTimelineSample? _latest;
+  YouTubeTimelineSample? get latest => _latest;
+  int epoch = 0;
+  int _revision = -1;
+  String? _videoId;
+  int? _sourceEpoch, _seekEpoch, _rateEpoch;
+  double? _speed;
+
+  void reset() {
+    _latest = null;
+    _revision = -1;
+    _videoId = null;
+    _sourceEpoch = _seekEpoch = _rateEpoch = null;
+    _speed = null;
+    epoch++;
+  }
+
+  /// Without an RTT bracket, a push/command can invalidate but cannot sample.
+  bool observe(Map<String, dynamic> state, {int? startUs, int? endUs}) {
+    int? counter(String key) {
+      final value = state[key];
+      return value is num &&
+              value.isFinite &&
+              value >= 0 &&
+              value <= 9007199254740991 &&
+              value == value.truncateToDouble()
+          ? value.toInt()
+          : null;
+    }
+
+    double? finite(String key) {
+      final value = state[key];
+      return value is num && value.isFinite ? value.toDouble() : null;
+    }
+
+    final revision = counter('snapshotRevision');
+    if (revision == null || revision <= _revision) return false;
+    _revision = revision;
+    final id = state['videoId'];
+    final source = counter('timelineSourceEpoch');
+    final seek = counter('timelineSeekEpoch');
+    final rate = counter('timelineRateEpoch');
+    final browserTime = finite('sampleTimeMs');
+    final position = finite('position');
+    final duration = finite('duration');
+    final speed = finite('speed');
+    final validFields =
+        id is String &&
+        RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id) &&
+        source != null &&
+        seek != null &&
+        rate != null &&
+        browserTime != null &&
+        browserTime >= 0 &&
+        position != null &&
+        position >= 0 &&
+        duration != null &&
+        duration > 0 &&
+        position <= duration + 1 &&
+        speed != null &&
+        speed > 0 &&
+        speed <= 4;
+    if (!validFields) {
+      if (_latest != null) epoch++;
+      _latest = null;
+      return false;
+    }
+    final videoId = id;
+    final sourceEpoch = source;
+    final seekEpoch = seek;
+    final rateEpoch = rate;
+    final sampleTimeMs = browserTime;
+    final positionSeconds = position;
+    final playbackSpeed = speed;
+    final changedContext =
+        _videoId != videoId ||
+        _sourceEpoch != sourceEpoch ||
+        _seekEpoch != seekEpoch ||
+        _rateEpoch != rateEpoch ||
+        (_speed != null && _speed != playbackSpeed);
+    if (changedContext) {
+      _latest = null;
+      epoch++;
+    }
+    _videoId = videoId;
+    _sourceEpoch = sourceEpoch;
+    _seekEpoch = seekEpoch;
+    _rateEpoch = rateEpoch;
+    _speed = playbackSpeed;
+    // A changed source, seek, or rate begins a new segment; do not treat its
+    // first observation as a continuation or an immediately usable anchor.
+    if (changedContext) return false;
+    if (state['hasVideo'] != true ||
+        state['isAd'] == true ||
+        state['seeking'] == true ||
+        state['playbackReady'] != true ||
+        state['playing'] != true) {
+      if (_latest != null) epoch++;
+      _latest = null;
+      return false;
+    }
+    if (startUs == null || endUs == null) return false;
+    final rttUs = endUs - startUs;
+    if (startUs < 0 || rttUs < 0 || rttUs > 250000) {
+      if (_latest != null) epoch++;
+      _latest = null;
+      return false;
+    }
+    final midpoint = startUs + rttUs ~/ 2;
+    final previous = _latest;
+    if (previous != null) {
+      if (sampleTimeMs < previous.browserTimeMs ||
+          midpoint <= previous.hostMidpointUs) {
+        epoch++;
+        _latest = null;
+        return false;
+      }
+      final predicted =
+          previous.positionMs +
+          (midpoint - previous.hostMidpointUs) / 1000 * previous.speed;
+      final tolerance = 200 + previous.uncertaintyMs + rttUs / 2000;
+      if ((positionSeconds * 1000 - predicted).abs() > tolerance) {
+        epoch++;
+        _latest = null;
+        return false;
+      }
+    }
+    _latest = YouTubeTimelineSample(
+      videoId: videoId,
+      revision: revision,
+      epoch: epoch,
+      positionMs: positionSeconds * 1000,
+      speed: playbackSpeed,
+      browserTimeMs: sampleTimeMs,
+      hostMidpointUs: midpoint,
+      uncertaintyMs: rttUs / 2000,
+    );
+    return true;
+  }
 }
 
 /// The browser has one media element/graph; Flutter only issues commands and
@@ -150,6 +335,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     readScript: controller.runJavaScriptReturningResult,
   );
   YouTubeMediaState _media = const YouTubeMediaState();
+  final YouTubeTimelineTracker _timeline = YouTubeTimelineTracker();
+  final Stopwatch _timelineClock = Stopwatch()..start();
+  YouTubeTimelineSample? get timeline => _timeline.latest;
   int _progress = 0;
   bool _contentReady = false;
   bool _checkingContent = false;
@@ -170,6 +358,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
 
   @override
   YouTubeMediaState get media => _media;
+
+  /// Local monotonic epoch for timeline brackets; not Android System.nanoTime.
+  int get timelineClockUs => _timelineClock.elapsedMicroseconds;
   @override
   int get progress => _progress;
   @override
@@ -210,6 +401,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         },
         onPageStarted: (_) {
           _document++;
+          _timeline.reset();
           _contentReady = false;
           _snapshotRevision = -1;
           _error = null;
@@ -310,6 +502,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     final int generation = _document;
     final String? pausedVideoId = _pauseOnReadyVideoId;
     try {
+      final int startUs = _timelineClock.elapsedMicroseconds;
       final Object result = await controller.runJavaScriptReturningResult(
         pausedVideoId == null
             ? 'JSON.stringify(window.TransponoMedia?.snapshot() || {})'
@@ -326,6 +519,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
               return JSON.stringify(state);
             })()''',
       );
+      final int endUs = _timelineClock.elapsedMicroseconds;
       dynamic decoded = result;
       // Android may return the JSON string quoted; WKWebView returns its value.
       for (int count = 0; decoded is String && count < 2; count++) {
@@ -337,7 +531,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           pausedVideoId != _pauseOnReadyVideoId) {
         return;
       }
-      if (decoded is Map<String, dynamic>) _acceptSnapshot(decoded);
+      if (decoded is Map<String, dynamic>) {
+        _acceptSnapshot(decoded, startUs: startUs, endUs: endUs);
+      }
       if (_focusOnReadyVideoId != null &&
           decoded is Map<String, dynamic> &&
           decoded['videoId'] == _focusOnReadyVideoId &&
@@ -366,7 +562,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     }
   }
 
-  void _acceptSnapshot(Map<String, dynamic> state) {
+  void _acceptSnapshot(Map<String, dynamic> state, {int? startUs, int? endUs}) {
     final revision = state['snapshotRevision'];
     if (revision is! num ||
         !revision.isFinite ||
@@ -392,6 +588,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         state['isAd'] == true ||
         state['restoreReady'] == true) {
       _media = YouTubeMediaState.fromJson(state);
+      _timeline.observe(state, startUs: startUs, endUs: endUs);
       if (state['restoreReady'] == true) _pauseOnReadyVideoId = null;
     }
   }
@@ -438,6 +635,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     final Uri uri = _youtubeVideoUri(videoId);
     await command('pause');
     if (_disposed) return;
+    _timeline.reset();
     _pauseOnReadyVideoId = videoId;
     _focusOnReadyVideoId = videoId;
     _pauseOnReadyDocument = _document + 1;

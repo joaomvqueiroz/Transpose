@@ -81,6 +81,24 @@ void main() {
     expect(harness.repository.saved.map((s) => s.media.pitch), [1, 6]);
   });
 
+  test('temporary rhythm preview does not replace recovery source', () async {
+    final harness = _Harness();
+    addTearDown(harness.close);
+    await harness.recovery.initialize();
+    harness.player.update(_media(source: 'original'));
+    await harness.recovery.flush();
+    harness.player.previewTemporary = true;
+    harness.player.update(_media(source: 'rhythm-preview-temp'));
+    await harness.recovery.flush();
+    expect(harness.repository.saved.last.media.locator, contains('original'));
+    expect(
+      harness.repository.saved.any(
+        (s) => s.media.locator.contains('rhythm-preview-temp'),
+      ),
+      isFalse,
+    );
+  });
+
   test(
     'unsettled practice transitions retain the last confirmed snapshot',
     () async {
@@ -616,6 +634,7 @@ class _Repository extends SessionSnapshotRepository {
 
 class _Player extends MainPlayerController {
   PlayerPreset? current;
+  bool previewTemporary = false;
   final restored = <PlayerPreset>[];
   Completer<void>? restoreGate;
   bool restoreSucceeds = true, _lastRestore = false;
@@ -649,7 +668,7 @@ class _Player extends MainPlayerController {
 
   @override
   PlayerPreset? snapshot(String name) =>
-      busy || pitchPending ? null : current?.renamed(name);
+      busy || pitchPending || previewTemporary ? null : current?.renamed(name);
 
   @override
   Future<void> restore(PlayerPreset preset) async {

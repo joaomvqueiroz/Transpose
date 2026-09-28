@@ -14,6 +14,9 @@ class HomeWidgetBridge {
   Map<String, Object?>? _state;
   String? _sent;
   DateTime? _lastSent;
+  bool _sending = false;
+  bool _disposed = false;
+  bool _missingPlugin = false;
 
   Future<void> initialize() async {
     _channel.setMethodCallHandler((call) async {
@@ -30,6 +33,7 @@ class HomeWidgetBridge {
   }
 
   void schedule(Map<String, Object?> state) {
+    if (_disposed || _missingPlugin) return;
     _state = state;
     final encoded = jsonEncode(state);
     if (encoded == _sent) return;
@@ -47,20 +51,48 @@ class HomeWidgetBridge {
   }
 
   Future<void> _send() async {
+    if (_disposed || _missingPlugin) return;
+    if (_sending) {
+      _schedulePending();
+      return;
+    }
     final state = _state;
     if (state == null) return;
     final encoded = jsonEncode(state);
     if (encoded == _sent) return;
+    _sending = true;
+    var delivered = false;
     try {
       await _channel.invokeMethod<void>('update', state);
       _sent = encoded;
       _lastSent = DateTime.now();
+      delivered = true;
     } on MissingPluginException {
       // No Android widget provider on this platform.
+      _missingPlugin = true;
+    } on PlatformException {
+      // A later player snapshot can retry after a transient Android failure.
+    } finally {
+      _sending = false;
+      if (delivered &&
+          !_disposed &&
+          !_missingPlugin &&
+          _state != null &&
+          jsonEncode(_state) != _sent) {
+        _schedulePending();
+      }
     }
   }
 
+  void _schedulePending() {
+    _pending ??= Timer(const Duration(seconds: 2), () {
+      _pending = null;
+      unawaited(_send());
+    });
+  }
+
   void dispose() {
+    _disposed = true;
     _pending?.cancel();
     _channel.setMethodCallHandler(null);
   }

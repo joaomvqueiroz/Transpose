@@ -1,0 +1,14 @@
+Six-stem HTDemucs model
+
+Source: https://huggingface.co/datasets/Retrobear/demucs.cpp
+Dataset revision: 8f58ac0491bbea657275bcd3e38af1ab3a27bfc9
+File: ggml-model-htdemucs-6s-f16.bin
+SHA-256: 09704f4ceae204e56e77d5eefd6ac71d7275be81fd507e6913371d59abcee856
+Size: 54,855,129 bytes
+
+The dataset declares the model under the MIT license. The model is
+downloaded only after the user selects Prepare model. The application
+verifies its exact size and SHA-256 before inference.
+
+The original Demucs project is by Meta AI Research and contributors:
+https://github.com/facebookresearch/demucs

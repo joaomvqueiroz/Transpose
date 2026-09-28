@@ -3,6 +3,59 @@ import 'package:flutter/material.dart';
 /// Stitch-inspired monochrome controls scoped to the four adjustments tabs.
 /// The embedded YouTube page keeps its own visual styling.
 ThemeData studioColumnTheme(ThemeData base) {
+  if (base.brightness == Brightness.light) {
+    const ink = Color(0xFF193244);
+    const panel = Color(0xFFFFFFFF);
+    const border = Color(0xFFB7C4D2);
+    final scheme = base.colorScheme.copyWith(
+      primary: ink,
+      onPrimary: Colors.white,
+      primaryContainer: const Color(0xFFDCEBF3),
+      onPrimaryContainer: ink,
+      secondaryContainer: const Color(0xFFE8EEF4),
+      onSecondaryContainer: ink,
+      surface: panel,
+      onSurface: const Color(0xFF182636),
+      outline: border,
+    );
+    return base.copyWith(
+      colorScheme: scheme,
+      cardColor: panel,
+      cardTheme: const CardThemeData(
+        color: panel,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(24)),
+          side: BorderSide(color: border),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ink,
+          backgroundColor: const Color(0xFFE8EEF4),
+          side: const BorderSide(color: border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(foregroundColor: ink),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: ink,
+        ),
+      ),
+      sliderTheme: base.sliderTheme.copyWith(
+        activeTrackColor: ink,
+        inactiveTrackColor: border,
+        thumbColor: ink,
+      ),
+    );
+  }
   const muted = Color(0xFFA1A1AA);
   const control = Color(0xFF2A2A2C);
   const controlBorder = Color(0xFF444447);

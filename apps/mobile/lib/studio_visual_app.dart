@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import 'main_player_panel.dart';
 import 'player_chord_sheet.dart';
 import 'player_presets.dart';
 import 'study_tools.dart';
+import 'band_session.dart';
 import 'chord_sheet.dart';
 import 'chord_browser.dart';
 import 'practice_progression_card.dart';
@@ -21,6 +23,8 @@ import 'session_snapshot.dart';
 import 'premium_branding.dart';
 import 'microphone_tuner.dart';
 import 'home_widget_bridge.dart';
+import 'studio_appearance.dart';
+import 'stem_panel.dart';
 
 part 'studio_player_home.dart';
 
@@ -56,9 +60,34 @@ class StudioVisualApp extends StatefulWidget {
 }
 
 class _StudioVisualAppState extends State<StudioVisualApp> {
+  final StudioAppearanceStore _appearanceStore = StudioAppearanceStore();
+  StudioAppearance _appearance = const StudioAppearance();
+  Future<void> _appearanceWrites = Future<void>.value();
+  bool _appearanceTouched = false;
   late final ValueNotifier<bool> _startupBrowserReady = ValueNotifier(
     !widget.waitForStartupBrowser,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadAppearance());
+  }
+
+  Future<void> _loadAppearance() async {
+    final saved = await _appearanceStore.read();
+    if (mounted && !_appearanceTouched) setState(() => _appearance = saved);
+  }
+
+  void _changeAppearance(StudioAppearance next) {
+    _appearanceTouched = true;
+    setState(() => _appearance = next);
+    _appearanceWrites = _appearanceWrites
+        .then((_) => _appearanceStore.save(next))
+        .catchError((Object error, StackTrace stack) {
+          debugPrint('Não foi possível guardar a aparência: $error');
+        });
+  }
 
   @override
   void dispose() {
@@ -72,13 +101,23 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: studioBg,
-      colorScheme: const ColorScheme.dark(
-        primary: Colors.white,
-        onPrimary: Color(0xFF101013),
-        surface: Color(0xFF18181B),
-      ),
+      brightness: _appearance.mode == StudioAppearanceMode.light
+          ? Brightness.light
+          : Brightness.dark,
+      scaffoldBackgroundColor: _appearance.mode == StudioAppearanceMode.light
+          ? const Color(0xFFF4F7FB)
+          : studioBg,
+      colorScheme: _appearance.mode == StudioAppearanceMode.light
+          ? const ColorScheme.light(
+              primary: Color(0xFF163E51),
+              onPrimary: Colors.white,
+              surface: Color(0xFFF4F7FB),
+            )
+          : const ColorScheme.dark(
+              primary: Colors.white,
+              onPrimary: Color(0xFF101013),
+              surface: Color(0xFF18181B),
+            ),
     ),
     home: TransponoLaunchGate(
       deferChild: widget.deferHomeUntilLaunch,
@@ -91,6 +130,8 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
         recoveryRepository: widget.recoveryRepository,
         chordBrowserFactory: widget.chordBrowserFactory,
         openSearchWhenEmpty: widget.openSearchWhenEmpty,
+        appearance: _appearance,
+        onAppearanceChanged: _changeAppearance,
         onInitialBrowserReady: () => _startupBrowserReady.value = true,
       ),
     ),
@@ -107,6 +148,7 @@ enum StudioTab {
   metronome,
   tuner,
   audioSettings,
+  appearanceSettings,
 }
 
 class StudioVisualHome extends StatefulWidget {
@@ -119,6 +161,8 @@ class StudioVisualHome extends StatefulWidget {
     this.recoveryRepository,
     this.chordBrowserFactory,
     this.openSearchWhenEmpty = false,
+    this.appearance = const StudioAppearance(),
+    this.onAppearanceChanged,
     this.onInitialBrowserReady,
   });
 
@@ -130,6 +174,8 @@ class StudioVisualHome extends StatefulWidget {
   final SessionSnapshotRepository? recoveryRepository;
   final ChordBrowserSession Function()? chordBrowserFactory;
   final bool openSearchWhenEmpty;
+  final StudioAppearance appearance;
+  final ValueChanged<StudioAppearance>? onAppearanceChanged;
   final VoidCallback? onInitialBrowserReady;
 
   @override

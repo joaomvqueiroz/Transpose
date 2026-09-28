@@ -54,6 +54,16 @@ void main() {
     expect(() => chordSearchUri(' '), throwsFormatException);
   });
 
+  test('video titles yield song queries, never generic YouTube', () {
+    expect(
+      chordQueryFromVideoTitle('Santo Pra Sempre - YouTube'),
+      'Santo Pra Sempre',
+    );
+    expect(chordQueryFromVideoTitle('YouTube'), isEmpty);
+    expect(chordQueryFromVideoTitle('Vídeo do YouTube'), isEmpty);
+    expect(chordQueryFromVideoTitle('Outra canção'), 'Outra canção');
+  });
+
   test(
     'import validates URL text size and double-encoded platform results',
     () {
@@ -154,6 +164,13 @@ void main() {
     await tap(tester, 'unifiedChooseChord');
     expect(find.byKey(const Key('unifiedChordSearch')), findsOneWidget);
     expect(find.byKey(const Key('chordBrowserPage')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('chordNativeQuery')))
+          .decoration
+          ?.hintText,
+      'Pesquisar música ou artista',
+    );
     await tester.enterText(find.byKey(const Key('chordNativeQuery')), 'Estudo');
     await tap(tester, 'chordNativeSearch');
     await tester.pump();

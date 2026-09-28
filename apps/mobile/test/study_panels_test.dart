@@ -182,6 +182,79 @@ void main() {
     expect((await store.read('local:test')).notes, 'Minha nota');
     expect(tester.takeException(), isNull);
   });
+  testWidgets('manual edit preserves newer tone and provenance', (
+    tester,
+  ) async {
+    final store = ChordSheetStore();
+    await store.save(
+      'local:merge',
+      const ChordSheet(timeline: '00:00 C', notes: 'Original'),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChordsPanel(
+            model: _Model(),
+            sourceKey: 'local:merge',
+            store: store,
+            onOpenPlayer: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, 'chordsEdit');
+    await tester.enterText(
+      find.byKey(const Key('chordsNotesInput')),
+      'Nota editada',
+    );
+    await store.save(
+      'local:merge',
+      const ChordSheet(
+        timeline: '00:00 C',
+        notes: 'Original',
+        transpose: 3,
+        followAudio: true,
+        sourceTitle: 'Fonte atualizada',
+      ),
+    );
+    await tap(tester, 'chordsSave');
+    final saved = await store.read('local:merge');
+    expect(saved.notes, 'Nota editada');
+    expect(saved.transpose, 3);
+    expect(saved.followAudio, isTrue);
+    expect(saved.sourceTitle, 'Fonte atualizada');
+  });
+
+  testWidgets('manual edit refuses to overwrite newer chord text', (
+    tester,
+  ) async {
+    final store = ChordSheetStore();
+    await store.save('local:conflict', const ChordSheet(notes: 'Original'));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChordsPanel(
+            model: _Model(),
+            sourceKey: 'local:conflict',
+            store: store,
+            onOpenPlayer: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tap(tester, 'chordsEdit');
+    await tester.enterText(
+      find.byKey(const Key('chordsNotesInput')),
+      'Meu rascunho',
+    );
+    await store.save('local:conflict', const ChordSheet(notes: 'Outra edição'));
+    await tap(tester, 'chordsSave');
+    expect(find.textContaining('A cifra mudou noutro painel'), findsOneWidget);
+    expect(find.text('Meu rascunho'), findsOneWidget);
+    expect((await store.read('local:conflict')).notes, 'Outra edição');
+  });
   testWidgets(
     'stage uses shared transport and setlist, lock prevents changes',
     (tester) async {

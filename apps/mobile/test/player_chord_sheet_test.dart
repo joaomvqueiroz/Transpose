@@ -10,6 +10,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/player_chord_sheet.dart';
 import 'package:transpose_mobile/player_panel_model.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 
 void main() {
   setUp(() {
@@ -28,6 +29,86 @@ void main() {
       .widget<SelectableText>(find.byKey(const Key('playerChordText')))
       .textSpan!
       .toPlainText();
+
+  test('cada nota usa a nova cor estável após transposição', () {
+    expect(playerChordPitchClass('G/B'), 7);
+    expect(playerChordPitchClass('Abm7'), 8);
+    expect(playerChordPitchClass('G#m7'), 8);
+    expect(playerChordNoteColors[0], const Color(0xFF5CA9FF));
+    expect(playerChordNoteColors[2], const Color(0xFF5DD47A));
+    expect(playerChordNoteColors[4], const Color(0xFFFF6B6B));
+    expect(playerChordNoteColors[5], const Color(0xFFC89362));
+    expect(playerChordNoteColors[7], const Color(0xFFFFD34F));
+    expect(playerChordNoteColors[9], const Color(0xFFB695F5));
+    expect(playerChordNoteColors[11], const Color(0xFFF48FC7));
+    final text = 'C   G/B   Am\nLetra [F#m] e [G]\n';
+    final spans = playerChordColorSpans(text).cast<TextSpan>();
+    expect(TextSpan(children: spans).toPlainText(), text);
+    expect(
+      spans.where((span) => span.text == 'G/B').single.style?.color,
+      playerChordNoteColors[7],
+    );
+    expect(
+      spans.where((span) => span.text == '[G]').single.style?.color,
+      playerChordNoteColors[7],
+    );
+    final transposed = playerChordColorSpans(
+      transposePlayerChordText('F   Am', 2),
+    ).cast<TextSpan>();
+    expect(
+      transposed.where((span) => span.text == 'G').single.style?.color,
+      playerChordNoteColors[7],
+    );
+    final light = const StudioAppearance(mode: StudioAppearanceMode.light);
+    expect(playerChordDisplayColor(7, light), const Color(0xFF806000));
+    expect(playerChordDisplayColor(9, light).computeLuminance(), lessThan(.18));
+  });
+
+  test('as 12 cores originais têm contraste nos temas escuro e claro', () {
+    const darkBackground = Color(0xFF0D0D0F);
+    for (var index = 0; index < 12; index++) {
+      final dark = playerChordNoteColors[index];
+      final light = playerChordNoteColorsLight[index];
+      final darkRatio =
+          (dark.computeLuminance() + .05) /
+          (darkBackground.computeLuminance() + .05);
+      final lightRatio = 1.05 / (light.computeLuminance() + .05);
+      expect(
+        darkRatio,
+        greaterThanOrEqualTo(4.5),
+        reason: 'nota $index escuro',
+      );
+      expect(
+        lightRatio,
+        greaterThanOrEqualTo(4.5),
+        reason: 'nota $index claro',
+      );
+    }
+  });
+
+  test('nomes enarmónicos recebem exatamente a mesma cor', () {
+    const pairs = [
+      ('C', 'B#'),
+      ('C#', 'Db'),
+      ('D#', 'Eb'),
+      ('E', 'Fb'),
+      ('F', 'E#'),
+      ('F#', 'Gb'),
+      ('G#', 'Ab'),
+      ('A#', 'Bb'),
+      ('B', 'Cb'),
+    ];
+    for (final (first, second) in pairs) {
+      final left = playerChordPitchClass(first);
+      final right = playerChordPitchClass(second);
+      expect(left, right, reason: '$first / $second');
+      expect(playerChordNoteColors[left!], playerChordNoteColors[right!]);
+      expect(
+        playerChordNoteColorsLight[left],
+        playerChordNoteColorsLight[right],
+      );
+    }
+  });
 
   test('UTF-8 import keeps alignment, accents and normalized newlines', () {
     expect(
@@ -117,6 +198,75 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'saved linked cifra follows confirmed audio and keeps its offset',
+    (tester) async {
+      final model = _DelayedPitch();
+      final store = ChordSheetStore();
+      await store.save(
+        'linked-song',
+        const ChordSheet(
+          notes: 'C   G/B\nLetra',
+          transpose: 1,
+          followAudio: true,
+        ),
+      );
+      await tester.pumpWidget(
+        _app(GlobalKey<PlayerChordSheetState>(), model, store, 'linked-song'),
+      );
+      await tester.pumpAndSettle();
+      expect(displayed(tester), 'C#  G#/C\nLetra');
+      expect(find.text('Acordes · acompanham o áudio'), findsOneWidget);
+
+      await tap(tester, 'playerChordPitchUp');
+      expect(model.requested, 1);
+      expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('playerChordPitchUp')))
+            .onPressed,
+        isNull,
+        reason: 'Um segundo toque não pode enviar outro tom antes do ACK.',
+      );
+      expect(
+        displayed(tester),
+        'C#  G#/C\nLetra',
+        reason: 'A cifra não deve antecipar o ACK do áudio.',
+      );
+      model.acknowledge();
+      await tester.pumpAndSettle();
+      expect(displayed(tester), 'D   A/C#\nLetra');
+      expect((await store.read('linked-song')).transpose, 1);
+      expect((await store.read('linked-song')).followAudio, isTrue);
+
+      unawaited(model.changePitch(3));
+      await tester.pump();
+      expect(displayed(tester), 'D   A/C#\nLetra');
+      model.acknowledge();
+      await tester.pumpAndSettle();
+      expect(displayed(tester), 'E   B/D#\nLetra');
+    },
+  );
+
+  testWidgets('linked cifra disables pitch controls when audio cannot pitch', (
+    tester,
+  ) async {
+    final model = _Model()..canPitch = false;
+    final store = ChordSheetStore()
+      ..temporarySheet = const ChordSheet(notes: 'Am  F', followAudio: true);
+    await tester.pumpWidget(
+      _app(GlobalKey<PlayerChordSheetState>(), model, store, ''),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('playerChordPitchUp')))
+          .onPressed,
+      isNull,
+    );
+    expect(displayed(tester), 'Am  F');
+    expect(store.temporarySheet.followAudio, isTrue);
+  });
 
   testWidgets('unsupported audio can still transpose the chord independently', (
     tester,
