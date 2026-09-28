@@ -118,6 +118,34 @@ interna 17,77 µs, e parou. O pacote principal permaneceu instalado. Estas
 medições vêm do relógio de apresentação do AudioTrack, **não do microfone**;
 não demonstram o instante audível, nem sincronização com YouTube.
 
+## Prova acústica de cliques sintéticos no Samsung
+
+Com autorização do utilizador, `integration_test/native_beat_acoustic_probe_test.dart`
+usou o microfone integrado durante cerca de 11 segundos **somente** enquanto
+`NativeBandAudio` gerava cliques a 120 BPM. O PCM permaneceu na memória do
+componente QA e foi apagado ao terminar; para Dart passaram apenas janelas de
+10 ms com RMS/novidade, sem áudio bruto. Não abriu YouTube nem qualquer vídeo.
+
+No volume original de música 1/15, o detector conservador não viu ataques:
+21 cliques no AudioTrack, 0 onsets no microfone. Ao elevar temporariamente
+para 6/15, captou 5 onsets fortes (principalmente inícios de compasso) e
+casou 4/20 batidas. Isto mostrou que o bit `onset` sozinho perdia os cliques
+fracos. O teste foi então alterado para comparar o maior aumento de energia
+perto de cada batida com o maior aumento na lacuna seguinte, exigindo pelo
+menos 2,5× de contraste e um limiar absoluto. A repetição a 6/15 encontrou
+20/20 batidas; razão mediana batida/lacuna 8,16; atraso acústico mediano
+estimado 26,47 ms; dispersão p95 quantizada 0 ms. As janelas são de 10 ms,
+portanto **não há prova de jitter zero nem precisão sub-10 ms**. O relógio de
+captação variou 670 µs entre timestamps; a qualidade nativa foi
+`availableForReview`, com fonte `VOICE_RECOGNITION`, sem AEC/NS ativos e AGC
+não reportado. O nível de áudio e o processamento da rota podem mudar a
+latência noutros aparelhos/volumes.
+
+O volume foi restaurado a 1/15 e a permissão `RECORD_AUDIO` do pacote QA foi
+revogada após a prova. O pacote de produção permaneceu instalado e intacto.
+Isto valida cliques locais gerados pela app **num** Samsung, não a sincronia
+audível com música YouTube ou com um segundo telemóvel.
+
 Na primeira execução, o APK QA antigo tinha assinatura incompatível. O Flutter
 Drive desinstalou-o automaticamente e instalou o novo pacote `.qa`; os dados
 locais do pacote QA antigo podem ter sido perdidos. O pacote de produção

@@ -30,7 +30,9 @@ QA de dois telefones: foi pedido explicitamente que não se repita.
    Samsung (5 cliques, pausa remove lease). Próximo: só após revisão de
    conformidade/consentimento, decidir se e como associar um mapa revisto a
    conteúdo real. O árbitro partilhado com `BandSession` passou testes unitários
-   e uma prova de alternância no mesmo Samsung; falta medir som acústico.
+   e uma prova de alternância no mesmo Samsung. Uma prova acústica de cliques
+   sintéticos nesse aparelho encontrou 20/20 batidas a volume 6/15, com atraso
+   mediano estimado 26,47 ms e resolução temporal de 10 ms. Não valida YouTube.
 2. Validar com conteúdo permitido somente se o utilizador pedir para retomar a
    QA em aparelhos.
 3. Rever compliance antes de qualquer distribuição.
@@ -59,6 +61,10 @@ anteriores falharam apenas no teste temporal `web_media_command_test.dart:
 never-completing cancellation is bounded and preserves timeout`; o mesmo
 teste e o ficheiro inteiro passaram isolados. Tratar como potencial
 instabilidade de temporização, não como garantia de regressão resolvida.
+Depois da prova acústica QA, `flutter analyze --no-pub` passou e a suíte
+sequencial completa passou 390 testes. A prova no aparelho não pertence à
+suíte `flutter test`; os seus resultados e limites estão em
+`docs/YOUTUBE_AMBIENT_RHYTHM_QA.md`.
 
 ## Preparação no outro PC
 

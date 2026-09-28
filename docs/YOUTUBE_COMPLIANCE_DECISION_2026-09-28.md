@@ -52,8 +52,8 @@ arbitragem permanece no pacote QA, com linha temporal e áudio sintéticos.
   recolher áudio de vídeos reais para o mapa e não apresentar BPM inferido do
   YouTube como funcionalidade do utilizador nesta fase.
 - Conservar os testes sintéticos QA, sem download, WebView, vídeo ou microfone.
-  Uma eventual prova acústica QA usa apenas cliques gerados pela própria app,
-  requer autorização do microfone e não valida sincronia com vídeos.
+  A prova acústica QA separada usou apenas cliques gerados pela própria app,
+  com autorização temporária do microfone; não valida sincronia com vídeos.
 - Não alterar silenciosamente a experiência YouTube existente como parte desta
   tarefa; a análise dos pontos 1–2 precisa de decisão de produto e avaliação
   de conformidade separadas.
