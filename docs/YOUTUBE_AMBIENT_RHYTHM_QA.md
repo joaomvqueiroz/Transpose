@@ -170,6 +170,20 @@ PowerShell passou.
 A associação de um mapa derivado de microfone a um vídeo real e a revisão de
 conformidade/consentimento continuam pendentes; ver
 [`YOUTUBE_COMPLIANCE_DECISION_2026-09-28.md`](YOUTUBE_COMPLIANCE_DECISION_2026-09-28.md).
+
+## Primeira interface pessoal de diagnóstico
+
+O build separado `.personal` criado por `tool/run_dev.ps1 -Personal` expõe em Treino um botão
+**Medir BPM do ambiente**. Pede permissão do microfone, recolhe 10 segundos de
+características acústicas pelo canal nativo, exige qualidade de captação e
+mostra BPM/compasso/confiança estimados. Parar, sair do ecrã ou suspender a app
+cancela a captação. O PCM não passa para Dart nem é guardado. O botão não
+atribui o som ao YouTube, não guarda um mapa da música e não gera cliques
+sincronizados: é diagnóstico, não a funcionalidade final. O build principal
+não inclui essa interface nem ativa o canal nativo. O build `.dev` também pode
+expor o diagnóstico; um APK `.dev` antigo com assinatura incompatível foi
+preservado, não desinstalado.
+
 O árbitro comum passou testes
 unitários de contenção, saída sem posse, pausa durante a preparação e falha
 no `stop`; ainda não foi provado acusticamente nem testado com as duas sessões

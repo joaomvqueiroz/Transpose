@@ -25,6 +25,7 @@ import 'microphone_tuner.dart';
 import 'home_widget_bridge.dart';
 import 'studio_appearance.dart';
 import 'stem_panel.dart';
+import 'ambient_rhythm_trial.dart';
 
 part 'studio_player_home.dart';
 

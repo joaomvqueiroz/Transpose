@@ -2050,6 +2050,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       ),
                     ),
                   ),
+                  if (const bool.fromEnvironment('TRANSPONO_PERSONAL_RHYTHM'))
+                    const AmbientRhythmTrial(),
                 ],
               ),
             ),

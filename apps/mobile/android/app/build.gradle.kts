@@ -7,7 +7,8 @@ plugins {
 val flutterTarget = providers.gradleProperty("target").orNull
     ?.replace('\\', '/') ?: "lib/main.dart"
 val isQaBuild = flutterTarget.contains("integration_test/")
-val isDevBuild = providers.gradleProperty("transponoDev").orNull == "true" && !isQaBuild
+val isPersonalBuild = providers.gradleProperty("transponoPersonal").orNull == "true" && !isQaBuild
+val isDevBuild = providers.gradleProperty("transponoDev").orNull == "true" && !isQaBuild && !isPersonalBuild
 
 android {
     namespace = "com.example.transpose_mobile"
@@ -29,6 +30,8 @@ android {
         // drive may uninstall its target during cleanup, even after a failure.
         applicationId = if (isQaBuild) {
             "com.example.transpose_mobile.qa"
+        } else if (isPersonalBuild) {
+            "com.example.transpose_mobile.personal"
         } else if (isDevBuild) {
             "com.example.transpose_mobile.dev"
         } else {
@@ -36,6 +39,7 @@ android {
         }
         manifestPlaceholders["transponoLabel"] = when {
             isQaBuild -> "Transpono QA"
+            isPersonalBuild -> "Transpono Pessoal"
             isDevBuild -> "Transpono Dev"
             else -> "Transpono"
         }

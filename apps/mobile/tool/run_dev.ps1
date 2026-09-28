@@ -5,6 +5,7 @@ param(
     [string] $DeviceId,
     [ValidateSet('debug', 'release')]
     [string] $Mode = 'debug',
+    [switch] $Personal,
     [switch] $BuildOnly,
     [string] $FlutterPath = (Join-Path $env:LOCALAPPDATA 'Codex\Toolchains\flutter\bin\flutter.bat'),
     [string] $AndroidSdk = (Join-Path $env:LOCALAPPDATA 'Android\Sdk')
@@ -32,11 +33,13 @@ Push-Location -LiteralPath $mobileRoot
 try {
     $env:ANDROID_HOME = $AndroidSdk
     $env:TRANSPONO_DEV_KEYSTORE = $keyPath
-    & $FlutterPath build apk "--$Mode" --target=lib/main.dart --android-project-arg=transponoDev=true
+    $buildVariant = if ($Personal) { 'transponoPersonal=true' } else { 'transponoDev=true' }
+    $expectedPackage = if ($Personal) { 'com.example.transpose_mobile.personal' } else { 'com.example.transpose_mobile.dev' }
+    & $FlutterPath build apk "--$Mode" --target=lib/main.dart --dart-define=TRANSPONO_PERSONAL_RHYTHM=true "--android-project-arg=$buildVariant"
     if ($LASTEXITCODE -ne 0) { throw 'Development build failed. Nothing was installed.' }
     $apkDirectory = Join-Path $mobileRoot "build\app\outputs\apk\$Mode"
     $metadata = Get-Content -Raw -LiteralPath (Join-Path $apkDirectory 'output-metadata.json') | ConvertFrom-Json
-    if ($metadata.applicationId -cne 'com.example.transpose_mobile.dev' -or
+    if ($metadata.applicationId -cne $expectedPackage -or
         $metadata.variantName -cne $Mode -or $metadata.elements.Count -ne 1) {
         throw 'Unexpected APK identity or variant. Nothing was installed.'
     }
@@ -48,7 +51,7 @@ try {
     if ($BuildOnly) { Write-Output "Development APK: $apk"; return }
     & $adb -s $DeviceId install -r $apk
     if ($LASTEXITCODE -ne 0) { throw 'Install failed. No automatic uninstall will be attempted.' }
-    & $adb -s $DeviceId shell am start -W -n com.example.transpose_mobile.dev/com.example.transpose_mobile.MainActivity
+    & $adb -s $DeviceId shell am start -W -n "$expectedPackage/com.example.transpose_mobile.MainActivity"
     if ($LASTEXITCODE -ne 0) { throw 'Development app launch failed.' }
 } finally {
     Pop-Location

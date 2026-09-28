@@ -18,7 +18,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 
-/** QA-only ambient rhythm features. No WebView access, PCM file, or PCM channel payload. */
+/** Isolated QA/development rhythm features. No WebView access or PCM payload. */
 class PhoneRhythmFeatureCapture private constructor(
     private val context: Context,
     messenger: BinaryMessenger,
@@ -34,7 +34,7 @@ class PhoneRhythmFeatureCapture private constructor(
     private var completedOriginUs: Long? = null
 
     init {
-        check(context.packageName == QA_PACKAGE) { "Rhythm microphone capture is QA-only." }
+        check(context.packageName in ENABLED_PACKAGES) { "Rhythm capture is limited to isolated builds." }
         channel.setMethodCallHandler { call, reply ->
             when (call.method) {
                 "clock" -> reply.success(System.nanoTime() / 1000)
@@ -309,9 +309,13 @@ class PhoneRhythmFeatureCapture private constructor(
     }
 
     companion object {
-        private const val QA_PACKAGE = "com.example.transpose_mobile.qa"
+        private val ENABLED_PACKAGES = setOf(
+            "com.example.transpose_mobile.qa",
+            "com.example.transpose_mobile.dev",
+            "com.example.transpose_mobile.personal",
+        )
         fun attach(context: Context, messenger: BinaryMessenger): PhoneRhythmFeatureCapture? =
-            if (context.packageName == QA_PACKAGE)
+            if (context.packageName in ENABLED_PACKAGES)
                 PhoneRhythmFeatureCapture(context.applicationContext, messenger) else null
     }
 }
