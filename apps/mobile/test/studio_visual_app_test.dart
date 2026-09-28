@@ -96,6 +96,20 @@ void main() {
     expect(lightGradient.colors.first, Colors.white);
     expect(
       tester
+          .widget<Text>(find.byKey(const Key('unifiedSpeedValue')))
+          .style!
+          .color,
+      const Color(0xFF193244),
+    );
+    final lightMarker = tester.widget<OutlinedButton>(
+      find.byKey(const Key('unifiedMarkA')),
+    );
+    expect(
+      lightMarker.style!.backgroundColor!.resolve({}),
+      const Color(0xFFE8EEF4),
+    );
+    expect(
+      tester
           .widget<Material>(
             find
                 .ancestor(

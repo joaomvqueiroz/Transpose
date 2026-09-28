@@ -62,6 +62,52 @@ String youtubeAppearanceScript(StudioAppearanceMode mode) {
           background-color: #ffffff !important;
           color: #0f0f0f !important;
         }
+        html[data-transpono-theme="dark"] ytm-mobile-topbar-renderer,
+        html[data-transpono-theme="dark"] ytm-feed-filter-chip-bar-renderer,
+        html[data-transpono-theme="dark"] ytm-pivot-bar-renderer,
+        html[data-transpono-theme="dark"] .ytmDrawerLayoutContainerDrawerLayout {
+          background-color: #0f0f0f !important;
+          color: #f1f1f1 !important;
+        }
+        html[data-transpono-theme="light"] ytm-mobile-topbar-renderer,
+        html[data-transpono-theme="light"] ytm-feed-filter-chip-bar-renderer,
+        html[data-transpono-theme="light"] ytm-pivot-bar-renderer,
+        html[data-transpono-theme="light"] .ytmDrawerLayoutContainerDrawerLayout {
+          background-color: #ffffff !important;
+          color: #0f0f0f !important;
+        }
+        html[data-transpono-theme="dark"] ytm-mobile-topbar-renderer c3-icon,
+        html[data-transpono-theme="dark"] ytm-mobile-topbar-renderer button,
+        html[data-transpono-theme="dark"] ytm-pivot-bar-renderer * {
+          color: #f1f1f1 !important;
+        }
+        html[data-transpono-theme="light"] ytm-mobile-topbar-renderer c3-icon,
+        html[data-transpono-theme="light"] ytm-mobile-topbar-renderer button,
+        html[data-transpono-theme="light"] ytm-pivot-bar-renderer * {
+          color: #0f0f0f !important;
+        }
+        html[data-transpono-theme="dark"] .chip-container {
+          background-color: #272727 !important;
+          color: #f1f1f1 !important;
+        }
+        html[data-transpono-theme="light"] .chip-container {
+          background-color: #f2f2f2 !important;
+          color: #0f0f0f !important;
+        }
+        html[data-transpono-theme="dark"] ytm-chip-cloud-chip-renderer[aria-selected="true"] .chip-container {
+          background-color: #f1f1f1 !important;
+          color: #0f0f0f !important;
+        }
+        html[data-transpono-theme="dark"] ytm-chip-cloud-chip-renderer[aria-selected="true"] .chip-container * {
+          color: #0f0f0f !important;
+        }
+        html[data-transpono-theme="light"] ytm-chip-cloud-chip-renderer[aria-selected="true"] .chip-container {
+          background-color: #0f0f0f !important;
+          color: #ffffff !important;
+        }
+        html[data-transpono-theme="light"] ytm-chip-cloud-chip-renderer[aria-selected="true"] .chip-container * {
+          color: #ffffff !important;
+        }
       `;
       if (window.__transponoThemeObserver) window.__transponoThemeObserver.disconnect();
       window.__transponoThemeObserver = new MutationObserver(() => {

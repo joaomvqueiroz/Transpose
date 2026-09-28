@@ -1350,6 +1350,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                   model: model,
                   enabled: ready,
                   compact: true,
+                  appearanceMode: appearanceMode,
                   minSpeed: youtubeNativeTransport ? .25 : .5,
                   maxSpeed: 2,
                 ),
@@ -1434,6 +1435,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                                 ? model.markA
                                 : null,
                             compact: true,
+                            appearanceMode: appearanceMode,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -1446,6 +1448,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                                 ? model.markB
                                 : null,
                             compact: true,
+                            appearanceMode: appearanceMode,
                           ),
                         ),
                       ],
@@ -2494,12 +2497,14 @@ class _SpeedControl extends StatefulWidget {
     required this.model,
     required this.enabled,
     this.compact = false,
+    this.appearanceMode = StudioAppearanceMode.dark,
     this.minSpeed = .5,
     this.maxSpeed = 1.5,
   });
   final PlayerPanelModel model;
   final bool enabled;
   final bool compact;
+  final StudioAppearanceMode appearanceMode;
   final double minSpeed, maxSpeed;
 
   @override
@@ -2562,8 +2567,10 @@ class _SpeedControlState extends State<_SpeedControl> {
               Text(
                 '${speed.toStringAsFixed(2)}×',
                 key: const Key('unifiedSpeedValue'),
-                style: const TextStyle(
-                  color: studioCyan,
+                style: TextStyle(
+                  color: widget.appearanceMode == StudioAppearanceMode.light
+                      ? const Color(0xFF193244)
+                      : studioCyan,
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                 ),
@@ -2890,43 +2897,54 @@ class _MarkerButton extends StatelessWidget {
     required this.value,
     required this.onPressed,
     this.compact = false,
+    this.appearanceMode = StudioAppearanceMode.dark,
   });
   final Key controlKey;
   final String label;
   final Duration? value;
   final VoidCallback? onPressed;
   final bool compact;
+  final StudioAppearanceMode appearanceMode;
 
   @override
-  Widget build(BuildContext context) => OutlinedButton(
-    key: controlKey,
-    onPressed: onPressed,
-    style: OutlinedButton.styleFrom(
-      backgroundColor: const Color(0xFF232326),
-      foregroundColor: Colors.white,
-      fixedSize: compact ? const Size.fromHeight(36) : null,
-      minimumSize: compact ? const Size(0, 36) : null,
-      tapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : null,
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 6 : 8,
-        vertical: compact ? 2 : 12,
+  Widget build(BuildContext context) {
+    final light = appearanceMode == StudioAppearanceMode.light;
+    return OutlinedButton(
+      key: controlKey,
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        backgroundColor: light
+            ? const Color(0xFFE8EEF4)
+            : const Color(0xFF232326),
+        foregroundColor: light ? const Color(0xFF193244) : Colors.white,
+        disabledForegroundColor: light ? const Color(0xFF526577) : studioMuted,
+        fixedSize: compact ? const Size.fromHeight(36) : null,
+        minimumSize: compact ? const Size(0, 36) : null,
+        tapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : null,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 8,
+          vertical: compact ? 2 : 12,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
-    child: Column(
-      children: <Widget>[
-        Text(
-          label,
-          style: TextStyle(fontSize: compact ? 9 : 10, color: studioMuted),
-        ),
-        SizedBox(height: compact ? 0 : 4),
-        Text(
-          value == null ? 'Marcar' : _time(value!),
-          style: compact ? const TextStyle(fontSize: 12) : null,
-        ),
-      ],
-    ),
-  );
+      child: Column(
+        children: <Widget>[
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: compact ? 9 : 10,
+              color: light ? const Color(0xFF526577) : studioMuted,
+            ),
+          ),
+          SizedBox(height: compact ? 0 : 4),
+          Text(
+            value == null ? 'Marcar' : _time(value!),
+            style: compact ? const TextStyle(fontSize: 12) : null,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ToolButton extends StatelessWidget {

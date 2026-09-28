@@ -15,6 +15,9 @@ void main() {
       expect(light, contains('const dark = false'));
       expect(dark, contains("host.endsWith('.youtube.com')"));
       expect(light, contains("root.toggleAttribute('dark', dark)"));
+      expect(dark, contains('ytm-mobile-topbar-renderer'));
+      expect(dark, contains('ytm-feed-filter-chip-bar-renderer'));
+      expect(dark, contains('ytm-pivot-bar-renderer'));
       expect(dark, isNot(contains('video.style')));
     },
   );
