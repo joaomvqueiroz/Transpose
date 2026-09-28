@@ -60,11 +60,11 @@ void main() {
       playerChordNoteColors[7],
     );
     final light = const StudioAppearance(mode: StudioAppearanceMode.light);
-    expect(playerChordDisplayColor(7, light), const Color(0xFF664B00));
-    expect(playerChordDisplayColor(9, light).computeLuminance(), lessThan(.11));
+    expect(playerChordDisplayColor(7, light), playerChordNoteColors[7]);
+    expect(playerChordDisplayColor(9, light), playerChordNoteColors[9]);
   });
 
-  test('as 12 cores originais têm contraste nos temas escuro e claro', () {
+  test('as 12 cores da cifra são iguais no escuro e no claro', () {
     const darkBackground = Color(0xFF0D0D0F);
     for (var index = 0; index < 12; index++) {
       final dark = playerChordNoteColors[index];
@@ -72,21 +72,16 @@ void main() {
       final darkRatio =
           (dark.computeLuminance() + .05) /
           (darkBackground.computeLuminance() + .05);
-      final lightRatio = 1.05 / (light.computeLuminance() + .05);
       expect(
         darkRatio,
         greaterThanOrEqualTo(4.5),
         reason: 'nota $index escuro',
       );
-      expect(
-        lightRatio,
-        greaterThanOrEqualTo(4.5),
-        reason: 'nota $index claro',
-      );
+      expect(light, dark, reason: 'nota $index claro');
     }
   });
 
-  testWidgets('cifra clara tem letra preta em negrito e acordes escuros', (
+  testWidgets('cifra clara tem letra preta e notas coloridas com contorno', (
     tester,
   ) async {
     final store = ChordSheetStore()
@@ -109,8 +104,15 @@ void main() {
     final chords = text.textSpan!.children!.cast<TextSpan>();
     expect(
       chords.where((span) => span.text == 'C').single.style!.color,
-      playerChordNoteColorsLight[0],
+      playerChordNoteColors[0],
     );
+    final outline = chords
+        .where((span) => span.text == 'C')
+        .single
+        .style!
+        .shadows!;
+    expect(outline.length, 8);
+    expect(outline.every((shadow) => shadow.color == Colors.black), isTrue);
   });
 
   testWidgets('cifra fica opaca acima do desfoque no modo Vidro', (
@@ -134,6 +136,32 @@ void main() {
     final gradient =
         (sheet.decoration! as BoxDecoration).gradient! as LinearGradient;
     expect(gradient.colors.every((color) => color.a == 1), isTrue);
+    expect(gradient.colors.first, const Color(0xFF4F5969));
+    final textSurface = tester.widget<Container>(
+      find.byKey(const Key('playerChordTextSurface')),
+    );
+    expect(
+      (textSurface.decoration! as BoxDecoration).color,
+      const Color(0xFF303B4A),
+    );
+  });
+
+  testWidgets('cifra escura usa o mesmo grafite dos outros cartões', (
+    tester,
+  ) async {
+    final store = ChordSheetStore()
+      ..temporarySheet = const ChordSheet(notes: 'C\nMinha letra');
+    await tester.pumpWidget(
+      _app(GlobalKey<PlayerChordSheetState>(), _Model(), store, ''),
+    );
+    await tester.pumpAndSettle();
+    final textSurface = tester.widget<Container>(
+      find.byKey(const Key('playerChordTextSurface')),
+    );
+    expect(
+      (textSurface.decoration! as BoxDecoration).color,
+      const Color(0xFF242427),
+    );
   });
 
   test('nomes enarmónicos recebem exatamente a mesma cor', () {

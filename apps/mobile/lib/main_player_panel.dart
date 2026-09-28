@@ -1264,76 +1264,83 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      IconButton.filledTonal(
-                        key: const Key('unifiedPitchDown'),
-                        tooltip: 'Diminuir tom',
-                        style: IconButton.styleFrom(
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          minimumSize: const Size(32, 32),
-                          maximumSize: const Size(32, 32),
-                        ),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 32,
-                          height: 32,
-                        ),
-                        padding: EdgeInsets.zero,
-                        iconSize: 17,
-                        onPressed: ready && model.canPitch && model.pitch > -12
-                            ? () => model.changePitch(
-                                (model.pitch - 1).clamp(-12, 12),
-                              )
-                            : null,
-                        icon: const Icon(Icons.remove),
-                      ),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            Text(
-                              '${_pitchLabel(model.pitch)} semitons',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                              ),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 238),
+                      child: Row(
+                        children: [
+                          IconButton.filledTonal(
+                            key: const Key('unifiedPitchDown'),
+                            tooltip: 'Diminuir tom',
+                            style: IconButton.styleFrom(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(32, 32),
+                              maximumSize: const Size(32, 32),
                             ),
-                            Text(
-                              _detectedKeyLabel(),
-                              key: const Key('unifiedDetectedKey'),
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 9,
-                                color: studioMuted,
-                              ),
+                            constraints: const BoxConstraints.tightFor(
+                              width: 32,
+                              height: 32,
                             ),
-                          ],
-                        ),
+                            padding: EdgeInsets.zero,
+                            iconSize: 17,
+                            onPressed:
+                                ready && model.canPitch && model.pitch > -12
+                                ? () => model.changePitch(
+                                    (model.pitch - 1).clamp(-12, 12),
+                                  )
+                                : null,
+                            icon: const Icon(Icons.remove),
+                          ),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Text(
+                                  '${_pitchLabel(model.pitch)} semitons',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                Text(
+                                  _detectedKeyLabel(),
+                                  key: const Key('unifiedDetectedKey'),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    color: studioMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton.filledTonal(
+                            key: const Key('unifiedPitchUp'),
+                            tooltip: 'Aumentar tom',
+                            style: IconButton.styleFrom(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              minimumSize: const Size(32, 32),
+                              maximumSize: const Size(32, 32),
+                            ),
+                            constraints: const BoxConstraints.tightFor(
+                              width: 32,
+                              height: 32,
+                            ),
+                            padding: EdgeInsets.zero,
+                            iconSize: 17,
+                            onPressed:
+                                ready && model.canPitch && model.pitch < 12
+                                ? () => model.changePitch(
+                                    (model.pitch + 1).clamp(-12, 12),
+                                  )
+                                : null,
+                            icon: const Icon(Icons.add),
+                          ),
+                        ],
                       ),
-                      IconButton.filledTonal(
-                        key: const Key('unifiedPitchUp'),
-                        tooltip: 'Aumentar tom',
-                        style: IconButton.styleFrom(
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          minimumSize: const Size(32, 32),
-                          maximumSize: const Size(32, 32),
-                        ),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 32,
-                          height: 32,
-                        ),
-                        padding: EdgeInsets.zero,
-                        iconSize: 17,
-                        onPressed: ready && model.canPitch && model.pitch < 12
-                            ? () => model.changePitch(
-                                (model.pitch + 1).clamp(-12, 12),
-                              )
-                            : null,
-                        icon: const Icon(Icons.add),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),

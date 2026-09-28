@@ -74,32 +74,22 @@ const playerChordNoteColors = <Color>[
   Color(0xFFF48FC7), // B: rosa
 ];
 
-const playerChordNoteColorsLight = <Color>[
-  Color(0xFF164B84),
-  Color(0xFF0F526C),
-  Color(0xFF0D5D2C),
-  Color(0xFF0D5F40),
-  Color(0xFF8F1725),
-  Color(0xFF603716),
-  Color(0xFF673E1A),
-  Color(0xFF664B00),
-  Color(0xFF6F4B00),
-  Color(0xFF543088),
-  Color(0xFF653B8C),
-  Color(0xFF802253),
+const playerChordNoteColorsLight = playerChordNoteColors;
+
+const _lightChordOutline = <Shadow>[
+  Shadow(color: Colors.black, offset: Offset(-1, -1)),
+  Shadow(color: Colors.black, offset: Offset(0, -1)),
+  Shadow(color: Colors.black, offset: Offset(1, -1)),
+  Shadow(color: Colors.black, offset: Offset(-1, 0)),
+  Shadow(color: Colors.black, offset: Offset(1, 0)),
+  Shadow(color: Colors.black, offset: Offset(-1, 1)),
+  Shadow(color: Colors.black, offset: Offset(0, 1)),
+  Shadow(color: Colors.black, offset: Offset(1, 1)),
 ];
 
 Color playerChordDisplayColor(int pitchClass, StudioAppearance appearance) {
   final customized = appearance.noteColors[pitchClass];
-  if (appearance.mode != StudioAppearanceMode.light) {
-    return customized ?? playerChordNoteColors[pitchClass];
-  }
-  if (customized == null) return playerChordNoteColorsLight[pitchClass];
-  for (var step = 0; step <= 8; step++) {
-    final candidate = Color.lerp(customized, Colors.black, step / 10)!;
-    if (candidate.computeLuminance() <= .11) return candidate;
-  }
-  return Color.lerp(customized, Colors.black, .8)!;
+  return customized ?? playerChordNoteColors[pitchClass];
 }
 
 int? playerChordPitchClass(String chord) {
@@ -153,6 +143,9 @@ List<InlineSpan> playerChordColorSpans(
               StudioAppearance(mode: mode, noteColors: noteColors),
             ),
             fontWeight: FontWeight.w700,
+            shadows: mode == StudioAppearanceMode.light
+                ? _lightChordOutline
+                : null,
           ),
         ),
       );
@@ -257,11 +250,28 @@ class PlayerChordSheet extends StatefulWidget {
 }
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
-  // The notes sit above the glass layer so their reading surface stays crisp.
-  StudioAppearanceMode get _sheetDecorationMode =>
-      widget.appearance.mode == StudioAppearanceMode.glass
-      ? StudioAppearanceMode.dark
-      : widget.appearance.mode;
+  // An opaque graphite surface keeps the notes crisp without making glass black.
+  BoxDecoration get _sheetDecoration {
+    final base = studioPanelDecoration(
+      radius: 26,
+      mode: widget.appearance.mode,
+    );
+    if (widget.appearance.mode != StudioAppearanceMode.glass) return base;
+    return base.copyWith(
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF4F5969), Color(0xFF303B4A), Color(0xFF202937)],
+        stops: [0, .48, 1],
+      ),
+    );
+  }
+
+  Color get _textSurfaceColor => switch (widget.appearance.mode) {
+    StudioAppearanceMode.light => Colors.white,
+    StudioAppearanceMode.dark => const Color(0xFF242427),
+    StudioAppearanceMode.glass => const Color(0xFF303B4A),
+  };
   Color get _controlColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => const Color(0xFFE8EEF4),
     StudioAppearanceMode.glass => const Color(0xAA303841),
@@ -506,10 +516,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
         if (widget.lyricsOnly) {
           return Container(
             key: const Key('playerChordSheet'),
-            decoration: studioPanelDecoration(
-              radius: 26,
-              mode: _sheetDecorationMode,
-            ),
+            decoration: _sheetDecoration,
             clipBehavior: Clip.antiAlias,
             child: NotificationListener<OverscrollNotification>(
               onNotification: (notification) {
@@ -572,10 +579,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
         return Container(
           key: const Key('playerChordSheet'),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: studioPanelDecoration(
-            radius: 26,
-            mode: _sheetDecorationMode,
-          ),
+          decoration: _sheetDecoration,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -719,11 +723,10 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                 ),
               ],
               Container(
+                key: const Key('playerChordTextSurface'),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: widget.appearance.mode == StudioAppearanceMode.light
-                      ? const Color(0xFFFFFFFF)
-                      : const Color(0xFF0D0D0F),
+                  color: _textSurfaceColor,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: LayoutBuilder(

@@ -44,6 +44,10 @@ void main() {
     expect(closeButton.tooltip, 'Expandir ou fechar ajustes');
     expect(find.byKey(const Key('unifiedSectioninstruments')), findsNothing);
     expect(find.byKey(const Key('unifiedChooseChord')), findsOneWidget);
+    final pitchButtonsInCifra =
+        tester.getCenter(find.byKey(const Key('unifiedPitchUp'))).dx -
+        tester.getCenter(find.byKey(const Key('unifiedPitchDown'))).dx;
+    expect(pitchButtonsInCifra, lessThan(230));
     expect(
       tester.getTopLeft(find.byKey(const Key('unifiedChooseChord'))).dy,
       greaterThanOrEqualTo(
@@ -60,6 +64,10 @@ void main() {
     expect(find.byKey(const Key('unifiedChooseChord')), findsNothing);
     expect(find.byKey(const Key('unifiedSpeedSlider')), findsOneWidget);
     expect(find.byKey(const Key('unifiedLoopToggle')), findsOneWidget);
+    final pitchButtonsInTreino =
+        tester.getCenter(find.byKey(const Key('unifiedPitchUp'))).dx -
+        tester.getCenter(find.byKey(const Key('unifiedPitchDown'))).dx;
+    expect(pitchButtonsInTreino, lessThan(230));
     expect(find.text('TEMPO MASTER'), findsNothing);
     expect(find.text('VELOCIDADE'), findsOneWidget);
     expect(find.text('Repetir'), findsOneWidget);
@@ -160,9 +168,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('quatro colunas cabem sem arrastar a faixa', (
-    tester,
-  ) async {
+  testWidgets('quatro colunas cabem sem arrastar a faixa', (tester) async {
     tester.view.physicalSize = const Size(350, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

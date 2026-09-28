@@ -121,6 +121,18 @@ void main() {
           .color,
       isNot(const Color(0xFF202023)),
     );
+    await tester.tap(find.byKey(const Key('unifiedSectionaudioSettings')));
+    await tester.pumpAndSettle();
+    final fileCard = tester.widget<Card>(
+      find.byKey(const Key('audioOpenLocalFileCard')),
+    );
+    expect(fileCard.color, isNull);
+    expect(
+      Theme.of(tester.element(find.byKey(const Key('audioOpenLocalFileCard'))))
+          .cardTheme
+          .color,
+      Colors.white,
+    );
     await tester.tap(find.byKey(const Key('unifiedSectionchords')));
     await tester.pumpAndSettle();
     expect(

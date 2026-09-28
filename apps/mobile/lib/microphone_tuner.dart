@@ -285,11 +285,20 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
 
   @override
   Widget build(BuildContext context) {
+    final light = widget.appearance.mode == StudioAppearanceMode.light;
+    const lightInk = Color(0xFF193244);
+    const lightMuted = Color(0xFF526577);
     final reading = _reading;
     final targetCents = reading?.cents;
     final accurate = reading != null && _inTune;
     final feedbackColor = reading == null
-        ? Colors.white
+        ? (light ? lightInk : Colors.white)
+        : light
+        ? accurate
+              ? const Color(0xFF16743A)
+              : _needleCents.abs() <= 30
+              ? const Color(0xFF9B4E00)
+              : const Color(0xFFB42332)
         : tunerFeedbackColor(_needleCents, inTune: accurate);
     final status = _previewNote != null
         ? 'Nota de referência · piano'
@@ -311,7 +320,11 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
         children: [
           Row(
             children: [
-              const Icon(Icons.tune, size: 16, color: Colors.white),
+              Icon(
+                Icons.tune,
+                size: 16,
+                color: light ? lightInk : Colors.white,
+              ),
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
@@ -323,9 +336,12 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                   ),
                 ),
               ),
-              const Text(
+              Text(
                 'AUTO · 440 Hz',
-                style: TextStyle(fontSize: 10, color: Color(0xFFBEBEC4)),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: light ? lightMuted : const Color(0xFFBEBEC4),
+                ),
               ),
             ],
           ),
@@ -366,10 +382,10 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                           : reading == null
                           ? 'ESCUTA AUTOMÁTICA'
                           : 'NOTA DETETADA',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 9,
                         letterSpacing: 1,
-                        color: Color(0xFFA1A1AA),
+                        color: light ? lightMuted : const Color(0xFFA1A1AA),
                       ),
                     ),
                   ],
@@ -384,7 +400,9 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: reading == null ? const Color(0xFFBABAC0) : feedbackColor,
+              color: reading == null
+                  ? (light ? lightMuted : const Color(0xFFBABAC0))
+                  : feedbackColor,
             ),
           ),
           if (reading != null)
@@ -407,12 +425,20 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         minimumSize: Size.zero,
-                        foregroundColor: Colors.white,
-                        backgroundColor: _previewNote == string.$1
+                        foregroundColor: light ? lightInk : Colors.white,
+                        backgroundColor: light
+                            ? _previewNote == string.$1
+                                  ? const Color(0xFFDCEBF3)
+                                  : const Color(0xFFE8EEF4)
+                            : _previewNote == string.$1
                             ? const Color(0xFF38383E)
                             : const Color(0xFF232326),
                         side: BorderSide(
-                          color: _previewNote == string.$1
+                          color: light
+                              ? _previewNote == string.$1
+                                    ? lightInk
+                                    : const Color(0xFFB7C4D2)
+                              : _previewNote == string.$1
                               ? const Color(0xFFBEBEC4)
                               : const Color(0xFF35353A),
                         ),
@@ -431,9 +457,11 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                           ),
                           Text(
                             '${string.$2.toStringAsFixed(0)} Hz',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 7,
-                              color: Color(0xFFA1A1AA),
+                              color: light
+                                  ? lightMuted
+                                  : const Color(0xFFA1A1AA),
                             ),
                           ),
                         ],
@@ -461,10 +489,16 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                   : _active
                   ? 'Parar microfone'
                   : 'Ativar microfone',
+              style: TextStyle(color: light ? Colors.black : null),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Color(0xFF66666D)),
+              foregroundColor: light ? lightInk : Colors.white,
+              backgroundColor: light ? const Color(0xFFE8EEF4) : null,
+              side: BorderSide(
+                color: light
+                    ? const Color(0xFFB7C4D2)
+                    : const Color(0xFF66666D),
+              ),
             ),
           ),
           if (_error != null)

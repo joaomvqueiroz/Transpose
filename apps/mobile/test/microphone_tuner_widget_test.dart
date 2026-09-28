@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:transpose_mobile/microphone_tuner.dart';
 import 'package:transpose_mobile/piano_reference_player.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 
 class _FakePianoReferencePlayer implements PianoReferencePlayer {
   final played = <String>[];
@@ -129,6 +130,51 @@ void main() {
     expect(find.text('A2'), findsWidgets);
     expect(find.text('Nota de referência · piano'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('botões inferiores do afinador seguem o modo Claro', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.light(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: MicrophoneTunerTool(
+              referencePlayer: _FakePianoReferencePlayer(),
+              appearance: const StudioAppearance(
+                mode: StudioAppearanceMode.light,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final stringButton = tester.widget<OutlinedButton>(
+      find.byKey(const Key('tunerStringE2')),
+    );
+    expect(
+      stringButton.style!.backgroundColor!.resolve({}),
+      const Color(0xFFE8EEF4),
+    );
+    expect(
+      stringButton.style!.foregroundColor!.resolve({}),
+      const Color(0xFF193244),
+    );
+    final microphoneButton = tester.widget<OutlinedButton>(
+      find.byKey(const Key('tunerMicrophoneToggle')),
+    );
+    expect(
+      microphoneButton.style!.backgroundColor!.resolve({}),
+      const Color(0xFFE8EEF4),
+    );
+    final microphoneLabel = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('tunerMicrophoneToggle')),
+        matching: find.text('Ativar microfone'),
+      ),
+    );
+    expect(microphoneLabel.style!.color, Colors.black);
   });
 
   testWidgets('piano atrasado não reativa a pré-escuta após suspensão', (

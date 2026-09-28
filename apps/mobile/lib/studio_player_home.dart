@@ -1293,7 +1293,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
       const SizedBox(height: 12),
       Card(
-        color: studioCard,
+        key: const Key('audioResetProcessingCard'),
         child: ListTile(
           leading: const Icon(Icons.restore),
           title: const Text(
@@ -1319,7 +1319,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         style: TextStyle(color: studioMuted, fontSize: 12),
       ),
       Card(
-        color: studioCard,
+        key: const Key('audioOpenLocalFileCard'),
         child: ListTile(
           key: const Key('audioOpenLocalFile'),
           onTap: _pickFile,
