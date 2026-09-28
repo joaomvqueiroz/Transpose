@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:transpose_mobile/band_audio.dart';
+import 'package:transpose_mobile/native_beat_audio_arbiter.dart';
 import 'package:transpose_mobile/youtube_beat_scheduler.dart';
 import 'package:transpose_mobile/youtube_native_beat_output.dart';
 
@@ -7,7 +8,7 @@ class FakeAudio implements FractionalBeatAudio {
   int prepares = 0, stops = 0, schedules = 0;
   double? bpm;
   int? startUs, beats, expiry, revision;
-  bool fail = false;
+  bool fail = false, failStop = false;
 
   @override
   Future<void> prepare(int Function() now) async {
@@ -36,23 +37,7 @@ class FakeAudio implements FractionalBeatAudio {
   @override
   Future<void> stop() async {
     stops++;
-  }
-}
-
-class FakeArbiter implements YouTubeBeatAudioArbiter {
-  bool busy = false;
-  int releases = 0;
-  @override
-  bool tryAcquire() {
-    if (busy) return false;
-    busy = true;
-    return true;
-  }
-
-  @override
-  void release() {
-    busy = false;
-    releases++;
+    if (failStop) throw StateError('stop failed');
   }
 }
 
@@ -75,12 +60,12 @@ void main() {
     () async {
       var now = 10000000;
       final audio = FakeAudio();
-      final arbiter = FakeArbiter();
+      final arbiter = NativeBeatAudioArbiter();
+      final competingOwner = Object();
       final output = YouTubeNativeBeatOutput(
         audio: audio,
         nowUs: () => now,
         arbiter: arbiter,
-        bandSessionActive: () => false,
       );
       await output.schedule(plan());
       await output.schedule(plan(expiry: 11200000));
@@ -93,7 +78,8 @@ void main() {
       expect(audio.expiry, 11200000);
       await output.stop();
       expect(audio.stops, 1);
-      expect(arbiter.busy, false);
+      expect(arbiter.tryAcquire(competingOwner), isTrue);
+      arbiter.release(competingOwner);
       now += 100000;
       await output.schedule(plan(expiry: 11500000));
       expect(audio.prepares, 2);
@@ -103,38 +89,34 @@ void main() {
 
   test('pause/seek stop is idempotent and releases ownership', () async {
     final audio = FakeAudio();
-    final arbiter = FakeArbiter();
+    final arbiter = NativeBeatAudioArbiter();
+    final competingOwner = Object();
     final output = YouTubeNativeBeatOutput(
       audio: audio,
       nowUs: () => 10000000,
       arbiter: arbiter,
-      bandSessionActive: () => false,
     );
     await output.schedule(plan());
     await output.stop();
     await output.stop();
     expect(audio.stops, 1);
-    expect(arbiter.releases, 1);
-    expect(arbiter.busy, false);
+    expect(arbiter.tryAcquire(competingOwner), isTrue);
+    arbiter.release(competingOwner);
   });
 
-  test('expired lease and BandSession cannot seize shared channel', () async {
+  test('expired lease and band owner cannot seize shared channel', () async {
     final audio = FakeAudio();
-    final arbiter = FakeArbiter();
-    var bandActive = true;
+    final arbiter = NativeBeatAudioArbiter();
+    final bandOwner = Object();
+    expect(arbiter.tryAcquire(bandOwner), isTrue);
     final output = YouTubeNativeBeatOutput(
       audio: audio,
       nowUs: () => 10000000,
       arbiter: arbiter,
-      bandSessionActive: () => bandActive,
     );
     await expectLater(output.schedule(plan()), throwsStateError);
     expect(audio.prepares, 0);
-    bandActive = false;
-    arbiter.busy = true;
-    await expectLater(output.schedule(plan()), throwsStateError);
-    expect(audio.prepares, 0);
-    arbiter.busy = false;
+    arbiter.release(bandOwner);
     await expectLater(
       output.schedule(plan(expiry: 10510000)),
       throwsArgumentError,
@@ -145,15 +127,31 @@ void main() {
 
   test('schedule error stops owned output and releases lease', () async {
     final audio = FakeAudio()..fail = true;
-    final arbiter = FakeArbiter();
+    final arbiter = NativeBeatAudioArbiter();
+    final competingOwner = Object();
     final output = YouTubeNativeBeatOutput(
       audio: audio,
       nowUs: () => 10000000,
       arbiter: arbiter,
-      bandSessionActive: () => false,
     );
     await expectLater(output.schedule(plan()), throwsStateError);
     expect(audio.stops, 1);
-    expect(arbiter.busy, false);
+    expect(arbiter.tryAcquire(competingOwner), isTrue);
+    arbiter.release(competingOwner);
+  });
+  test('failed native stop keeps the channel locked', () async {
+    final audio = FakeAudio()..failStop = true;
+    final arbiter = NativeBeatAudioArbiter();
+    final output = YouTubeNativeBeatOutput(
+      audio: audio,
+      nowUs: () => 10000000,
+      arbiter: arbiter,
+    );
+    await output.schedule(plan());
+    await expectLater(output.stop(), throwsStateError);
+    expect(arbiter.tryAcquire(Object()), isFalse);
+    audio.failStop = false;
+    await output.stop();
+    expect(arbiter.tryAcquire(Object()), isTrue);
   });
 }

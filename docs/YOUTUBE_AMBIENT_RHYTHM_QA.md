@@ -1,9 +1,10 @@
 # Características rítmicas ambiente — protótipo QA (2026-09-28)
 
 Estado: **base técnica experimental, apenas no pacote `com.example.transpose_mobile.qa`**.
-Não foi compilada em APK nem executada em telemóvel após o pedido do utilizador
-para não repetir testes. Não há análise de vídeo YouTube em produção, nem
-alinhamento comprovado entre música e metrónomo.
+A cadeia sintética de saída nativa foi executada uma vez no Samsung, conforme
+registo abaixo; a captação rítmica ambiente não foi testada em telemóvel.
+Não há análise de vídeo YouTube em produção, nem alinhamento comprovado entre
+música e metrónomo.
 
 ## Limite de captação e privacidade
 
@@ -53,13 +54,14 @@ precisa calibrar explicitamente os relógios, descartar amostras durante seek,
 anúncio, mudança de velocidade/fonte e buffering, e medir latência de saída
 e entrada. Não afirmar sincronia a partir da semelhança visual dos timestamps.
 
-## Scheduler de cliques, ainda sem saída nativa
+## Scheduler de cliques e saída nativa isolada para QA
 
 `youtube_beat_scheduler.dart` é um coordenador Dart puro que aceita um
 `RhythmMap` já validado, amostras `YouTubeTimelineSample` e um relógio injetado
-da **mesma instância/época `Stopwatch`** da amostra. Produz grades para uma
-interface `YouTubeBeatOutput` fictícia; não está ligada ao AudioTrack, à WebView
-nem à UI. Exige vídeo/identidade coincidentes, reprodução pronta sem anúncio
+da **mesma instância/época `Stopwatch`** da amostra. Produz grades para a
+interface `YouTubeBeatOutput`; a implementação nativa isolada de QA está
+descrita abaixo, sem ligação à WebView ou à UI. Exige vídeo/identidade
+coincidentes, reprodução pronta sem anúncio
 ou seek, velocidade 1, confiança do trecho ≥0,55, incerteza ≤20 ms e amostra
 com até 1 s. Pausa, buffer, anúncios, seek, mudança de velocidade/fonte, lacuna
 entre trechos e amostra vencida desligam a saída. Uma nova época precisa de
@@ -83,13 +85,44 @@ para `NativeBandAudio`: prepara uma vez por lease, passa BPM fracionário sem
 arredondar (por exemplo 90,5), início da grade, compasso, revisão e validade,
 e pára a saída ao terminar/errar. O motor Kotlin aceita agora BPM finito
 `Double` entre 40 e 240, preservando o protocolo inteiro de `BandSession`.
-A ponte recebe predicado de sessão de banda e árbitro de lease injetados;
-**ainda não existe árbitro partilhado ligado à sessão de banda**, portanto
-não pode ser usada em paralelo com ela. A preparação de AudioTrack em até
+A ponte e `BandSession` partilham agora um árbitro de posse da saída nativa;
+uma sessão sem posse não envia `stop`, e a posse só é libertada após o `stop`
+nativo concluir. A preparação de AudioTrack em até
 200 ms é uma hipótese de interface, não uma medição. Testes fake Dart da ponte,
 scheduler e sessão de banda passaram (19 casos); análise estática direcionada
-sem problemas. Esta alteração Kotlin não foi compilada em APK nem ouvida em
-dispositivo depois do pedido de não repetir testes.
+sem problemas. Na entrega inicial, esta alteração Kotlin ainda não tinha sido
+compilada em APK nem ouvida em dispositivo; a prova sintética posterior está
+registada abaixo.
+
+## Prova sintética num Samsung — 2026-09-28
+
+`integration_test/youtube_beat_native_probe_test.dart` liga um `RhythmMap`
+construído e revisto no próprio teste (120 BPM, 4 tempos) a uma linha temporal
+YouTube **sintética**, ao `YouTubeBeatScheduler`, à ponte
+`YouTubeNativeBeatOutput` e ao `NativeBandAudio`/AudioTrack. Não abre YouTube,
+não usa música, microfone, WebView nem uma segunda sessão de banda. O teste só
+aceita o pacote isolado `.qa` e confirma que Pausa retira o lease.
+
+No Samsung `R58YA16NDVM`, a prova passou: 5 cliques nativos, erro máximo da
+grelha interna 13,55 µs e lease desligado após Pausa. Isto prova a cadeia
+sintética no dispositivo, **não** a sincronização audível com um vídeo real,
+calibração acústica, conformidade para distribuição ou N1/N2 concluídos.
+
+Na primeira execução, o APK QA antigo tinha assinatura incompatível. O Flutter
+Drive desinstalou-o automaticamente e instalou o novo pacote `.qa`; os dados
+locais do pacote QA antigo podem ter sido perdidos. O pacote de produção
+`com.example.transpose_mobile` permaneceu instalado. Todos os seis scripts de
+probe que usam Flutter Drive chamam agora `tool/install_qa_apk_safely.ps1`
+após verificar os metadados do APK. O helper faz primeiro `adb install -r` e
+aborta em caso de assinatura incompatível antes de iniciar o Driver. Nenhum
+teste foi repetido no aparelho só para validar esta proteção; a sintaxe
+PowerShell passou.
+
+A associação de um mapa derivado de microfone a um vídeo real e a revisão de
+conformidade/consentimento continuam pendentes. O árbitro comum passou testes
+unitários de contenção, saída sem posse, pausa durante a preparação e falha
+no `stop`; ainda não foi provado acusticamente nem testado com as duas sessões
+num telemóvel. Não ligar este probe à UI de produção.
 
 ## Distribuição e políticas
 

@@ -7,15 +7,22 @@ import 'package:flutter/widgets.dart';
 
 import 'band_audio.dart';
 import 'band_clock.dart';
+import 'native_beat_audio_arbiter.dart';
 
 class BandSession extends ChangeNotifier with WidgetsBindingObserver {
-  BandSession({BandAudio? audio, int Function()? now, this.onDiagnostic})
-    : audio = audio ?? NativeBandAudio() {
+  BandSession({
+    BandAudio? audio,
+    NativeBeatAudioArbiter? arbiter,
+    int Function()? now,
+    this.onDiagnostic,
+  }) : audio = audio ?? NativeBandAudio(),
+       arbiter = arbiter ?? NativeBeatAudioArbiter.instance {
     final watch = Stopwatch()..start();
     this.now = now ?? (() => watch.elapsedMicroseconds);
     WidgetsBinding.instance.addObserver(this);
   }
   final BandAudio audio;
+  final NativeBeatAudioArbiter arbiter;
   final void Function(Map<String, Object?> event)? onDiagnostic;
   late final int Function() now;
   final clock = BandClock();
@@ -29,6 +36,9 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
   int _sequence = 0, _lastSequence = -1, _lastState = -1, _nonce = 0;
   int _generation = 0, _activeRevision = -1, _effectiveStart = 0;
   bool _disposed = false, _ticking = false, _prepared = false;
+  bool _ownsAudio = false;
+  Completer<void>? _tickDone;
+  Future<void>? _audioStopTask;
   bool? _lastHealthy;
   int _acceptedPongs = 0, _rejectedPongs = 0;
   bool isHost = false;
@@ -291,6 +301,8 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _tick() async {
     if (_ticking || !connected || _disposed) return;
     _ticking = true;
+    final tickDone = Completer<void>();
+    _tickDone = tickDone;
     final generation = _generation;
     try {
       final time = now();
@@ -322,21 +334,28 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
           ? 'Relógio alinhado · ±${(clock.uncertaintyUs / 1000).toStringAsFixed(1)} ms'
           : 'A sincronizar · som suspenso';
       if (!healthy || !plan.playing) {
-        if (_prepared) {
+        if (_ownsAudio) {
           _trace('audioStop', {
             'reason': !plan.playing ? 'transportPaused' : 'unhealthy',
             ...diagnosticStatus,
           });
-          _prepared = false;
-          await audio.stop();
+          await _stopOwnedAudio();
         }
         _activeRevision = -1;
       } else {
+        if (!_ownsAudio) {
+          if (!arbiter.tryAcquire(this)) {
+            connectionStatus = 'Saída nativa ocupada';
+            _notify();
+            return;
+          }
+          _ownsAudio = true;
+        }
         if (!_prepared) {
           _trace('audioPrepare', diagnosticStatus);
           await audio.prepare(now);
           if (generation != _generation || _disposed) {
-            await audio.stop();
+            await _stopOwnedAudio();
             return;
           }
           _prepared = true;
@@ -347,8 +366,7 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
                 ? 'disconnectedDuringPrepare'
                 : 'pausedDuringPrepare',
           });
-          _prepared = false;
-          await audio.stop();
+          await _stopOwnedAudio();
           return;
         }
         if (_activeRevision != plan.revision) {
@@ -368,8 +386,7 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
         );
         if (generation != _generation || !connected || !plan.playing) {
           _trace('audioStop', {'reason': 'changedDuringSchedule'});
-          _prepared = false;
-          await audio.stop();
+          await _stopOwnedAudio();
           return;
         }
         audioStatus = await audio.status();
@@ -381,11 +398,31 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
     } on Object catch (e) {
       if (generation == _generation) {
         _fail(e);
-        await leave(reason: 'tickError');
+        unawaited(leave(reason: 'tickError'));
       }
     } finally {
       _ticking = false;
+      if (identical(_tickDone, tickDone)) _tickDone = null;
+      tickDone.complete();
     }
+  }
+
+  Future<void> _stopOwnedAudio() {
+    final inProgress = _audioStopTask;
+    if (inProgress != null) return inProgress;
+    if (!_ownsAudio) return Future<void>.value();
+    // Keep the lease until the native stop completes. A failed stop leaves
+    // ownership locked rather than allowing another session to overlap it.
+    final task = () async {
+      await audio.stop();
+      _prepared = false;
+      _ownsAudio = false;
+      arbiter.release(this);
+    }();
+    _audioStopTask = task;
+    return task.whenComplete(() {
+      if (identical(_audioStopTask, task)) _audioStopTask = null;
+    });
   }
 
   void _fail(Object e) {
@@ -411,7 +448,6 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
     _lastHealthy = null;
     code = null;
     isHost = false;
-    _prepared = false;
     audioStatus = {};
     plan = const BandBeatPlan(
       revision: 0,
@@ -421,7 +457,8 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
       playing: false,
     );
     connectionStatus = 'Desligado';
-    await audio.stop();
+    await _tickDone?.future;
+    await _stopOwnedAudio();
     _notify();
   }
 

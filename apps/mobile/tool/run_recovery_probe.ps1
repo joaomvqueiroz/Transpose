@@ -107,7 +107,8 @@ try {
         "--target=$probeTarget",
         "--driver=$probeDriver"
     ) + $defines
-    Write-Host "Verified $qaApplicationId. Starting $normalizedPhase without automatic cleanup."
+    & (Join-Path $PSScriptRoot 'install_qa_apk_safely.ps1') -DeviceId $DeviceId -ApkPath $apkPath
+    Write-Host "Verified compatible $qaApplicationId. Starting $normalizedPhase without automatic cleanup."
     if ($normalizedPhase -eq 'seed') {
         Write-Host 'Wait for READY_TO_KILL before externally force-stopping the QA package only.'
     }

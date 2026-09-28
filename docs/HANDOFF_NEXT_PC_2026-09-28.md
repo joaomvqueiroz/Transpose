@@ -26,10 +26,20 @@ QA de dois telefones: foi pedido explicitamente que não se repita.
 
 ## Próximos passos
 
-1. Integrar o mapa QA → scheduler → `NativeBandAudio`.
+1. A cadeia mapa sintético QA → scheduler → `NativeBandAudio` passou num
+   Samsung (5 cliques, pausa remove lease). Próximo: só após revisão de
+   conformidade/consentimento, decidir se e como associar um mapa revisto a
+   conteúdo real. O árbitro partilhado com `BandSession` tem testes unitários,
+   mas ainda não foi exercitado em hardware com as duas sessões.
 2. Validar com conteúdo permitido somente se o utilizador pedir para retomar a
    QA em aparelhos.
 3. Rever compliance antes de qualquer distribuição.
+
+Os seis scripts de probe Android que invocam Flutter Drive verificam agora a
+substituição do APK QA com `adb install -r` antes de iniciar o Driver; uma
+assinatura incompatível aborta sem desinstalar a instalação existente. A
+proteção foi revista por análise estática e parsing PowerShell, não por uma
+nova execução no telemóvel.
 
 Não declarar N1–N4 prontos nem baixar o guard de RAM.
 
@@ -42,6 +52,13 @@ na corrida sequencial); investigar se voltar a ocorrer. Os testes JavaScript
 passaram: 65/65 em `transpono_media_test.cjs` e 2/2 em
 `transpono_key_detector_test.cjs`. Não houve nova execução nos telemóveis após
 o pedido do utilizador.
+
+Após o árbitro comum, `flutter analyze --no-pub` voltou a passar e a suíte
+sequencial completa passou 389 testes numa repetição. Duas corridas completas
+anteriores falharam apenas no teste temporal `web_media_command_test.dart:
+never-completing cancellation is bounded and preserves timeout`; o mesmo
+teste e o ficheiro inteiro passaram isolados. Tratar como potencial
+instabilidade de temporização, não como garantia de regressão resolvida.
 
 ## Preparação no outro PC
 

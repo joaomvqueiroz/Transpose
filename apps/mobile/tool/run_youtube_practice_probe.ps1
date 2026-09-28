@@ -66,7 +66,8 @@ try {
         (Get-Item -LiteralPath $apkPath).Length -le 0) {
         throw 'Missing or empty verified APK. Nothing was installed.'
     }
-    Write-Host "Verified $qaApplicationId; driver automatic cleanup is disabled."
+    & (Join-Path $PSScriptRoot 'install_qa_apk_safely.ps1') -DeviceId $DeviceId -ApkPath $apkPath
+    Write-Host "Verified compatible $qaApplicationId; driver automatic cleanup is disabled."
     & $flutterExecutable drive --profile --keep-app-running -d $DeviceId `
         "--use-application-binary=$apkPath" "--target=$probeTarget" "--driver=$probeDriver"
     if ($LASTEXITCODE -ne 0) { throw 'YouTube practice probe failed. No cleanup was performed.' }

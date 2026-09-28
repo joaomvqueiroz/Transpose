@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:transpose_mobile/band_audio.dart';
 import 'package:transpose_mobile/band_clock.dart';
 import 'package:transpose_mobile/band_session.dart';
+import 'package:transpose_mobile/native_beat_audio_arbiter.dart';
 import 'package:transpose_mobile/study_tools.dart';
 
 class FakeAudio implements BandAudio {
@@ -183,8 +184,15 @@ void main() {
     'two actual UDP sessions align, stop, reject bad code and leave safely',
     () async {
       final hostAudio = FakeAudio(), guestAudio = FakeAudio();
-      final host = BandSession(audio: hostAudio);
-      final guest = BandSession(audio: guestAudio);
+      // These fakes represent separate devices, each with its own channel.
+      final host = BandSession(
+        audio: hostAudio,
+        arbiter: NativeBeatAudioArbiter(),
+      );
+      final guest = BandSession(
+        audio: guestAudio,
+        arbiter: NativeBeatAudioArbiter(),
+      );
       addTearDown(() async {
         await host.leave();
         await guest.leave();
@@ -245,10 +253,91 @@ void main() {
     await audio.entered.future;
     session.setTransport(bpm: 120, beats: 4, playing: false);
     audio.release.complete();
-    await until(() => audio.stops >= 2);
+    await until(() => audio.stops >= 1);
     expect(audio.schedules, 0);
     expect(audio.active, isFalse);
     await session.leave();
+    session.dispose();
+  });
+  test('leaving an unowned band session cannot stop another owner', () async {
+    final arbiter = NativeBeatAudioArbiter();
+    final youtubeOwner = Object();
+    expect(arbiter.tryAcquire(youtubeOwner), isTrue);
+    final audio = FakeAudio();
+    final session = BandSession(audio: audio, arbiter: arbiter);
+    await session.leave();
+    expect(audio.stops, 0);
+    expect(arbiter.owns(youtubeOwner), isTrue);
+    session.dispose();
+    arbiter.release(youtubeOwner);
+  });
+  test(
+    'band waits for the shared native output and then releases it',
+    () async {
+      final arbiter = NativeBeatAudioArbiter();
+      final youtubeOwner = Object();
+      expect(arbiter.tryAcquire(youtubeOwner), isTrue);
+      final audio = FakeAudio();
+      final session = BandSession(audio: audio, arbiter: arbiter);
+      addTearDown(() async {
+        await session.leave();
+        session.dispose();
+      });
+      await session.host(address: InternetAddress.loopbackIPv4);
+      session.setTransport(bpm: 120, beats: 4, playing: true);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(audio.starts, 0);
+      expect(audio.schedules, 0);
+      expect(audio.stops, 0);
+      expect(arbiter.owns(youtubeOwner), isTrue);
+
+      arbiter.release(youtubeOwner);
+      await until(() => audio.schedules > 0);
+      expect(audio.active, isTrue);
+      await session.leave();
+      expect(audio.stops, 1);
+      expect(arbiter.tryAcquire(youtubeOwner), isTrue);
+      arbiter.release(youtubeOwner);
+    },
+  );
+  test(
+    'leave during prepare holds ownership until native stop completes',
+    () async {
+      final arbiter = NativeBeatAudioArbiter();
+      final audio = DelayedPrepareAudio();
+      final session = BandSession(audio: audio, arbiter: arbiter);
+      await session.host(address: InternetAddress.loopbackIPv4);
+      session.setTransport(bpm: 120, beats: 4, playing: true);
+      await audio.entered.future;
+      final competingOwner = Object();
+      expect(arbiter.tryAcquire(competingOwner), isFalse);
+      final leaving = session.leave();
+      expect(arbiter.tryAcquire(competingOwner), isFalse);
+      audio.release.complete();
+      await leaving;
+      expect(audio.schedules, 0);
+      expect(audio.stops, 1);
+      expect(arbiter.tryAcquire(competingOwner), isTrue);
+      arbiter.release(competingOwner);
+      session.dispose();
+    },
+  );
+  test('concurrent leave calls share one native stop', () async {
+    final arbiter = NativeBeatAudioArbiter();
+    final audio = DelayedStopAudio();
+    final session = BandSession(audio: audio, arbiter: arbiter);
+    await session.host(address: InternetAddress.loopbackIPv4);
+    session.setTransport(bpm: 120, beats: 4, playing: true);
+    await until(() => audio.schedules > 0);
+    final competingOwner = Object();
+    final first = session.leave();
+    final second = session.leave();
+    expect(arbiter.tryAcquire(competingOwner), isFalse);
+    audio.release.complete();
+    await Future.wait([first, second]);
+    expect(audio.stops, 1);
+    expect(arbiter.tryAcquire(competingOwner), isTrue);
+    arbiter.release(competingOwner);
     session.dispose();
   });
   testWidgets('embedded metronome keeps owner session until app pauses', (
