@@ -125,8 +125,52 @@ const audioProbeSource = r'''
     }
   }
 
+  async function runPitchTransitionCase() {
+    if (running) throw new Error('A probe case is already running.');
+    running = true;
+    try {
+      await ready;
+      if (!window.TransponoMedia) throw new Error('Inject the media bridge before running a case.');
+      await window.TransponoMedia.command({action: 'pitch', value: 0});
+      video.currentTime = 2;
+      await video.play();
+      await window.TransponoMedia.command({action: 'pitch', value: 3});
+      const deadline = performance.now() + 12000;
+      let before;
+      do {
+        await sleep(200);
+        before = window.TransponoMedia.snapshot();
+        if (before.pitchStatus === 'unavailable') throw new Error(before.pitchMessage);
+      } while (before.pitchStatus !== 'active' && performance.now() < deadline);
+      if (before.pitchStatus !== 'active') throw new Error('Initial processed signal was not observed.');
+
+      const change = window.TransponoMedia.command({action: 'pitch', value: 5});
+      const during = window.TransponoMedia.snapshot();
+      await change;
+      const after = window.TransponoMedia.snapshot();
+      await sleep(1200);
+      const settled = window.TransponoMedia.snapshot();
+      const expectedHz = frequency * Math.pow(2, 5 / 12);
+      const centsError = settled.probe.outputHz
+        ? 1200 * Math.log2(settled.probe.outputHz / expectedHz) : null;
+      return {
+        passed: before.pitch === 3 && before.probe.wetGain === 1 &&
+          during.pitch === 3 && during.pendingPitch === 5 &&
+          during.probe.wetGain === 1 && during.probe.dryGain === 0 &&
+          after.pitch === 5 && after.pitchStatus === 'active' &&
+          after.probe.wetGain === 1 && after.probe.dryGain === 0 &&
+          centsError !== null && Math.abs(centsError) < 15 &&
+          settled.probe.wetGain === 1 && settled.probe.dryGain === 0,
+        centsError, before, during, after, settled,
+      };
+    } finally {
+      video.pause();
+      running = false;
+    }
+  }
+
   window.TransponoAudioProbe = Object.freeze({
-    ready, runCase,
+    ready, runCase, runPitchTransitionCase,
     cleanup() {
       if (running) throw new Error('Wait for the current probe case before cleanup.');
       video.pause();

@@ -1,0 +1,6 @@
+<resources>
+    <string name="widget_small_description">Transpono · Player compacto</string>
+    <string name="widget_medium_description">Transpono · Player e tom</string>
+    <string name="widget_large_description">Transpono · Trecho e cifra</string>
+    <string name="widget_cockpit_description">Transpono · Cockpit de ensaio</string>
+</resources>

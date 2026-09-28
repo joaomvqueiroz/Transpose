@@ -27,7 +27,21 @@
   let bass = 0;
   let mid = 0;
   let treble = 0;
+  let gain = 0;
+  let chorus = 0;
+  let feedback = 0;
   let delay = 0;
+  let reverb = 0;
+  let reverbImpulse = null;
+  const keyDetector = window.TransponoKeyDetector
+    ? new window.TransponoKeyDetector.KeyDetector() : null;
+  let keyCapture = null;
+  let keyPreparing = false;
+  let keyLastAttempt = -Infinity;
+  let keyLastSample = -Infinity;
+  let keyRoot = null;
+  let keyMode = '';
+  let keyStatus = 'waiting';
   let pitchStatus = 'idle';
   let pitchMessage = '';
   let loopA = null;
@@ -56,6 +70,13 @@
   const maxCommandResults = 64;
 
   const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
+  const decibelGain = value => Math.pow(10, value / 20);
+  function setEffectParam(parameter, value, smooth = false) {
+    const time = audioContext.currentTime;
+    parameter.cancelScheduledValues(time);
+    if (smooth) parameter.setTargetAtTime(value, time, 0.015);
+    else parameter.setValueAtTime(value, time);
+  }
   const now = () => performance.now();
   const durationOf = (element) => Math.max(0, finite(element && element.duration));
   const positionOf = (element) => Math.max(0, finite(element && element.currentTime));
@@ -119,29 +140,71 @@
     graph.audible = true;
   }
 
+  function impulseResponse() {
+    if (reverbImpulse) return reverbImpulse;
+    const length = Math.floor(audioContext.sampleRate * 1.15);
+    const buffer = audioContext.createBuffer(2, length, audioContext.sampleRate);
+    // A short, decaying stereo impulse keeps the reverb local to the page.
+    let seed = 2179;
+    for (let channel = 0; channel < 2; channel++) {
+      const data = buffer.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        const envelope = Math.pow(1 - i / length, 3);
+        data[i] = (seed / 2147483648 - 1) * envelope;
+      }
+    }
+    reverbImpulse = buffer;
+    return buffer;
+  }
+
+  function connectEffects(graph) {
+    graph.low.connect(graph.mid).connect(graph.high).connect(graph.master).connect(audioContext.destination);
+    graph.high.connect(graph.echoDelay);
+    graph.echoDelay.connect(graph.echoGain).connect(graph.master);
+    graph.echoDelay.connect(graph.feedbackGain).connect(graph.echoDelay);
+    graph.high.connect(graph.chorusDelay).connect(graph.chorusGain).connect(graph.master);
+    graph.chorusLfo.connect(graph.chorusDepth).connect(graph.chorusDelay.delayTime);
+    graph.high.connect(graph.convolver).connect(graph.reverbGain).connect(graph.master);
+  }
+
   function retire(graph) {
     if (!graph || graph.retired) return;
     dry(graph, true);
     graph.source.disconnect();
     graph.input.disconnect();
+    graph.keyAnalyser.disconnect();
     graph.dry.disconnect();
     graph.wet.disconnect();
     graph.low.disconnect();
     graph.mid.disconnect();
     graph.high.disconnect();
+    graph.master.disconnect();
     graph.echoDelay.disconnect();
     graph.echoGain.disconnect();
+    graph.feedbackGain.disconnect();
+    graph.chorusDelay.disconnect();
+    graph.chorusGain.disconnect();
+    graph.chorusLfo.disconnect();
+    if (graph.lfoStarted) graph.chorusLfo.stop();
+    graph.lfoStarted = false;
+    graph.chorusDepth.disconnect();
+    graph.convolver.disconnect();
+    graph.reverbGain.disconnect();
     graph.retired = true;
     allGraphs.delete(graph);
   }
 
   function revive(graph) {
     if (!graph || !graph.retired) return;
-    graph.input.connect(graph.dry).connect(graph.low);
+    graph.chorusLfo = audioContext.createOscillator();
+    graph.chorusLfo.frequency.value = 0.8;
+    graph.input.connect(graph.keyAnalyser).connect(graph.dry).connect(graph.low);
     graph.wet.connect(graph.low);
-    graph.low.connect(graph.mid).connect(graph.high).connect(audioContext.destination);
-    graph.high.connect(graph.echoDelay).connect(graph.echoGain).connect(audioContext.destination);
+    connectEffects(graph);
     graph.source.connect(graph.input);
+    graph.chorusLfo.start();
+    graph.lfoStarted = true;
     graph.retired = false;
     allGraphs.add(graph);
   }
@@ -161,6 +224,97 @@
       return source.protocol === 'blob:' && source.origin === window.location.origin;
     } catch (_) {
       return false;
+    }
+  }
+
+  function stopKeyCapture() {
+    if (!keyCapture) return;
+    keyCapture.source.disconnect();
+    keyCapture.analyser.disconnect();
+    keyCapture.silent.disconnect();
+    keyCapture.stream.getTracks().forEach(track => track.stop());
+    keyCapture = null;
+  }
+
+  function resetKeyDetection() {
+    stopKeyCapture();
+    if (keyDetector) keyDetector.reset();
+    keyRoot = null;
+    keyMode = '';
+    keyStatus = 'waiting';
+    keyLastAttempt = -Infinity;
+    keyLastSample = -Infinity;
+  }
+
+  async function startKeyCapture(element) {
+    const capture = element.captureStream || element.mozCaptureStream;
+    if (!capture) throw new Error('Captura de áudio indisponível.');
+    const stream = capture.call(element);
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      stream.getTracks().forEach(item => item.stop());
+      throw new Error('O vídeo ainda não tem uma faixa de áudio acessível.');
+    }
+    try {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context) throw new Error('Análise de áudio indisponível.');
+      if (!audioContext) audioContext = new Context({latencyHint: 'interactive'});
+      await timeout(audioContext.resume(), 4000, 'Áudio ainda não iniciado.');
+      if (element !== video || disposed || isAd) throw new Error('O vídeo mudou.');
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 16384;
+      analyser.smoothingTimeConstant = 0.7;
+      const silent = audioContext.createGain();
+      silent.gain.value = 0;
+      source.connect(analyser).connect(silent).connect(audioContext.destination);
+      keyCapture = {
+        element, source, analyser, silent, stream, track,
+        spectrum: new Float32Array(analyser.frequencyBinCount), startedAt: now(),
+      };
+      keyStatus = 'analyzing';
+    } catch (error) {
+      stream.getTracks().forEach(item => item.stop());
+      throw error;
+    }
+  }
+
+  function updateKeyDetection() {
+    if (!keyDetector || !video || isAd || disposed) return;
+    if (video.paused || video.ended || video.readyState < 3) return;
+    if (keyCapture && (keyCapture.element !== video || keyCapture.track.readyState !== 'live')) {
+      stopKeyCapture();
+      keyLastAttempt = -Infinity;
+    }
+    if (!keyCapture && !keyPreparing && now() - keyLastAttempt > 3000) {
+      const element = video;
+      keyPreparing = true;
+      keyLastAttempt = now();
+      void startKeyCapture(element).catch(() => {
+        if (element === video && !isAd) keyStatus = 'unavailable';
+      }).finally(() => { keyPreparing = false; });
+      return;
+    }
+    const graph = graphs.get(video);
+    const analyser = keyCapture ? keyCapture.analyser : graph && graph.keyAnalyser;
+    const spectrum = keyCapture ? keyCapture.spectrum : graph && graph.keySpectrum;
+    if (!analyser || !spectrum || !audioContext || audioContext.state !== 'running') return;
+    if (keyCapture && keyCapture.track.muted) {
+      if (now() - keyCapture.startedAt > 4000) keyStatus = 'unavailable';
+      return;
+    }
+    if (now() - keyLastSample < 330) return;
+    keyLastSample = now();
+    analyser.getFloatFrequencyData(spectrum);
+    const result = keyDetector.observeSpectrum(spectrum, audioContext.sampleRate, analyser.fftSize);
+    if (result) {
+      keyRoot = result.root;
+      keyMode = result.mode;
+      keyStatus = 'ready';
+    } else if (keyDetector.frames > 75) {
+      keyStatus = 'indeterminate';
+    } else {
+      keyStatus = 'analyzing';
     }
   }
 
@@ -337,13 +491,22 @@
     bass = 0;
     mid = 0;
     treble = 0;
+    gain = 0;
+    chorus = 0;
+    feedback = 0;
     delay = 0;
+    reverb = 0;
+    resetKeyDetection();
     const graph = previous && graphs.get(previous);
     if (graph) {
-      graph.low.gain.value = 0;
-      graph.mid.gain.value = 0;
-      graph.high.gain.value = 0;
-      graph.echoGain.gain.value = 0;
+      setEffectParam(graph.low.gain, 0);
+      setEffectParam(graph.mid.gain, 0);
+      setEffectParam(graph.high.gain, 0);
+      setEffectParam(graph.master.gain, 1);
+      setEffectParam(graph.echoGain.gain, 0);
+      setEffectParam(graph.feedbackGain.gain, 0);
+      setEffectParam(graph.chorusGain.gain, 0);
+      setEffectParam(graph.reverbGain.gain, 0);
     }
     pitchStatus = 'idle';
     pitchMessage = '';
@@ -363,6 +526,7 @@
       videoId = id;
     }
     if (next !== video) {
+      resetKeyDetection();
       invalidatePlaybackIntent();
       dry(video && graphs.get(video), true);
       if (video && video.isConnected === false) retire(graphs.get(video));
@@ -394,10 +558,14 @@
       dry(video && graphs.get(video), true);
       const currentGraph = video && graphs.get(video);
       if (currentGraph) {
-        currentGraph.low.gain.setValueAtTime(isAd ? 0 : bass, audioContext.currentTime);
-        currentGraph.mid.gain.setValueAtTime(isAd ? 0 : mid, audioContext.currentTime);
-        currentGraph.high.gain.setValueAtTime(isAd ? 0 : treble, audioContext.currentTime);
-        currentGraph.echoGain.gain.setValueAtTime(isAd ? 0 : delay, audioContext.currentTime);
+        setEffectParam(currentGraph.low.gain, isAd ? 0 : bass);
+        setEffectParam(currentGraph.mid.gain, isAd ? 0 : mid);
+        setEffectParam(currentGraph.high.gain, isAd ? 0 : treble);
+        setEffectParam(currentGraph.master.gain, isAd ? 1 : decibelGain(gain));
+        setEffectParam(currentGraph.echoGain.gain, isAd ? 0 : delay);
+        setEffectParam(currentGraph.feedbackGain.gain, isAd ? 0 : feedback);
+        setEffectParam(currentGraph.chorusGain.gain, isAd ? 0 : chorus);
+        setEffectParam(currentGraph.reverbGain.gain, isAd ? 0 : reverb);
       }
       if (isAd) {
         if (video) video.playbackRate = 1;
@@ -423,6 +591,7 @@
 
   function snapshot() {
     refresh();
+    const graph = video && graphs.get(video);
     return {
       snapshotRevision: ++snapshotRevision,
       videoId,
@@ -433,11 +602,15 @@
       position: positionOf(video),
       duration: durationOf(video),
       speed: video && !isAd ? finite(video.playbackRate, speed) : speed,
-      // The visible value describes confirmed processing, never just intention.
-      pitch: pitchStatus === 'active' ? pitch : 0,
+      // During a live pitch change, keep showing the tone still audible on
+      // the processed route instead of briefly reporting the original tone.
+      pitch: graph && graph.audible ? graph.appliedPitch : 0,
       pendingPitch: pitchStatus === 'loading' ? pitch : null,
       pitchStatus,
       pitchMessage,
+      keyRoot,
+      keyMode,
+      keyStatus: keyDetector ? keyStatus : 'unavailable',
       loopA,
       loopB,
       loopEnabled: loopWanted && !isAd && !disposed,
@@ -497,6 +670,9 @@
         requireSound(element);
         const input = audioContext.createAnalyser();
         const output = audioContext.createAnalyser();
+        const keyAnalyser = audioContext.createAnalyser();
+        keyAnalyser.fftSize = 16384;
+        keyAnalyser.smoothingTimeConstant = 0.7;
         input.fftSize = output.fftSize = probeEnabled ? 8192 : 512;
         if (probeEnabled) input.smoothingTimeConstant = output.smoothingTimeConstant = 0;
         const dryGain = audioContext.createGain();
@@ -518,17 +694,35 @@
         echoDelay.delayTime.value = 0.28;
         const echoGain = audioContext.createGain();
         echoGain.gain.value = delay;
+        const feedbackGain = audioContext.createGain();
+        feedbackGain.gain.value = feedback;
+        const chorusDelay = audioContext.createDelay(0.05);
+        chorusDelay.delayTime.value = 0.018;
+        const chorusGain = audioContext.createGain();
+        chorusGain.gain.value = chorus;
+        const chorusLfo = audioContext.createOscillator();
+        chorusLfo.frequency.value = 0.8;
+        const chorusDepth = audioContext.createGain();
+        chorusDepth.gain.value = 0.004;
+        const convolver = audioContext.createConvolver();
+        convolver.buffer = impulseResponse();
+        const reverbGain = audioContext.createGain();
+        reverbGain.gain.value = reverb;
+        const master = audioContext.createGain();
+        master.gain.value = decibelGain(gain);
         dryGain.gain.value = 1;
         wetGain.gain.value = 0;
-        input.connect(dryGain).connect(low);
+        input.connect(keyAnalyser).connect(dryGain).connect(low);
         if (stretch) input.connect(stretch).connect(output).connect(wetGain).connect(low);
-        low.connect(midFilter).connect(high).connect(audioContext.destination);
-        high.connect(echoDelay).connect(echoGain).connect(audioContext.destination);
         // Last irreversible operation, after the entire output graph is ready.
         const source = audioContext.createMediaElementSource(element);
         const graph = {
-          element, source, input, output, stretch, dry: dryGain, wet: wetGain,
-          low, mid: midFilter, high, echoDelay, echoGain, retired: false,
+          element, source, input, output, keyAnalyser,
+          keySpectrum: new Float32Array(keyAnalyser.frequencyBinCount),
+          stretch, dry: dryGain, wet: wetGain,
+          low, mid: midFilter, high, master, echoDelay, echoGain, feedbackGain,
+          chorusDelay, chorusGain, chorusLfo, chorusDepth, convolver, reverbGain,
+          retired: false, lfoStarted: false,
           samples: new Float32Array(512), audible: false, failed: false, dspConnected: !!stretch,
           appliedPitch: pitch, acknowledged: false, silentSince: null,
           ...(probeEnabled ? {
@@ -538,7 +732,10 @@
         graphs.set(element, graph);
         allGraphs.add(graph);
         try {
+          connectEffects(graph);
           source.connect(input);
+          chorusLfo.start();
+          graph.lfoStarted = true;
         } catch (error) {
           source.disconnect();
           source.connect(audioContext.destination);
@@ -614,7 +811,9 @@
     pitchStatus = 'loading';
     pitchMessage = 'A preparar a alteração de tom…';
     const previous = graphs.get(element);
-    if (previous) {
+    const keepProcessed = !!previous && previous.audible &&
+      previous.acknowledged && previous.dspConnected && !previous.failed;
+    if (previous && !keepProcessed) {
       previous.acknowledged = false;
       dry(previous);
     }
@@ -640,9 +839,16 @@
       graph.noSignalPlayingMs = 0;
       graph.lastConfirmationTick = null;
       graph.checkAfter = scheduledAt + 250;
-      // An ACK is not evidence of audio. Keep the dry route until output exists.
-      dry(graph);
-      pitchMessage = 'Tom preparado; a aguardar sinal de áudio.';
+      if (keepProcessed && graph === previous && graph.audible) {
+        // This processor was already producing audio. Updating its pitch does
+        // not require switching back to the unprocessed route or re-priming it.
+        pitchStatus = 'active';
+        pitchMessage = 'Tom aplicado · processamento experimental';
+      } else {
+        // First activation still needs real output before leaving the dry route.
+        dry(graph);
+        pitchMessage = 'Tom preparado; a aguardar sinal de áudio.';
+      }
     } catch (error) {
       if (token === revision && !disposed && element === video && !isAd) {
         unavailable(error.message || 'Não foi possível alterar o tom.');
@@ -689,6 +895,13 @@
       contextState: audioContext ? audioContext.state : 'absent',
       dryGain: graph ? graph.dry.gain.value : null,
       wetGain: graph ? graph.wet.gain.value : null,
+      effects: graph ? {
+        gain: graph.master.gain.value,
+        chorus: graph.chorusGain.gain.value,
+        feedback: graph.feedbackGain.gain.value,
+        delay: graph.echoGain.gain.value,
+        reverb: graph.reverbGain.gain.value,
+      } : null,
       sourceCount: allGraphs.size,
     };
   }
@@ -696,6 +909,7 @@
   function tick() {
     refresh();
     if (disposed || !allowedPage()) return;
+    updateKeyDetection();
     if (video && !isAd) {
       const graph = graphs.get(video);
       if (pitchStatus === 'loading' && (video.muted || video.volume === 0)) {
@@ -831,17 +1045,46 @@
         }
         break;
       }
-      case 'delay': {
+      case 'gain':
+      case 'chorus':
+      case 'feedback':
+      case 'delay':
+      case 'reverb': {
         requirePractice();
-        const value = numberIn(request.value, 0, 0.35, 'Delay');
+        const limits = {
+          gain: [-12, 6], chorus: [0, 0.5], feedback: [0, 0.55],
+          delay: [0, 0.35], reverb: [0, 0.4],
+        };
+        const [minimum, maximum] = limits[request.action];
+        const value = numberIn(request.value, minimum, maximum, request.action);
         if (!safeSource(video))
-          throw new Error('Este vídeo não disponibiliza áudio para o delay neste dispositivo.');
+          throw new Error('Este vídeo não disponibiliza áudio para efeitos neste dispositivo.');
         requireSound(video);
         const graph = await prepareGraph(video, false);
         if (disposed || graph.element !== video || isAd)
           throw new Error('A seleção de vídeo mudou. Tente novamente.');
-        delay = value;
-        graph.echoGain.gain.setValueAtTime(value, audioContext.currentTime);
+        switch (request.action) {
+          case 'gain':
+            gain = value;
+            setEffectParam(graph.master.gain, decibelGain(value), true);
+            break;
+          case 'chorus':
+            chorus = value;
+            setEffectParam(graph.chorusGain.gain, value, true);
+            break;
+          case 'feedback':
+            feedback = value;
+            setEffectParam(graph.feedbackGain.gain, value, true);
+            break;
+          case 'delay':
+            delay = value;
+            setEffectParam(graph.echoGain.gain, value, true);
+            break;
+          case 'reverb':
+            reverb = value;
+            setEffectParam(graph.reverbGain.gain, value, true);
+            break;
+        }
         break;
       }
       case 'speed': {

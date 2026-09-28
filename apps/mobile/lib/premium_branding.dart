@@ -76,6 +76,7 @@ class _TransponoLaunchGateState extends State<TransponoLaunchGate> {
   late bool _showChild;
   Timer? _homeTimer;
   Timer? _revealTimer;
+  Timer? _maximumWaitTimer;
   bool _minimumElapsed = false;
 
   @override
@@ -102,6 +103,12 @@ class _TransponoLaunchGateState extends State<TransponoLaunchGate> {
         _minimumElapsed = true;
         _tryReveal();
       });
+      // A slow or blocked YouTube page must not trap the user on the splash.
+      if (widget.revealWhen != null) {
+        _maximumWaitTimer = Timer(const Duration(seconds: 10), () {
+          if (mounted && _visible) setState(() => _visible = false);
+        });
+      }
     });
   }
 
@@ -119,6 +126,7 @@ class _TransponoLaunchGateState extends State<TransponoLaunchGate> {
   void dispose() {
     _homeTimer?.cancel();
     _revealTimer?.cancel();
+    _maximumWaitTimer?.cancel();
     widget.revealWhen?.removeListener(_tryReveal);
     super.dispose();
   }

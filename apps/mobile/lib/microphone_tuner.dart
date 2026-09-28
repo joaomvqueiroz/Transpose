@@ -5,10 +5,24 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 
+import 'piano_reference_player.dart';
 import 'pitch_detector.dart';
+import 'studio_native_pages.dart';
+
+/// Feedback follows the measured distance from the selected string, not a
+/// repeating decorative animation.
+Color tunerFeedbackColor(double? cents, {required bool inTune}) {
+  if (cents == null) return const Color(0xFF77777D);
+  if (inTune) return const Color(0xFF4ADE80);
+  if (cents.abs() <= 30) return const Color(0xFFFB923C);
+  return const Color(0xFFF87171);
+}
 
 class MicrophoneTunerTool extends StatefulWidget {
-  const MicrophoneTunerTool({super.key});
+  const MicrophoneTunerTool({super.key, this.referencePlayer});
+
+  /// Optional injection for tests; production uses bundled piano recordings.
+  final PianoReferencePlayer? referencePlayer;
 
   @override
   State<MicrophoneTunerTool> createState() => _MicrophoneTunerToolState();
@@ -19,24 +33,34 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   static const _sampleRate = 16000;
   static const _windowSize = 4096;
   final AudioRecorder _recorder = AudioRecorder();
+  PianoReferencePlayer? _referencePlayer;
   final List<double> _samples = List.filled(_windowSize, 0);
   StreamSubscription<Uint8List>? _subscription;
   PitchReading? _reading;
+  Timer? _silenceTimer;
+  final List<double> _recentCents = [];
+  double _needleCents = 0;
+  bool _inTune = false;
   String? _error;
   bool _active = false;
   bool _starting = false;
   int _cursor = 0;
   int _seen = 0;
   int _sinceEstimate = 0;
-  int _targetMidi = 40;
+  int? _trackedMidi;
+  int? _candidateMidi;
+  int _candidateCount = 0;
+  String? _previewNote;
+  Timer? _previewTimer;
+  int _previewRequest = 0;
 
-  static const _strings = <(String, int, double)>[
-    ('E2', 40, 82.41),
-    ('A2', 45, 110.00),
-    ('D3', 50, 146.83),
-    ('G3', 55, 196.00),
-    ('B3', 59, 246.94),
-    ('E4', 64, 329.63),
+  static const _strings = <(String, double)>[
+    ('E2', 82.41),
+    ('A2', 110.00),
+    ('D3', 146.83),
+    ('G3', 196.00),
+    ('B3', 246.94),
+    ('E4', 329.63),
   ];
 
   String _westernNote(int midi) {
@@ -65,8 +89,45 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed && _active) {
-      unawaited(_stop());
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_referencePlayer?.stop());
+      _finishPreview();
+      if (_active) unawaited(_stop());
+    }
+  }
+
+  void _finishPreview() {
+    _previewTimer?.cancel();
+    _previewTimer = null;
+    if (mounted) setState(() => _previewNote = null);
+    _cursor = _seen = _sinceEstimate = 0;
+  }
+
+  Future<void> _playReference(String note) async {
+    final request = ++_previewRequest;
+    _previewTimer?.cancel();
+    setState(() {
+      _previewNote = note;
+      _reading = null;
+      _needleCents = 0;
+      _inTune = false;
+      _trackedMidi = null;
+      _recentCents.clear();
+      _error = null;
+    });
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    _cursor = _seen = _sinceEstimate = 0;
+    try {
+      final player = _referencePlayer ??=
+          widget.referencePlayer ?? SampledPianoReferencePlayer();
+      await player.play(note);
+      if (!mounted || request != _previewRequest) return;
+      _previewTimer = Timer(const Duration(milliseconds: 2800), _finishPreview);
+    } on Object {
+      if (!mounted || request != _previewRequest) return;
+      _finishPreview();
+      setState(() => _error = 'Não foi possível tocar a nota de piano.');
     }
   }
 
@@ -114,7 +175,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   }
 
   void _consume(Uint8List bytes) {
-    if (!_active || bytes.length < 2) return;
+    if (!_active || _previewNote != null || bytes.length < 2) return;
     final data = ByteData.sublistView(bytes);
     for (var i = 0; i + 1 < bytes.length; i += 2) {
       _samples[_cursor] = data.getInt16(i, Endian.little) / 32768;
@@ -126,10 +187,56 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
     _sinceEstimate = 0;
     final window = [..._samples.skip(_cursor), ..._samples.take(_cursor)];
     final next = detectInstrumentPitch(window, sampleRate: _sampleRate);
-    if (mounted) setState(() => _reading = next);
+    if (next == null) {
+      // A single weak frame must not snap the needle back to the centre.
+      _silenceTimer ??= Timer(const Duration(milliseconds: 450), () {
+        _silenceTimer = null;
+        if (!mounted || !_active) return;
+        setState(() {
+          _reading = null;
+          _needleCents = 0;
+          _inTune = false;
+          _recentCents.clear();
+          _trackedMidi = _candidateMidi = null;
+          _candidateCount = 0;
+        });
+      });
+      return;
+    }
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    if (_trackedMidi != null && next.midiNote != _trackedMidi) {
+      if (_candidateMidi == next.midiNote) {
+        _candidateCount++;
+      } else {
+        _candidateMidi = next.midiNote;
+        _candidateCount = 1;
+      }
+      if (_candidateCount < 2) return;
+      _recentCents.clear();
+      _inTune = false;
+    }
+    _trackedMidi = next.midiNote;
+    _candidateMidi = null;
+    _candidateCount = 0;
+    final cents = next.cents;
+    _recentCents.add(cents.clamp(-50.0, 50.0));
+    if (_recentCents.length > 3) _recentCents.removeAt(0);
+    final ordered = [..._recentCents]..sort();
+    final stableCents = ordered[ordered.length ~/ 2];
+    if (mounted) {
+      setState(() {
+        _reading = next;
+        _needleCents = stableCents;
+        // Hysteresis prevents the green state flickering at the boundary.
+        _inTune = _inTune ? stableCents.abs() < 14 : stableCents.abs() <= 10;
+      });
+    }
   }
 
   Future<void> _stop() async {
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     final subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
@@ -142,6 +249,11 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
       setState(() {
         _active = false;
         _reading = null;
+        _needleCents = 0;
+        _inTune = false;
+        _recentCents.clear();
+        _trackedMidi = _candidateMidi = null;
+        _candidateCount = 0;
         _cursor = _seen = _sinceEstimate = 0;
       });
     }
@@ -150,6 +262,9 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _silenceTimer?.cancel();
+    _previewTimer?.cancel();
+    unawaited(_referencePlayer?.dispose());
     unawaited(_subscription?.cancel());
     unawaited(_recorder.dispose());
     super.dispose();
@@ -158,30 +273,26 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   @override
   Widget build(BuildContext context) {
     final reading = _reading;
-    final target = _strings.firstWhere((string) => string.$2 == _targetMidi);
-    final targetCents = reading == null
-        ? null
-        : 1200 * math.log(reading.frequency / target.$3) / math.ln2;
-    final accurate = targetCents != null && targetCents.abs() < 5;
-    final status = !_active
-        ? 'Ative o microfone e toque uma corda'
+    final targetCents = reading?.cents;
+    final accurate = reading != null && _inTune;
+    final feedbackColor = reading == null
+        ? Colors.white
+        : tunerFeedbackColor(_needleCents, inTune: accurate);
+    final status = _previewNote != null
+        ? 'Nota de referência · piano'
+        : !_active
+        ? 'Ative o microfone · botões tocam piano'
         : reading == null
         ? 'Toque uma corda de cada vez'
         : accurate
-        ? 'Corda afinada'
-        : targetCents!.abs() > 50
-        ? 'Nota distante de ${target.$1}'
-        : targetCents < 0
+        ? 'Nota afinada'
+        : targetCents! < 0
         ? 'Baixa · aperte a corda'
         : 'Alta · afrouxe a corda';
     return Container(
       key: const Key('chromaticTunerCard'),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF18181B),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF35353A)),
-      ),
+      decoration: studioPanelDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -200,7 +311,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                 ),
               ),
               const Text(
-                'A4 · 440 Hz',
+                'AUTO · 440 Hz',
                 style: TextStyle(fontSize: 10, color: Color(0xFFBEBEC4)),
               ),
             ],
@@ -212,27 +323,36 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
               alignment: Alignment.center,
               children: [
                 Positioned.fill(
-                  child: CustomPaint(
-                    painter: _TunerGaugePainter(cents: targetCents),
+                  child: TunerGauge(
+                    cents: reading == null ? null : _needleCents,
+                    inTune: accurate,
                   ),
                 ),
                 Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text(
-                      reading == null
-                          ? target.$1
-                          : _westernNote(reading.midiNote),
-                      key: const Key('tunerDetectedNote'),
-                      style: const TextStyle(
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 220),
+                      style: TextStyle(
                         fontSize: 31,
                         fontWeight: FontWeight.w900,
-                        color: Colors.white,
+                        color: feedbackColor,
                         height: 1,
+                      ),
+                      child: Text(
+                        _previewNote ??
+                            (reading == null
+                                ? '—'
+                                : _westernNote(reading.midiNote)),
+                        key: const Key('tunerDetectedNote'),
                       ),
                     ),
                     Text(
-                      reading == null ? 'ALVO' : 'NOTA DETETADA',
+                      _previewNote != null
+                          ? 'PIANO'
+                          : reading == null
+                          ? 'ESCUTA AUTOMÁTICA'
+                          : 'NOTA DETETADA',
                       style: const TextStyle(
                         fontSize: 9,
                         letterSpacing: 1,
@@ -251,7 +371,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w700,
-              color: accurate ? Colors.white : const Color(0xFFBABAC0),
+              color: reading == null ? const Color(0xFFBABAC0) : feedbackColor,
             ),
           ),
           if (reading != null)
@@ -259,7 +379,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
               '${targetCents! >= 0 ? '+' : ''}${targetCents.round()} cents · ${reading.frequency.toStringAsFixed(1)} Hz',
               key: const Key('tunerCents'),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 10, color: Color(0xFFA1A1AA)),
+              style: TextStyle(fontSize: 10, color: feedbackColor),
             ),
           const SizedBox(height: 10),
           Row(
@@ -270,21 +390,21 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: OutlinedButton(
                       key: Key('tunerString${string.$1}'),
-                      onPressed: () => setState(() => _targetMidi = string.$2),
+                      onPressed: () => _playReference(string.$1),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         minimumSize: Size.zero,
                         foregroundColor: Colors.white,
-                        backgroundColor: _targetMidi == string.$2
+                        backgroundColor: _previewNote == string.$1
                             ? const Color(0xFF38383E)
                             : const Color(0xFF232326),
                         side: BorderSide(
-                          color: _targetMidi == string.$2
+                          color: _previewNote == string.$1
                               ? const Color(0xFFBEBEC4)
                               : const Color(0xFF35353A),
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(13),
                         ),
                       ),
                       child: Column(
@@ -297,7 +417,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                             ),
                           ),
                           Text(
-                            '${string.$3.toStringAsFixed(0)} Hz',
+                            '${string.$2.toStringAsFixed(0)} Hz',
                             style: const TextStyle(
                               fontSize: 7,
                               color: Color(0xFFA1A1AA),
@@ -342,15 +462,87 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   }
 }
 
-class _TunerGaugePainter extends CustomPainter {
-  const _TunerGaugePainter({required this.cents});
+/// Animates measured cents; no demo loop is played without microphone input.
+class TunerGauge extends StatelessWidget {
+  const TunerGauge({super.key, required this.cents, required this.inTune});
+
   final double? cents;
+  final bool inTune;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    key: const Key('tunerNeedleAnimation'),
+    tween: Tween<double>(begin: cents ?? 0, end: cents ?? 0),
+    duration: const Duration(milliseconds: 240),
+    curve: Curves.easeOutCubic,
+    builder: (context, animatedCents, _) => TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: inTune ? 1 : 0, end: inTune ? 1 : 0),
+      duration: const Duration(milliseconds: 260),
+      builder: (context, green, _) => CustomPaint(
+        key: const Key('tunerGaugePaint'),
+        painter: _TunerGaugePainter(
+          cents: cents == null ? null : animatedCents,
+          green: green,
+        ),
+      ),
+    ),
+  );
+}
+
+class _TunerGaugePainter extends CustomPainter {
+  const _TunerGaugePainter({required this.cents, required this.green});
+  final double? cents;
+  final double green;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height * .95);
     final radius = math.min(size.width * .39, size.height * .88);
     final arc = Rect.fromCircle(center: center, radius: radius);
+    final needleColor = cents == null
+        ? tunerFeedbackColor(null, inTune: false)
+        : Color.lerp(
+            tunerFeedbackColor(cents, inTune: false),
+            tunerFeedbackColor(cents, inTune: true),
+            green,
+          )!;
+    if (cents != null) {
+      final cloud = Rect.fromCenter(
+        center: Offset(center.dx, center.dy - radius * .16),
+        width: radius * 1.8,
+        height: radius * .88,
+      );
+      canvas.drawOval(
+        cloud,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [
+              needleColor.withValues(alpha: .34 + .18 * green),
+              needleColor.withValues(alpha: .12 + .08 * green),
+              Colors.transparent,
+            ],
+            stops: const [0, .42, 1],
+          ).createShader(cloud),
+      );
+    }
+    if (green > 0) {
+      canvas.drawArc(
+        arc,
+        math.pi,
+        math.pi,
+        true,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(0, .65),
+            radius: .9,
+            colors: [
+              const Color(0xBB22C55E).withValues(alpha: .50 * green),
+              const Color(0x5522C55E).withValues(alpha: .20 * green),
+              Colors.transparent,
+            ],
+          ).createShader(arc),
+      );
+    }
     canvas.drawArc(
       arc,
       math.pi,
@@ -376,7 +568,9 @@ class _TunerGaugePainter extends CustomPainter {
         inner,
         outer,
         Paint()
-          ..color = tick == 6 ? Colors.white : const Color(0xFF77777D)
+          ..color = tick == 6
+              ? Color.lerp(Colors.white, const Color(0xFF4ADE80), green)!
+              : const Color(0xFF77777D)
           ..strokeWidth = tick == 6 ? 2 : 1,
       );
     }
@@ -386,18 +580,26 @@ class _TunerGaugePainter extends CustomPainter {
       center.dx + radius * .77 * math.cos(angle),
       center.dy + radius * .77 * math.sin(angle),
     );
+    if (cents != null) {
+      canvas.drawCircle(
+        tip,
+        7,
+        Paint()..color = needleColor.withValues(alpha: .22),
+      );
+    }
     canvas.drawLine(
       center,
       tip,
       Paint()
-        ..color = cents == null ? const Color(0xFF77777D) : Colors.white
+        ..color = needleColor
         ..strokeWidth = 2.5
         ..strokeCap = StrokeCap.round,
     );
-    canvas.drawCircle(center, 3, Paint()..color = Colors.white);
+    canvas.drawCircle(tip, 3, Paint()..color = needleColor);
+    canvas.drawCircle(center, 3, Paint()..color = needleColor);
   }
 
   @override
   bool shouldRepaint(_TunerGaugePainter oldDelegate) =>
-      oldDelegate.cents != cents;
+      oldDelegate.cents != cents || oldDelegate.green != green;
 }

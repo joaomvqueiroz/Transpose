@@ -73,7 +73,7 @@ void main() {
   );
 
   testWidgets(
-    'setlist shows only thumbnail and short title; long press manages order',
+    'setlist shows thumbnail, short title and a compact options menu',
     (tester) async {
       final store = PlayerPresetStore();
       await store.save(_preset('one'), setlist: true);
@@ -84,9 +84,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Song'), findsNWidgets(2));
-      expect(find.byKey(const ValueKey('collectionMenu-one')), findsNothing);
+      expect(find.byKey(const ValueKey('collectionMenu-one')), findsOneWidget);
       expect(find.byKey(const ValueKey('collectionDown-one')), findsNothing);
-      await tester.longPress(find.byKey(const ValueKey('collectionOpen-one')));
+      await tester.tap(find.byKey(const ValueKey('collectionMenu-one')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('setlistMoveDown')));
       await tester.pumpAndSettle();
@@ -100,6 +100,32 @@ void main() {
       expect(find.byKey(const Key('setlistMoveDown')), findsOneWidget);
     },
   );
+
+  testWidgets('embedded setlist header is a quarter shorter', (tester) async {
+    final store = PlayerPresetStore();
+    await store.save(_preset('one'), setlist: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PlayerCollectionsPage(
+            store: store,
+            setlist: true,
+            embedded: true,
+            onApply: (_) async {},
+            onAdd: () async {},
+            onPrevious: () {},
+            onNext: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const Key('setlistHeader'))).height,
+      closeTo(58, 1),
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('applying delegates to existing player then closes this page', (
     tester,

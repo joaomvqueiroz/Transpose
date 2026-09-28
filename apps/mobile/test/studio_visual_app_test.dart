@@ -4,6 +4,7 @@ import 'package:shared_preferences_platform_interface/in_memory_shared_preferenc
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/player_presets.dart';
+import 'package:transpose_mobile/studio_native_pages.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
@@ -36,6 +37,27 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNothing);
   });
 
+  testWidgets('ajustes abrem a partir do YouTube sem vídeo escolhido', (
+    tester,
+  ) async {
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('youtubeBrowserViewport')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionStrip')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('unifiedSectionaudioSettings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('audioTuner')), findsOneWidget);
+    expect(session.commands.where((command) => command.$1 == 'play'), isEmpty);
+  });
+
   testWidgets('open button is centred and close button lives in tabs', (
     tester,
   ) async {
@@ -48,6 +70,10 @@ void main() {
         tester.view.physicalSize.width / tester.view.devicePixelRatio;
     final open = tester.getRect(find.byKey(const Key('visualMainAdjustments')));
     expect((open.center.dx - screenWidth / 2).abs(), lessThan(1));
+    final openButton = tester.widget<OutlinedButton>(
+      find.byKey(const Key('visualMainAdjustments')),
+    );
+    expect(openButton.style?.shape?.resolve({}), isA<StadiumBorder>());
     await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
     final close = tester.getRect(
@@ -61,6 +87,57 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('direções substituem o botão por duas opções separadas', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    final tabsBefore = tester.getRect(
+      find.byKey(const Key('unifiedSectionchords')),
+    );
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('visualMainAdjustments')), findsNothing);
+    expect(
+      tester.getRect(find.byKey(const Key('unifiedSectionchords'))),
+      tabsBefore,
+      reason: 'Abrir as duas direções não deve aumentar a barra das colunas.',
+    );
+    final upper = tester.getRect(
+      find.byKey(const Key('adjustmentsExpandVideo')),
+    );
+    final lower = tester.getRect(find.byKey(const Key('adjustmentsClose')));
+    expect(upper.bottom, lessThan(lower.top));
+    expect(lower.top - upper.bottom, greaterThanOrEqualTo(16));
+
+    await tester.tap(find.byKey(const Key('adjustmentsClose')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('adjustmentDirectionChoices')), findsNothing);
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+  });
+
+  testWidgets('abas de Áudio sobem com o conteúdo ao rolar', (tester) async {
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('unifiedSectionaudioSettings')));
+    await tester.pumpAndSettle();
+
+    final tabs = find.byKey(const Key('unifiedSectionaudioSettings'));
+    final before = tester.getTopLeft(tabs).dy;
+    await tester.drag(
+      find.byKey(const Key('unifiedAudioSettingsScroll')),
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(tabs).dy, lessThan(before - 100));
+    expect(tester.takeException(), isNull);
+  });
+
   Future<void> tap(WidgetTester tester, String key) async {
     if (key == 'visualPlayerMenu') return;
     if (key.startsWith('unifiedSection') &&
@@ -71,6 +148,11 @@ void main() {
     await tester.ensureVisible(find.byKey(Key(key)));
     await tester.tap(find.byKey(Key(key)));
     await tester.pumpAndSettle();
+    if (key == 'visualMainAdjustments' &&
+        find.byKey(const Key('adjustmentsClose')).evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const Key('adjustmentsClose')));
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<void> openSearch(WidgetTester tester) async {
@@ -260,6 +342,34 @@ void main() {
     await tap(tester, 'unifiedChooseChord');
     expect(find.byKey(const Key('playerChordSheet')), findsOneWidget);
     expect(tester.getSize(viewport).height, fullHeight);
+    final autoCard = find.byKey(const Key('chordAutoScrollCard'));
+    final chooser = find.byKey(const Key('unifiedChooseChord'));
+    final pitchCard = find.byKey(const Key('unifiedPitchCard'));
+    expect(tester.getRect(chooser).left, tester.getRect(pitchCard).left);
+    expect(tester.getRect(chooser).right, tester.getRect(pitchCard).right);
+    expect(tester.getRect(autoCard).left, tester.getRect(pitchCard).left);
+    expect(tester.getRect(autoCard).right, tester.getRect(pitchCard).right);
+    final controlsBackdrop = find.byKey(
+      const Key('unifiedChordControlsBackdrop'),
+    );
+    final chordFrame = find.byKey(const Key('unifiedChordFrame'));
+    expect(autoCard, findsOneWidget);
+    expect(
+      find.ancestor(of: autoCard, matching: controlsBackdrop),
+      findsOneWidget,
+      reason: 'A rolagem automática não pode mostrar o YouTube por trás.',
+    );
+    expect(
+      (tester.widget<DecoratedBox>(controlsBackdrop).decoration
+              as BoxDecoration)
+          .color,
+      studioBg,
+    );
+    expect(
+      tester.getRect(chordFrame).top - tester.getRect(autoCard).bottom,
+      lessThanOrEqualTo(5),
+      reason: 'A cifra deve começar logo abaixo da rolagem automática.',
+    );
     final chordOverlay = find.byKey(const Key('unifiedChordOverlay'));
     final overlayTop = tester.getTopLeft(chordOverlay).dy;
     final tabsTop = tester
@@ -270,7 +380,7 @@ void main() {
     expect(tabsTop - overlayTop, greaterThan(50));
     expect(
       tester.widget<ClipRRect>(chordOverlay).borderRadius,
-      const BorderRadius.vertical(top: Radius.circular(18)),
+      const BorderRadius.vertical(top: Radius.circular(26)),
     );
     expect(
       find.byKey(const Key('unifiedSectionchords')).hitTestable(),
@@ -322,7 +432,7 @@ void main() {
       isA<BoxDecoration>().having(
         (decoration) => decoration.borderRadius,
         'rounded top',
-        BorderRadius.circular(18),
+        BorderRadius.circular(26),
       ),
     );
     await tester.drag(
@@ -378,6 +488,195 @@ void main() {
     expect(backdrop.bottom, closeTo(overlay.bottom, 1));
     expect(backdrop.width, closeTo(overlay.width, 1));
   });
+
+  testWidgets('duas setas expandem todas as colunas e dão controlo do vídeo', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await openSearch(tester);
+    await selectVideo(
+      tester,
+      session,
+      const YouTubeMediaState(
+        videoId: 'aqz-KE-bpKQ',
+        title: 'Song',
+        hasVideo: true,
+        position: 30,
+        duration: 180,
+      ),
+    );
+    await tap(tester, 'visualMainAdjustments');
+    expect(find.byKey(const Key('coveredVideoTransport')), findsNothing);
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('adjustmentsExpandVideo')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('adjustmentsExpandVideo')),
+        matching: find.byType(CircleAvatar),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<CircleAvatar>(
+            find.descendant(
+              of: find.byKey(const Key('adjustmentsClose')),
+              matching: find.byType(CircleAvatar),
+            ),
+          )
+          .radius,
+      18,
+    );
+    await tester.tap(find.byKey(const Key('adjustmentsExpandVideo')));
+    await tester.pumpAndSettle();
+    final transport = find.byKey(const Key('coveredVideoTransport'));
+    expect(transport, findsOneWidget);
+    expect(
+      tester.getSize(transport).height,
+      lessThanOrEqualTo(
+        tester
+                .getSize(find.byKey(const Key('visualMainMediaViewport')))
+                .height /
+            8,
+      ),
+    );
+    await tester.tap(find.byKey(const Key('coveredVideoBack10')));
+    await tester.pumpAndSettle();
+    expect(session.commands.last, ('seekTo', 20.0));
+    await tester.tap(find.byKey(const Key('coveredVideoForward10')));
+    await tester.pumpAndSettle();
+    expect(session.commands.last, ('seekTo', 40.0));
+    await tester.tap(find.byKey(const Key('coveredVideoPlayPause')));
+    await tester.pumpAndSettle();
+    expect(session.commands.last.$1, 'play');
+    for (final name in ['practice', 'setlist', 'audioSettings', 'chords']) {
+      await tap(tester, 'unifiedSection$name');
+      expect(transport, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adjustmentsClose')));
+    await tester.pumpAndSettle();
+    expect(transport, findsNothing);
+    expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
+    expect(find.text('Abrir ajustes'), findsNothing);
+    await tester.drag(
+      find.byKey(const Key('visualMainAdjustments')),
+      const Offset(0, -80),
+    );
+    await tester.pumpAndSettle();
+    expect(transport, findsOneWidget);
+    await tester.drag(
+      find.byKey(const Key('visualMainAdjustments')),
+      const Offset(0, 80),
+    );
+    await tester.pumpAndSettle();
+    expect(transport, findsNothing);
+    expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
+    await tester.drag(
+      find.byKey(const Key('visualMainAdjustments')),
+      const Offset(0, 80),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+  });
+
+  testWidgets('na horizontal só o botão abre os ajustes, não a rolagem', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await openSearch(tester);
+    await selectVideo(
+      tester,
+      session,
+      const YouTubeMediaState(
+        videoId: 'aqz-KE-bpKQ',
+        title: 'Song',
+        hasVideo: true,
+        duration: 180,
+      ),
+    );
+    await tap(tester, 'visualMainAdjustments');
+    expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
+
+    tester.view.physicalSize = const Size(844, 390);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
+    expect(find.byKey(const Key('unifiedSectionchords')), findsNothing);
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+    await tester.drag(
+      find.byKey(const Key('visualMainMediaViewport')),
+      const Offset(0, 120),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionchords')), findsNothing);
+    await tester.drag(
+      find.byKey(const Key('visualMainMediaViewport')),
+      const Offset(0, -120),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionchords')), findsNothing);
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('unifiedSectionchords'))).dy,
+      greaterThan(390 * .5),
+    );
+    expect(session.disposed, isFalse);
+
+    await tester.drag(
+      find.byKey(const Key('visualMainAdjustments')),
+      const Offset(0, 80),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionchords')), findsNothing);
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final size in [const Size(320, 700), const Size(844, 390)]) {
+    testWidgets('ajustes sobre o vídeo cabem em $size', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(const StudioVisualApp());
+      await tap(tester, 'visualMainAdjustments');
+      await tester.drag(
+        find.byKey(const Key('visualMainAdjustments')),
+        const Offset(0, -80),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('coveredVideoTransport')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'empty panel disables transport instead of opening legacy player',

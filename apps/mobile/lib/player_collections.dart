@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'player_presets.dart';
+import 'studio_native_pages.dart';
 
 /// User-owned, persistent collections. Choosing an entry asks the existing
 /// player to restore it; this screen never creates a second media session.
@@ -191,7 +192,7 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
       );
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(14),
       child: Image.network(
         'https://i.ytimg.com/vi/$videoId/mqdefault.jpg',
         key: ValueKey('setlistThumbnail-${item.id}'),
@@ -210,18 +211,30 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
   Widget _row(int index) {
     final item = _items[index];
     if (widget.setlist) {
-      return Card(
+      return Container(
         key: ValueKey('collection-${item.id}'),
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        child: ListTile(
-          key: ValueKey('collectionOpen-${item.id}'),
-          onTap: _busy ? null : () => _apply(item),
-          onLongPress: _busy ? null : () => _setlistOptions(item, index),
-          leading: _thumbnail(item),
-          title: Text(
-            item.title.trim().characters.take(55).toString(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+        decoration: studioPanelDecoration(radius: 23),
+        clipBehavior: Clip.antiAlias,
+        child: Material(
+          color: Colors.transparent,
+          child: ListTile(
+            key: ValueKey('collectionOpen-${item.id}'),
+            onTap: _busy ? null : () => _apply(item),
+            onLongPress: _busy ? null : () => _setlistOptions(item, index),
+            leading: _thumbnail(item),
+            title: Text(
+              item.title.trim().characters.take(55).toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            trailing: IconButton(
+              key: ValueKey('collectionMenu-${item.id}'),
+              tooltip: 'Ordenar ou remover da setlist',
+              onPressed: _busy ? null : () => _setlistOptions(item, index),
+              icon: const Icon(Icons.more_vert, size: 19),
+            ),
           ),
         ),
       );
@@ -279,7 +292,9 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
             padding: const EdgeInsets.all(12),
             child: Text(_error!, key: const Key('collectionError')),
           ),
-        if (!_loading && _items.isNotEmpty)
+        if (!_loading &&
+            _items.isNotEmpty &&
+            !(widget.embedded && widget.setlist))
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Text(
@@ -334,22 +349,40 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
             ? content
             : Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                  Container(
+                    key: const Key('setlistHeader'),
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    padding: const EdgeInsets.fromLTRB(12, 5, 8, 5),
+                    decoration: studioPanelDecoration(radius: 26),
                     child: Row(
                       children: [
+                        if (widget.setlist) ...[
+                          const Icon(Icons.queue_music, size: 19),
+                          const SizedBox(width: 8),
+                        ],
                         Expanded(
                           child: Text(
                             widget.setlist
                                 ? 'Minha setlist'
                                 : 'Predefinições guardadas',
-                            style: Theme.of(context).textTheme.titleMedium,
+                            maxLines: 1,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
                           ),
                         ),
                         if (widget.onAdd != null)
                           IconButton(
                             key: const Key('collectionAddCurrent'),
                             tooltip: 'Adicionar música atual',
+                            constraints: const BoxConstraints.tightFor(
+                              width: 34,
+                              height: 34,
+                            ),
+                            style: IconButton.styleFrom(
+                              fixedSize: const Size(34, 34),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: EdgeInsets.zero,
+                            ),
                             onPressed: _busy
                                 ? null
                                 : () async {
@@ -362,6 +395,15 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
                           IconButton(
                             key: const Key('setlistPrevious'),
                             tooltip: 'Anterior da setlist',
+                            constraints: const BoxConstraints.tightFor(
+                              width: 34,
+                              height: 34,
+                            ),
+                            style: IconButton.styleFrom(
+                              fixedSize: const Size(34, 34),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: EdgeInsets.zero,
+                            ),
                             onPressed: _busy ? null : widget.onPrevious,
                             icon: const Icon(Icons.skip_previous),
                           ),
@@ -369,17 +411,46 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
                           IconButton(
                             key: const Key('setlistNext'),
                             tooltip: 'Próxima da setlist',
+                            constraints: const BoxConstraints.tightFor(
+                              width: 34,
+                              height: 34,
+                            ),
+                            style: IconButton.styleFrom(
+                              fixedSize: const Size(34, 34),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: EdgeInsets.zero,
+                            ),
                             onPressed: _busy ? null : widget.onNext,
                             icon: const Icon(Icons.skip_next),
                           ),
                         IconButton(
                           tooltip: 'Atualizar coleção',
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
+                          style: IconButton.styleFrom(
+                            fixedSize: const Size(34, 34),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: EdgeInsets.zero,
+                          ),
                           onPressed: _busy ? null : _load,
                           icon: const Icon(Icons.refresh),
                         ),
                       ],
                     ),
                   ),
+                  if (widget.setlist && !_loading && _items.isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(24, 2, 24, 4),
+                      child: Text(
+                        'Toque num item para abrir com os ajustes guardados, sem reprodução automática. Mantenha pressionado para ordenar ou remover.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFFB7B7BD),
+                        ),
+                      ),
+                    ),
                   Expanded(child: content),
                 ],
               ),

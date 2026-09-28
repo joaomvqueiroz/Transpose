@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
@@ -39,9 +41,15 @@ void main() {
     final closeButton = tester.widget<IconButton>(
       find.byKey(const Key('visualMainAdjustments')),
     );
-    expect(closeButton.tooltip, 'Fechar ajustes');
+    expect(closeButton.tooltip, 'Expandir ou fechar ajustes');
     expect(find.byKey(const Key('unifiedSectioninstruments')), findsNothing);
     expect(find.byKey(const Key('unifiedChooseChord')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('unifiedChooseChord'))).dy,
+      greaterThanOrEqualTo(
+        tester.getBottomLeft(find.byKey(const Key('unifiedPitchCard'))).dy,
+      ),
+    );
     expect(find.byKey(const Key('unifiedSpeedSlider')), findsNothing);
     expect(find.byKey(const Key('unifiedLoopToggle')), findsNothing);
 
@@ -52,9 +60,23 @@ void main() {
     expect(find.byKey(const Key('unifiedChooseChord')), findsNothing);
     expect(find.byKey(const Key('unifiedSpeedSlider')), findsOneWidget);
     expect(find.byKey(const Key('unifiedLoopToggle')), findsOneWidget);
+    expect(find.text('TEMPO MASTER'), findsNothing);
+    expect(find.text('VELOCIDADE'), findsOneWidget);
+    expect(find.text('Repetir'), findsOneWidget);
+    expect(find.text('Repetir trecho continuamente'), findsNothing);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('unifiedMarkA'))).dy,
+      greaterThan(
+        tester.getBottomLeft(find.byKey(const Key('unifiedLoopToggle'))).dy,
+      ),
+    );
+    expect(tester.getSize(find.byKey(const Key('unifiedMarkA'))).height, 36);
+    expect(tester.getSize(find.byKey(const Key('unifiedMarkB'))).height, 36);
     await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adjustmentsClose')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedPracticeScroll')), findsNothing);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
@@ -100,8 +122,32 @@ void main() {
     final speed = tester.widget<Slider>(
       find.byKey(const Key('unifiedSpeedSlider')),
     );
-    expect(speed.min, .25);
-    expect(speed.max, 2);
+    expect(speed.min, 0);
+    expect(speed.max, 1);
+    expect(speed.value, .5);
+    speed.onChanged!(.7);
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(find.byKey(const Key('unifiedSpeedSlider'))).value,
+      closeTo(.7, .0001),
+    );
+    tester
+        .widget<Slider>(find.byKey(const Key('unifiedSpeedSlider')))
+        .onChangeEnd!(.7);
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(find.byKey(const Key('unifiedSpeedSlider'))).value,
+      closeTo(.7, .0001),
+    );
+    tester
+        .widget<Slider>(find.byKey(const Key('unifiedSpeedSlider')))
+        .onChanged!(.53);
+    await tester.pump();
+    expect(
+      tester.widget<Slider>(find.byKey(const Key('unifiedSpeedSlider'))).value,
+      .5,
+    );
+    expect(find.text('1.00×'), findsOneWidget);
     expect(find.byKey(const Key('unifiedSpeedPreset100')), findsNothing);
     expect(find.byKey(const Key('visualPracticePause')), findsNothing);
     await tester.tap(find.byKey(const Key('unifiedSectionchords')));
@@ -178,4 +224,181 @@ void main() {
     expect(tester.getSize(viewport).height, mediaHeight);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('áudio mostra controles compactos e reposição individual', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: () => session,
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.state = const YouTubeMediaState(
+      videoId: 'audio-controls',
+      hasVideo: true,
+      duration: 180,
+    );
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('unifiedSectionaudioSettings')),
+    );
+    await tester.tap(find.byKey(const Key('unifiedSectionaudioSettings')));
+    await tester.pumpAndSettle();
+
+    for (final name in <String>[
+      'Gain',
+      'Bass',
+      'Mid',
+      'Treble',
+      'Chorus',
+      'Feedback',
+      'Delay',
+      'Reverb',
+    ]) {
+      expect(find.byKey(Key('audio${name}Slider')), findsOneWidget);
+      expect(find.byKey(Key('audio${name}SliderReset')), findsOneWidget);
+    }
+    expect(find.textContaining('Graves ('), findsNothing);
+    expect(find.textContaining('Médios ('), findsNothing);
+    expect(find.textContaining('Agudos ('), findsNothing);
+    final bass = find.byKey(const Key('audioBassSlider'));
+    final bassReset = find.byKey(const Key('audioBassSliderReset'));
+    final bassRow = tester.getRect(bass);
+    final resetRect = tester.getRect(bassReset);
+    expect(resetRect.left, greaterThan(bassRow.right - 2));
+    tester.widget<Slider>(bass).onChangeEnd?.call(4);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(bassReset);
+    await tester.tap(bassReset);
+    await tester.pumpAndSettle();
+    expect(
+      session.commands,
+      containsAllInOrder(<(String, num?)>[('bass', 4), ('bass', 0)]),
+    );
+  });
+
+  testWidgets('respostas antigas não desfazem ajustes de áudio mais recentes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = _DelayedAudioSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: () => session,
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.state = const YouTubeMediaState(
+      videoId: 'audio-order',
+      hasVideo: true,
+      duration: 180,
+    );
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('unifiedSectionaudioSettings')),
+    );
+    await tester.tap(find.byKey(const Key('unifiedSectionaudioSettings')));
+    await tester.pumpAndSettle();
+
+    final bass = find.byKey(const Key('audioBassSlider'));
+    final mid = find.byKey(const Key('audioMidSlider'));
+    tester.widget<Slider>(bass).onChangeEnd?.call(4);
+    tester.widget<Slider>(mid).onChangeEnd?.call(6);
+    await tester.pump();
+    session.pending[1].complete();
+    await tester.pump();
+    session.pending[0].complete();
+    await tester.pump();
+    expect(tester.widget<Slider>(bass).value, 4);
+    expect(tester.widget<Slider>(mid).value, 6);
+
+    tester.widget<Slider>(bass).onChangeEnd?.call(2);
+    tester.widget<Slider>(bass).onChangeEnd?.call(7);
+    await tester.pump();
+    session.pending[3].complete();
+    await tester.pump();
+    session.pending[2].complete();
+    await tester.pump();
+    expect(tester.widget<Slider>(bass).value, 7);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('modulação compacta mostra tom estimado em Cifra e Treino', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: () => session,
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.state = const YouTubeMediaState(
+      videoId: 'key-song',
+      hasVideo: true,
+      duration: 180,
+      keyRoot: 0,
+      keyMode: 'major',
+      keyStatus: 'ready',
+    );
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    final pitchCard = find.byKey(const Key('unifiedPitchCard'));
+    expect(tester.getSize(pitchCard).height, lessThan(90));
+    expect(find.byKey(const Key('unifiedPitchReset')), findsNothing);
+    expect(find.text('Tom estimado: C maior'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(pitchCard).height, lessThan(90));
+    expect(find.byKey(const Key('unifiedPitchReset')), findsNothing);
+    expect(find.text('Tom estimado: C maior'), findsOneWidget);
+    session.state = const YouTubeMediaState(
+      videoId: 'key-song',
+      hasVideo: true,
+      duration: 180,
+      pitch: 2,
+      keyRoot: 0,
+      keyMode: 'major',
+      keyStatus: 'ready',
+    );
+    session.notifyListeners();
+    await tester.pump();
+    expect(find.text('Tom estimado: D maior'), findsOneWidget);
+  });
+}
+
+class _DelayedAudioSession extends FakeYouTubeSession {
+  final List<Completer<void>> pending = <Completer<void>>[];
+
+  @override
+  Future<void> command(String action, [num? value]) async {
+    final completer = Completer<void>();
+    pending.add(completer);
+    await completer.future;
+    await super.command(action, value);
+  }
 }

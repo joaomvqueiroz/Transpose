@@ -1158,23 +1158,54 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     required this.model,
     required this.youtubeNativeTransport,
     this.showPracticeControls = true,
+    this.compactBottom = false,
     super.key,
   });
 
   final PlayerPanelModel model;
   final bool youtubeNativeTransport;
   final bool showPracticeControls;
+  final bool compactBottom;
 
-  Widget _card({required Widget child, EdgeInsets? padding}) => Container(
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: padding ?? const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: studioCard,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFF38383E)),
-    ),
-    child: child,
-  );
+  String _detectedKeyLabel() {
+    if (!model.loaded) return 'Tom: escolha uma música';
+    final root = model.detectedKeyRoot;
+    if (root != null &&
+        (model.detectedKeyMode == 'major' ||
+            model.detectedKeyMode == 'minor')) {
+      const names = <String>[
+        'C',
+        'C♯',
+        'D',
+        'E♭',
+        'E',
+        'F',
+        'F♯',
+        'G',
+        'A♭',
+        'A',
+        'B♭',
+        'B',
+      ];
+      final transposed = (root + model.pitch.round()) % 12;
+      final mode = model.detectedKeyMode == 'major' ? 'maior' : 'menor';
+      return 'Tom estimado: ${names[transposed]} $mode';
+    }
+    return switch (model.keyDetectionStatus) {
+      'analyzing' => 'Tom: a analisar áudio…',
+      'unavailable' => 'Tom: indisponível nesta fonte',
+      _ => 'Tom: a aguardar reprodução',
+    };
+  }
+
+  Widget _card({Key? key, required Widget child, EdgeInsets? padding}) =>
+      Container(
+        key: key,
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: padding ?? const EdgeInsets.all(10),
+        decoration: studioPanelDecoration(),
+        child: child,
+      );
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -1182,7 +1213,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     builder: (context, _) {
       final ready = model.loaded && !model.busy;
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        padding: EdgeInsets.fromLTRB(16, 4, 16, compactBottom ? 0 : 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -1201,6 +1232,8 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
               ),
             ],
             _card(
+              key: const Key('unifiedPitchCard'),
+              padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
               child: Column(
                 children: [
                   Row(
@@ -1214,6 +1247,8 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                       const Expanded(
                         child: Text(
                           'MODULAÇÃO CROMÁTICA',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w800,
@@ -1221,30 +1256,25 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                           ),
                         ),
                       ),
-                      TextButton(
-                        key: const Key('unifiedPitchReset'),
-                        onPressed: ready && model.canPitch && model.pitch != 0
-                            ? () => model.changePitch(0)
-                            : null,
-                        child: const Text(
-                          'Redefinir (0)',
-                          style: TextStyle(fontSize: 10),
-                        ),
-                      ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 2),
                   Row(
                     children: [
                       IconButton.filledTonal(
                         key: const Key('unifiedPitchDown'),
                         tooltip: 'Diminuir tom',
+                        style: IconButton.styleFrom(
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          minimumSize: const Size(32, 32),
+                          maximumSize: const Size(32, 32),
+                        ),
                         constraints: const BoxConstraints.tightFor(
                           width: 32,
                           height: 32,
                         ),
                         padding: EdgeInsets.zero,
-                        iconSize: 18,
+                        iconSize: 17,
                         onPressed: ready && model.canPitch && model.pitch > -12
                             ? () => model.changePitch(
                                 (model.pitch - 1).clamp(-12, 12),
@@ -1253,41 +1283,44 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                         icon: const Icon(Icons.remove),
                       ),
                       Expanded(
-                        child: InkWell(
-                          onTap: ready && model.canPitch && model.pitch != 0
-                              ? () => model.changePitch(0)
-                              : null,
-                          child: Column(
-                            children: [
-                              const Text(
-                                'TOM ATUAL',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: studioMuted,
-                                  letterSpacing: 1,
-                                ),
+                        child: Column(
+                          children: [
+                            Text(
+                              '${_pitchLabel(model.pitch)} semitons',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
                               ),
-                              Text(
-                                '${_pitchLabel(model.pitch)} semitons',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                            ),
+                            Text(
+                              _detectedKeyLabel(),
+                              key: const Key('unifiedDetectedKey'),
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: studioMuted,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                       IconButton.filledTonal(
                         key: const Key('unifiedPitchUp'),
                         tooltip: 'Aumentar tom',
+                        style: IconButton.styleFrom(
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          minimumSize: const Size(32, 32),
+                          maximumSize: const Size(32, 32),
+                        ),
                         constraints: const BoxConstraints.tightFor(
                           width: 32,
                           height: 32,
                         ),
                         padding: EdgeInsets.zero,
-                        iconSize: 18,
+                        iconSize: 17,
                         onPressed: ready && model.canPitch && model.pitch < 12
                             ? () => model.changePitch(
                                 (model.pitch + 1).clamp(-12, 12),
@@ -1307,26 +1340,13 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
               ),
             if (showPracticeControls)
               _card(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'TEMPO MASTER',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: .7,
-                      ),
-                    ),
-                    _SpeedControl(
-                      model: model,
-                      enabled: ready,
-                      compact: true,
-                      minSpeed: youtubeNativeTransport ? .25 : .5,
-                      maxSpeed: 2,
-                    ),
-                  ],
+                padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+                child: _SpeedControl(
+                  model: model,
+                  enabled: ready,
+                  compact: true,
+                  minSpeed: youtubeNativeTransport ? .25 : .5,
+                  maxSpeed: 2,
                 ),
               ),
             if (showPracticeControls)
@@ -1340,19 +1360,64 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                         const Expanded(
                           child: Text(
                             'TRECHO DE ENSAIO (A–B)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        if (model.markerA != null && model.markerB != null)
-                          Text(
-                            '${(model.markerB! - model.markerA!).inSeconds}s',
-                            style: const TextStyle(fontSize: 10),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'Repetir',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
                           ),
+                        ),
+                        SizedBox(
+                          width: 48,
+                          height: 36,
+                          child: Transform.scale(
+                            scale: .7,
+                            child: Switch(
+                              key: const Key('unifiedLoopToggle'),
+                              value: model.loopEnabled,
+                              onChanged:
+                                  ready &&
+                                      model.canLoop &&
+                                      model.markerA != null &&
+                                      model.markerB != null
+                                  ? (_) => model.toggleLoop()
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          key: const Key('unifiedClearLoop'),
+                          tooltip: 'Limpar trecho',
+                          style: IconButton.styleFrom(
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            minimumSize: const Size(32, 32),
+                          ),
+                          constraints: const BoxConstraints.tightFor(
+                            width: 32,
+                            height: 32,
+                          ),
+                          padding: EdgeInsets.zero,
+                          onPressed:
+                              ready &&
+                                  model.canLoop &&
+                                  (model.markerA != null ||
+                                      model.markerB != null)
+                              ? model.clearLoop
+                              : null,
+                          icon: const Icon(Icons.close, size: 16),
+                        ),
                       ],
                     ),
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
@@ -1377,45 +1442,6 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                                 : null,
                             compact: true,
                           ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Repetir trecho continuamente',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Transform.scale(
-                          scale: .75,
-                          child: Switch(
-                            key: const Key('unifiedLoopToggle'),
-                            value: model.loopEnabled,
-                            onChanged:
-                                ready &&
-                                    model.canLoop &&
-                                    model.markerA != null &&
-                                    model.markerB != null
-                                ? (_) => model.toggleLoop()
-                                : null,
-                          ),
-                        ),
-                        IconButton(
-                          key: const Key('unifiedClearLoop'),
-                          tooltip: 'Limpar trecho',
-                          onPressed:
-                              ready &&
-                                  model.canLoop &&
-                                  (model.markerA != null ||
-                                      model.markerB != null)
-                              ? model.clearLoop
-                              : null,
-                          icon: const Icon(Icons.close, size: 17),
                         ),
                       ],
                     ),
@@ -2477,12 +2503,37 @@ class _SpeedControl extends StatefulWidget {
 
 class _SpeedControlState extends State<_SpeedControl> {
   double? _dragSpeed;
+  double? _pendingSpeed;
+  Timer? _pendingSpeedTimeout;
+
+  @override
+  void dispose() {
+    _pendingSpeedTimeout?.cancel();
+    super.dispose();
+  }
+
+  double _positionForSpeed(double speed) => speed <= 1
+      ? (speed - widget.minSpeed) / (1 - widget.minSpeed) * .5
+      : .5 + (speed - 1) / (widget.maxSpeed - 1) * .5;
+
+  double _speedForPosition(double position) {
+    // A small resting zone makes returning to the original speed feel precise.
+    if ((position - .5).abs() <= .035) return 1;
+    return position < .5
+        ? widget.minSpeed + (1 - widget.minSpeed) * position * 2
+        : 1 + (widget.maxSpeed - 1) * (position - .5) * 2;
+  }
 
   @override
   Widget build(BuildContext context) {
     final bool enabled = widget.enabled && widget.model.canSpeed;
     if (widget.compact) {
-      final value = (_dragSpeed ?? widget.model.speed).clamp(
+      if (_pendingSpeed != null &&
+          (widget.model.speed - _pendingSpeed!).abs() < .005) {
+        _pendingSpeed = null;
+        _pendingSpeedTimeout?.cancel();
+      }
+      final speed = (_dragSpeed ?? _pendingSpeed ?? widget.model.speed).clamp(
         widget.minSpeed,
         widget.maxSpeed,
       );
@@ -2503,26 +2554,13 @@ class _SpeedControlState extends State<_SpeedControl> {
                   ),
                 ),
               ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: studioCardAlt,
-                  border: Border.all(color: const Color(0xFF77777E)),
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  child: Text(
-                    '${value.toStringAsFixed(2)}×',
-                    key: const Key('unifiedSpeedValue'),
-                    style: const TextStyle(
-                      color: studioCyan,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+              Text(
+                '${speed.toStringAsFixed(2)}×',
+                key: const Key('unifiedSpeedValue'),
+                style: const TextStyle(
+                  color: studioCyan,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
@@ -2537,19 +2575,37 @@ class _SpeedControlState extends State<_SpeedControl> {
               height: 24,
               child: Slider(
                 key: const Key('unifiedSpeedSlider'),
-                value: value,
-                min: widget.minSpeed,
-                max: widget.maxSpeed,
-                divisions: ((widget.maxSpeed - widget.minSpeed) * 20).round(),
+                value: _positionForSpeed(speed),
+                min: 0,
+                max: 1,
                 activeColor: studioCyan,
                 inactiveColor: const Color(0xFF39393E),
+                semanticFormatterCallback: (position) =>
+                    '${_speedForPosition(position).toStringAsFixed(2)} vezes',
                 onChanged: enabled
-                    ? (v) => setState(() => _dragSpeed = v)
+                    ? (position) {
+                        _pendingSpeedTimeout?.cancel();
+                        setState(() {
+                          _pendingSpeed = null;
+                          _dragSpeed = _speedForPosition(position);
+                        });
+                      }
                     : null,
                 onChangeEnd: enabled
-                    ? (v) {
-                        setState(() => _dragSpeed = null);
-                        widget.model.changeSpeed(v);
+                    ? (position) {
+                        final target = _speedForPosition(position);
+                        setState(() {
+                          _dragSpeed = null;
+                          _pendingSpeed = target;
+                        });
+                        _pendingSpeedTimeout?.cancel();
+                        _pendingSpeedTimeout = Timer(
+                          const Duration(seconds: 5),
+                          () {
+                            if (mounted) setState(() => _pendingSpeed = null);
+                          },
+                        );
+                        widget.model.changeSpeed(target);
                       }
                     : null,
               ),
@@ -2843,21 +2899,25 @@ class _MarkerButton extends StatelessWidget {
     style: OutlinedButton.styleFrom(
       backgroundColor: const Color(0xFF232326),
       foregroundColor: Colors.white,
-      fixedSize: compact ? const Size.fromHeight(44) : null,
+      fixedSize: compact ? const Size.fromHeight(36) : null,
+      minimumSize: compact ? const Size(0, 36) : null,
       tapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : null,
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 8,
-        vertical: compact ? 4 : 12,
+        vertical: compact ? 2 : 12,
       ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ),
     child: Column(
       children: <Widget>[
-        Text(label, style: const TextStyle(fontSize: 10, color: studioMuted)),
-        SizedBox(height: compact ? 2 : 4),
+        Text(
+          label,
+          style: TextStyle(fontSize: compact ? 9 : 10, color: studioMuted),
+        ),
+        SizedBox(height: compact ? 0 : 4),
         Text(
           value == null ? 'Marcar' : _time(value!),
-          style: compact ? const TextStyle(fontSize: 14) : null,
+          style: compact ? const TextStyle(fontSize: 12) : null,
         ),
       ],
     ),

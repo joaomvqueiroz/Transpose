@@ -116,6 +116,12 @@ class MainPlayerController extends PlayerPanelModel {
   @override
   double get pitch => _online ? _media.pitch : local.pitch;
   @override
+  int? get detectedKeyRoot => _online ? _media.keyRoot : null;
+  @override
+  String get detectedKeyMode => _online ? _media.keyMode : '';
+  @override
+  String get keyDetectionStatus => _online ? _media.keyStatus : 'unavailable';
+  @override
   double get speed => _online ? _media.speed : local.speed;
   @override
   Duration? get markerA => _online

@@ -358,11 +358,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
         if (widget.lyricsOnly) {
           return Container(
             key: const Key('playerChordSheet'),
-            decoration: BoxDecoration(
-              color: const Color(0xFF151518),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: studioCyan.withValues(alpha: .2)),
-            ),
+            decoration: studioPanelDecoration(radius: 26),
             clipBehavior: Clip.antiAlias,
             child: NotificationListener<OverscrollNotification>(
               onNotification: (notification) {
@@ -422,11 +418,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
         return Container(
           key: const Key('playerChordSheet'),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF151518),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: studioCyan.withValues(alpha: .2)),
-          ),
+          decoration: studioPanelDecoration(radius: 26),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -471,6 +463,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchReset'),
                     tooltip: 'Repor cifra',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF303034),
+                    ),
                     onPressed: ready ? () => _saveTone(0, false) : null,
                     icon: const Icon(Icons.restore, size: 20),
                   ),
@@ -479,6 +474,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     tooltip: widget.onSearch == null
                         ? 'Editar cifra'
                         : 'Pesquisar outra cifra',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF303034),
+                    ),
                     onPressed: _loading ? null : widget.onSearch ?? choose,
                     icon: Icon(
                       widget.onSearch == null
@@ -491,6 +489,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     IconButton(
                       key: const Key('playerChordHide'),
                       tooltip: 'Esconder cifra',
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFF303034),
+                      ),
                       onPressed: widget.onHide,
                       visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.visibility_off_outlined, size: 20),
@@ -514,6 +515,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchDown'),
                     tooltip: 'Diminuir tonalidade da cifra',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF303034),
+                    ),
                     onPressed: canChange && _sheet.transpose > -24
                         ? () => _changeTone(-1)
                         : null,
@@ -532,6 +536,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchUp'),
                     tooltip: 'Aumentar tonalidade da cifra',
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF303034),
+                    ),
                     onPressed: canChange && _sheet.transpose < 24
                         ? () => _changeTone(1)
                         : null,
@@ -559,7 +566,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0D0D0F),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: LayoutBuilder(
                   builder: (context, box) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'studio_native_pages.dart';
@@ -19,6 +20,7 @@ import 'player_collections.dart';
 import 'session_snapshot.dart';
 import 'premium_branding.dart';
 import 'microphone_tuner.dart';
+import 'home_widget_bridge.dart';
 
 part 'studio_player_home.dart';
 
@@ -167,9 +169,7 @@ class _MainAdjustmentsBar extends StatelessWidget {
                       color: expanded ? Colors.white : const Color(0xFFBABAC0),
                       width: 1.2,
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(9),
-                    ),
+                    shape: const StadiumBorder(),
                   ),
                   icon: Icon(
                     expanded

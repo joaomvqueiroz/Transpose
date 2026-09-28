@@ -20,6 +20,9 @@ abstract class PlayerPanelModel extends ChangeNotifier {
   Duration get position;
   Duration get duration;
   double get pitch;
+  int? get detectedKeyRoot => null;
+  String get detectedKeyMode => '';
+  String get keyDetectionStatus => 'waiting';
   double get speed;
   Duration? get markerA;
   Duration? get markerB;

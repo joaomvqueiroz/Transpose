@@ -9,9 +9,14 @@ import 'studio_native_pages.dart';
 
 /// Presentation of a real practice session. It never schedules repetitions.
 class PracticeProgressionCard extends StatefulWidget {
-  const PracticeProgressionCard({required this.controller, super.key});
+  const PracticeProgressionCard({
+    required this.controller,
+    this.embedded = false,
+    super.key,
+  });
 
   final PracticeController controller;
+  final bool embedded;
 
   @override
   State<PracticeProgressionCard> createState() =>
@@ -209,29 +214,33 @@ class _PracticeProgressionCardState extends State<PracticeProgressionCard> {
           controller.currentPercent < controller.plan.targetPercent;
       return Material(
         key: const Key('practicePlanCard'),
-        color: studioCard,
+        color: widget.embedded ? Colors.transparent : studioCard,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF353537)),
+          borderRadius: BorderRadius.circular(widget.embedded ? 8 : 16),
+          side: widget.embedded
+              ? BorderSide.none
+              : const BorderSide(color: Color(0xFF353537)),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(widget.embedded ? 4 : 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const Text(
-                'PROGRESSÃO DE VELOCIDADE',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: studioCyan,
+              if (!widget.embedded) ...[
+                const Text(
+                  'PROGRESSÃO DE VELOCIDADE',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: studioCyan,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+              ],
               Text(
                 _statusLabel(controller.status),
                 key: const Key('practicePlanStatus'),
-                style: const TextStyle(
-                  fontSize: 20,
+                style: TextStyle(
+                  fontSize: widget.embedded ? 12 : 20,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -241,6 +250,7 @@ class _PracticeProgressionCardState extends State<PracticeProgressionCard> {
                 '+${plan.incrementPercent} pontos · '
                 '${plan.repetitionsPerStep} voltas por etapa',
                 key: const Key('practicePlanSummary'),
+                style: widget.embedded ? const TextStyle(fontSize: 11) : null,
               ),
               if (controller.hasSession) ...<Widget>[
                 const SizedBox(height: 12),
@@ -265,7 +275,7 @@ class _PracticeProgressionCardState extends State<PracticeProgressionCard> {
                 'Cada nova etapa faz uma breve pausa para ajustar a velocidade '
                 'e recomeçar em A. Retomar também volta a A. '
                 'A contagem não avalia a sua execução musical.',
-                style: TextStyle(color: studioMuted),
+                style: TextStyle(color: studioMuted, fontSize: 11),
               ),
               if (controller.busy) ...<Widget>[
                 const SizedBox(height: 12),

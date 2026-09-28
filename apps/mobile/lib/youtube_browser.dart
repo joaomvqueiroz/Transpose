@@ -35,6 +35,9 @@ class YouTubeMediaState {
     this.loopEpoch = 0,
     this.loopEventsSupported = false,
     this.playbackReady = false,
+    this.keyRoot,
+    this.keyMode = '',
+    this.keyStatus = 'waiting',
   });
 
   factory YouTubeMediaState.fromJson(Map<String, dynamic> json) {
@@ -82,6 +85,9 @@ class YouTubeMediaState {
           json['playbackReady'] == true &&
           json['hasVideo'] == true &&
           json['isAd'] != true,
+      keyRoot: (counter('keyRoot') ?? -1) <= 11 ? counter('keyRoot') : null,
+      keyMode: string('keyMode'),
+      keyStatus: string('keyStatus'),
     );
   }
 
@@ -91,6 +97,8 @@ class YouTubeMediaState {
   final int loopCount, loopEpoch;
   final double position, duration, speed, pitch;
   final double? loopA, loopB;
+  final int? keyRoot;
+  final String keyMode, keyStatus;
 }
 
 /// The browser has one media element/graph; Flutter only issues commands and
@@ -158,6 +166,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   String? _bridge;
   String? _dsp;
   String? _dspAdapter;
+  String? _keyDetector;
 
   @override
   YouTubeMediaState get media => _media;
@@ -178,6 +187,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   Future<void> start(Uri uri) async {
     if (!isYouTubeBrowserUri(uri)) throw ArgumentError.value(uri);
     _bridge = await rootBundle.loadString('assets/web/transpono_media.js');
+    _keyDetector = await rootBundle.loadString(
+      'assets/web/transpono_key_detector.js',
+    );
     _dsp = await rootBundle.loadString('assets/web/SignalsmithStretch.js');
     _dspAdapter = await rootBundle.loadString(
       'assets/web/transpono_stretch.js',
@@ -275,6 +287,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       await controller.runJavaScript(_dsp!);
       if (_disposed || generation != _document) return;
       await controller.runJavaScript(_dspAdapter!);
+      if (_disposed || generation != _document) return;
+      await controller.runJavaScript(_keyDetector!);
       if (_disposed || generation != _document) return;
       await controller.runJavaScript(_bridge!);
       await refresh();

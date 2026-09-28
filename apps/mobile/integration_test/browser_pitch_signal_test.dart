@@ -42,6 +42,7 @@ void main() {
     for (final String asset in <String>[
       'SignalsmithStretch.js',
       'transpono_stretch.js',
+      'transpono_key_detector.js',
       'transpono_media.js',
     ]) {
       await session.controller.runJavaScript(
@@ -79,7 +80,71 @@ void main() {
       expect(result['error'], isNull);
       expect(result['passed'], isTrue);
     }
-    binding.reportData = <String, dynamic>{'cases': cases};
+    await session.controller.runJavaScript('''
+      window.__transitionResult = null;
+      window.TransponoAudioProbe.runPitchTransitionCase()
+        .then(value => window.__transitionResult=value)
+        .catch(error => window.__transitionResult={error:error.message});
+    ''');
+    dynamic transition;
+    final DateTime transitionDeadline = DateTime.now().add(
+      const Duration(seconds: 20),
+    );
+    while (transition == null && DateTime.now().isBefore(transitionDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+      dynamic value = await session.controller.runJavaScriptReturningResult(
+        'JSON.stringify(window.__transitionResult)',
+      );
+      for (int i = 0; value is String && i < 2; i++) {
+        value = jsonDecode(value);
+      }
+      transition = value;
+    }
+    debugPrint('TRANSPO_PITCH_TRANSITION ${jsonEncode(transition)}');
+    expect(transition, isNotNull);
+    expect(transition['error'], isNull);
+    expect(transition['passed'], isTrue);
+    await session.controller.runJavaScript('''
+      window.__effectsResult = null;
+      (async () => {
+        for (const [action, value] of [
+          ['gain', 3], ['chorus', .2], ['feedback', .25],
+          ['delay', .15], ['reverb', .2],
+        ]) await window.TransponoMedia.command({action, value});
+        await new Promise(resolve => setTimeout(resolve, 150));
+        return window.TransponoMedia.snapshot().probe.effects;
+      })().then(value => window.__effectsResult=value)
+        .catch(error => window.__effectsResult={error:error.message});
+    ''');
+    dynamic effects;
+    final DateTime effectsDeadline = DateTime.now().add(
+      const Duration(seconds: 15),
+    );
+    while (effects == null && DateTime.now().isBefore(effectsDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await tester.pump();
+      dynamic value = await session.controller.runJavaScriptReturningResult(
+        'JSON.stringify(window.__effectsResult)',
+      );
+      for (int i = 0; value is String && i < 2; i++) {
+        value = jsonDecode(value);
+      }
+      effects = value;
+    }
+    debugPrint('TRANSPO_EFFECTS ${jsonEncode(effects)}');
+    expect(effects, isNotNull);
+    expect(effects['error'], isNull);
+    expect(effects['gain'], greaterThan(1));
+    expect(effects['chorus'], greaterThan(0));
+    expect(effects['feedback'], greaterThan(0));
+    expect(effects['delay'], greaterThan(0));
+    expect(effects['reverb'], greaterThan(0));
+    binding.reportData = <String, dynamic>{
+      'cases': cases,
+      'transition': transition,
+      'effects': effects,
+    };
     await session.controller.runJavaScript(
       'window.TransponoAudioProbe.cleanup()',
     );

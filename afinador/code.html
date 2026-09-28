@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+
+<html lang="pt"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Áudio - Afinador &amp; Equalizador</title>
+<!-- Tailwind CSS CDN with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            appDark: '#0e0e11',
+            cardDark: '#16161a',
+            borderDark: '#27272e',
+            subText: '#8e8e98',
+            tickColor: '#3a3a46'
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom CSS for specialized elements -->
+<style data-purpose="custom-sliders">
+    /* Dotted Slider Styling */
+    .dotted-track {
+      background-image: radial-gradient(circle, #555562 1.5px, transparent 1.5px);
+      background-size: 14px 100%;
+      background-position: center;
+      background-repeat: repeat-x;
+    }
+
+    /* Range slider custom appearance */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 20px;
+      width: 20px;
+      border-radius: 9999px;
+      background: #ffffff;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+      cursor: pointer;
+      margin-top: -8px;
+    }
+
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 4px;
+      cursor: pointer;
+      background: transparent;
+    }
+  </style>
+<style data-purpose="arc-gauge">
+    .gauge-container {
+      position: relative;
+      width: 280px;
+      height: 140px;
+      margin: 0 auto;
+      overflow: hidden;
+    }
+
+    .tuner-arc {
+      position: absolute;
+      width: 260px;
+      height: 260px;
+      left: 10px;
+      top: 10px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      box-shadow: inset 0 0 35px rgba(255, 255, 255, 0.05), 0 0 30px rgba(255, 255, 255, 0.03);
+    }
+
+    /* Realistic Tuner Needle Swing & Dynamic Color Transitions */
+    @keyframes tunerSwing {
+      0% {
+        transform: rotate(-38deg);
+      }
+      18% {
+        transform: rotate(26deg);
+      }
+      35% {
+        transform: rotate(-14deg);
+      }
+      50% {
+        transform: rotate(6deg);
+      }
+      62% {
+        transform: rotate(-2deg);
+      }
+      70% {
+        transform: rotate(0deg);
+      }
+      82% {
+        transform: rotate(0deg);
+      }
+      89% {
+        transform: rotate(1.5deg);
+      }
+      94% {
+        transform: rotate(-1deg);
+      }
+      100% {
+        transform: rotate(-38deg);
+      }
+    }
+
+    @keyframes tunerColorCycle {
+      /* -38deg: far flat (RED) */
+      0% {
+        stroke: #ef4444;
+        filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.85));
+      }
+      /* Moving toward center (ORANGE) */
+      9% {
+        stroke: #f97316;
+        filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.8));
+      }
+      /* Crossing center briefly */
+      13% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.95));
+      }
+      /* +26deg: sharp (ORANGE/RED) */
+      18% {
+        stroke: #ef4444;
+        filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.85));
+      }
+      26% {
+        stroke: #f97316;
+        filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.8));
+      }
+      /* -14deg (ORANGE) */
+      35% {
+        stroke: #f97316;
+        filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.75));
+      }
+      /* +6deg (near sweet spot) */
+      50% {
+        stroke: #84cc16;
+        filter: drop-shadow(0 0 8px rgba(132, 204, 22, 0.85));
+      }
+      /* Settling right on center / in-tune (VIBRANT GREEN) */
+      62% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 12px rgba(34, 197, 94, 1));
+      }
+      70% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 14px rgba(34, 197, 94, 1));
+      }
+      82% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 14px rgba(34, 197, 94, 1));
+      }
+      88% {
+        stroke: #4ade80;
+        filter: drop-shadow(0 0 10px rgba(74, 222, 128, 0.9));
+      }
+      95% {
+        stroke: #f97316;
+        filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.8));
+      }
+      100% {
+        stroke: #ef4444;
+        filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.85));
+      }
+    }
+
+    @keyframes tunerBallColorCycle {
+      0% {
+        fill: #ef4444;
+        filter: drop-shadow(0 0 6px #ef4444);
+      }
+      9% {
+        fill: #f97316;
+        filter: drop-shadow(0 0 5px #f97316);
+      }
+      13% {
+        fill: #22c55e;
+        filter: drop-shadow(0 0 8px #22c55e);
+      }
+      18% {
+        fill: #ef4444;
+        filter: drop-shadow(0 0 6px #ef4444);
+      }
+      26% {
+        fill: #f97316;
+        filter: drop-shadow(0 0 5px #f97316);
+      }
+      35% {
+        fill: #f97316;
+        filter: drop-shadow(0 0 5px #f97316);
+      }
+      50% {
+        fill: #84cc16;
+        filter: drop-shadow(0 0 7px #84cc16);
+      }
+      62% {
+        fill: #22c55e;
+        filter: drop-shadow(0 0 10px #22c55e);
+      }
+      70% {
+        fill: #22c55e;
+        filter: drop-shadow(0 0 12px #22c55e);
+      }
+      82% {
+        fill: #22c55e;
+        filter: drop-shadow(0 0 12px #22c55e);
+      }
+      88% {
+        fill: #4ade80;
+        filter: drop-shadow(0 0 8px #4ade80);
+      }
+      95% {
+        fill: #f97316;
+        filter: drop-shadow(0 0 5px #f97316);
+      }
+      100% {
+        fill: #ef4444;
+        filter: drop-shadow(0 0 6px #ef4444);
+      }
+    }
+
+    @keyframes centerNotchGlow {
+      0%, 10%, 15%, 58%, 95%, 100% {
+        stroke: #ffffff;
+        filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.4));
+      }
+      12%, 14% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.9));
+      }
+      62%, 84% {
+        stroke: #22c55e;
+        filter: drop-shadow(0 0 10px rgba(34, 197, 94, 1));
+      }
+    }
+
+    @keyframes noteInTunePulse {
+      0%, 55%, 96%, 100% {
+        color: #ffffff;
+        text-shadow: none;
+        transform: scale(1);
+      }
+      62%, 82% {
+        color: #22c55e;
+        text-shadow: 0 0 16px rgba(34, 197, 94, 0.7), 0 0 32px rgba(34, 197, 94, 0.35);
+        transform: scale(1.04);
+      }
+    }
+
+    @keyframes statusSubGlow {
+      0%, 55%, 96%, 100% {
+        color: #8e8e98;
+      }
+      62%, 82% {
+        color: #4ade80;
+      }
+    }
+
+    /* Spectacular Volumetric Light Cloud / Aura Keyframes */
+    @keyframes lightCloudGlow {
+      0% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(239, 68, 68, 0.35) 0%, rgba(220, 38, 38, 0.18) 40%, rgba(239, 68, 68, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.92);
+        opacity: 0.65;
+      }
+      9% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(249, 115, 22, 0.38) 0%, rgba(234, 88, 12, 0.2) 40%, rgba(249, 115, 22, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.96);
+        opacity: 0.72;
+      }
+      13% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(34, 197, 94, 0.52) 0%, rgba(16, 185, 129, 0.28) 42%, rgba(34, 197, 94, 0) 75%);
+        transform: translate(-50%, -50%) scale(1.06);
+        opacity: 0.88;
+      }
+      18% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(239, 68, 68, 0.35) 0%, rgba(220, 38, 38, 0.18) 40%, rgba(239, 68, 68, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.92);
+        opacity: 0.65;
+      }
+      26% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(249, 115, 22, 0.38) 0%, rgba(234, 88, 12, 0.2) 40%, rgba(249, 115, 22, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.96);
+        opacity: 0.72;
+      }
+      35% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(249, 115, 22, 0.4) 0%, rgba(234, 88, 12, 0.2) 40%, rgba(249, 115, 22, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.95);
+        opacity: 0.75;
+      }
+      50% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(132, 204, 22, 0.45) 0%, rgba(101, 163, 13, 0.22) 40%, rgba(132, 204, 22, 0) 75%);
+        transform: translate(-50%, -50%) scale(1.02);
+        opacity: 0.82;
+      }
+      /* Settling right on center / In-tune - radiant emerald pulsing cloud */
+      62% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(34, 197, 94, 0.6) 0%, rgba(16, 185, 129, 0.32) 42%, rgba(34, 197, 94, 0) 78%);
+        transform: translate(-50%, -50%) scale(1.1);
+        opacity: 0.95;
+      }
+      70% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(16, 185, 129, 0.68) 0%, rgba(34, 197, 94, 0.35) 45%, rgba(16, 185, 129, 0) 80%);
+        transform: translate(-50%, -50%) scale(1.15);
+        opacity: 1;
+      }
+      82% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(34, 197, 94, 0.62) 0%, rgba(16, 185, 129, 0.32) 42%, rgba(34, 197, 94, 0) 78%);
+        transform: translate(-50%, -50%) scale(1.1);
+        opacity: 0.95;
+      }
+      88% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(74, 222, 128, 0.48) 0%, rgba(34, 197, 94, 0.25) 40%, rgba(74, 222, 128, 0) 76%);
+        transform: translate(-50%, -50%) scale(1.04);
+        opacity: 0.85;
+      }
+      95% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(249, 115, 22, 0.38) 0%, rgba(234, 88, 12, 0.2) 40%, rgba(249, 115, 22, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.96);
+        opacity: 0.72;
+      }
+      100% {
+        background: radial-gradient(ellipse at 50% 65%, rgba(239, 68, 68, 0.35) 0%, rgba(220, 38, 38, 0.18) 40%, rgba(239, 68, 68, 0) 75%);
+        transform: translate(-50%, -50%) scale(0.92);
+        opacity: 0.65;
+      }
+    }
+
+    /* Core intense aura at the base center */
+    @keyframes lightCloudCoreGlow {
+      0%, 18%, 100% {
+        background: radial-gradient(circle, rgba(239, 68, 68, 0.45) 0%, rgba(239, 68, 68, 0) 70%);
+        transform: translate(-50%, -50%) scale(0.85);
+        opacity: 0.5;
+      }
+      9%, 26%, 35%, 95% {
+        background: radial-gradient(circle, rgba(249, 115, 22, 0.5) 0%, rgba(249, 115, 22, 0) 70%);
+        transform: translate(-50%, -50%) scale(0.95);
+        opacity: 0.65;
+      }
+      13% {
+        background: radial-gradient(circle, rgba(52, 211, 153, 0.7) 0%, rgba(34, 197, 94, 0) 72%);
+        transform: translate(-50%, -50%) scale(1.05);
+        opacity: 0.85;
+      }
+      50% {
+        background: radial-gradient(circle, rgba(163, 230, 53, 0.6) 0%, rgba(132, 204, 22, 0) 70%);
+        transform: translate(-50%, -50%) scale(1.0);
+        opacity: 0.75;
+      }
+      62%, 82% {
+        background: radial-gradient(circle, rgba(52, 211, 153, 0.85) 0%, rgba(16, 185, 129, 0.3) 45%, rgba(34, 197, 94, 0) 75%);
+        transform: translate(-50%, -50%) scale(1.2);
+        opacity: 1;
+      }
+      70% {
+        background: radial-gradient(circle, rgba(110, 231, 183, 0.95) 0%, rgba(16, 185, 129, 0.4) 50%, rgba(34, 197, 94, 0) 78%);
+        transform: translate(-50%, -50%) scale(1.28);
+        opacity: 1;
+      }
+      88% {
+        background: radial-gradient(circle, rgba(74, 222, 128, 0.7) 0%, rgba(34, 197, 94, 0) 72%);
+        transform: translate(-50%, -50%) scale(1.08);
+        opacity: 0.8;
+      }
+    }
+
+    .tuner-light-cloud {
+      position: absolute;
+      left: 50%;
+      top: 68%;
+      width: 250px;
+      height: 125px;
+      border-radius: 50%;
+      filter: blur(42px);
+      pointer-events: none;
+      z-index: 1;
+      animation: lightCloudGlow 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      mix-blend-mode: screen;
+    }
+
+    .tuner-light-cloud-core {
+      position: absolute;
+      left: 50%;
+      top: 72%;
+      width: 140px;
+      height: 75px;
+      border-radius: 50%;
+      filter: blur(22px);
+      pointer-events: none;
+      z-index: 2;
+      animation: lightCloudCoreGlow 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      mix-blend-mode: screen;
+    }
+
+    .tuner-needle-arm {
+      transform-origin: 140px 140px;
+      animation: tunerSwing 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    .tuner-needle-line {
+      animation: tunerColorCycle 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    .tuner-needle-circle {
+      animation: tunerBallColorCycle 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    .tuner-center-notch {
+      animation: centerNotchGlow 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    .tuner-note-label {
+      animation: noteInTunePulse 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+      display: inline-block;
+      transition: transform 0.2s ease;
+    }
+
+    .tuner-hz-label {
+      animation: statusSubGlow 6.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tuner-needle-arm,
+      .tuner-needle-line,
+      .tuner-needle-circle,
+      .tuner-center-notch,
+      .tuner-note-label,
+      .tuner-hz-label,
+      .tuner-light-cloud,
+      .tuner-light-cloud-core {
+        animation: none !important;
+      }
+      .tuner-needle-line {
+        stroke: #22c55e;
+      }
+      .tuner-needle-circle {
+        fill: #22c55e;
+      }
+      .tuner-note-label {
+        color: #22c55e;
+      }
+      .tuner-light-cloud {
+        background: radial-gradient(ellipse at 50% 65%, rgba(34, 197, 94, 0.55) 0%, rgba(16, 185, 129, 0.25) 45%, rgba(34, 197, 94, 0) 80%);
+        transform: translate(-50%, -50%) scale(1.1);
+        opacity: 0.9;
+      }
+      .tuner-light-cloud-core {
+        background: radial-gradient(circle, rgba(52, 211, 153, 0.8) 0%, rgba(16, 185, 129, 0.25) 50%, rgba(34, 197, 94, 0) 75%);
+        transform: translate(-50%, -50%) scale(1.2);
+        opacity: 0.95;
+      }
+    }
+  </style>
+</head>
+<body class="bg-appDark text-white font-sans antialiased min-h-screen select-none pb-8 flex flex-col items-center">
+<!-- Mobile Container Mockup (Matching typical tall iOS/Android screen aspect ratio) -->
+<div class="w-full max-w-md flex flex-col bg-appDark min-h-screen px-3.5 pt-1.5 pb-3 justify-between">
+<!-- BEGIN: SystemTopBar -->
+<!-- END: SystemTopBar -->
+<!-- BEGIN: NavigationTabs -->
+<!-- END: NavigationTabs -->
+<!-- BEGIN: ChromaticTunerSection -->
+<section class="bg-cardDark border border-borderDark rounded-2xl p-4 mb-3 relative overflow-hidden" data-purpose="chromatic-tuner">
+<!-- Section Header -->
+<div class="flex items-center justify-between mb-2 relative z-10">
+<div class="flex items-center space-x-2">
+<!-- Sliders / Equalizer Mini Icon -->
+<svg class="w-4 h-4 text-white fill-none stroke-current stroke-2" viewbox="0 0 24 24">
+<line x1="4" x2="4" y1="21" y2="14"></line>
+<line x1="4" x2="4" y1="10" y2="3"></line>
+<line x1="12" x2="12" y1="21" y2="12"></line>
+<line x1="12" x2="12" y1="8" y2="3"></line>
+<line x1="20" x2="20" y1="21" y2="16"></line>
+<line x1="20" x2="20" y1="12" y2="3"></line>
+<line x1="1" x2="7" y1="14" y2="14"></line>
+<line x1="9" x2="15" y1="8" y2="8"></line>
+<line x1="17" x2="23" y1="16" y2="16"></line>
+</svg>
+<h2 class="text-xs font-bold tracking-wider uppercase text-white">Afinador Cromático</h2>
+</div>
+<span class="text-xs text-subText font-medium">A4 · 440 Hz</span>
+</div>
+<!-- Tuner Radial Arc Display with Volumetric Light Cloud -->
+<div class="relative w-full flex flex-col items-center justify-center pt-2 pb-1">
+<!-- Dynamic Volumetric Light Cloud / Aura Layers -->
+<div aria-hidden="true" class="tuner-light-cloud"></div>
+<div aria-hidden="true" class="tuner-light-cloud-core"></div>
+<!-- SVG Arc & Needle -->
+<div class="relative w-[280px] h-[125px] flex items-end justify-center z-10">
+<svg class="w-[280px] h-[140px] overflow-visible" viewbox="0 0 280 140">
+<defs>
+<radialgradient cx="50%" cy="100%" id="tunerGlow" r="90%">
+<stop offset="0%" stop-color="#ffffff" stop-opacity="0.12"></stop>
+<stop offset="100%" stop-color="#ffffff" stop-opacity="0"></stop>
+</radialgradient>
+</defs>
+<!-- Radial Background Glow -->
+<path d="M 20 140 A 120 120 0 0 1 260 140 Z" fill="url(#tunerGlow)"></path>
+<!-- Main Arc Track -->
+<path d="M 25 140 A 115 115 0 0 1 255 140" fill="none" stroke="#2c2c36" stroke-width="2.5"></path>
+<!-- Tick Marks -->
+<!-- -60 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="45" x2="52" y1="80" y2="87"></line>
+<!-- -40 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="75" x2="82" y1="46" y2="55"></line>
+<!-- -20 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="110" x2="114" y1="28" y2="38"></line>
+<!-- 0 deg (Center) Indicator Tick / Sweet Spot Notch -->
+<line class="tuner-center-notch" stroke="#ffffff" stroke-width="2.5" x1="140" x2="140" y1="15" y2="32"></line>
+<!-- +20 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="170" x2="166" y1="28" y2="38"></line>
+<!-- +40 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="205" x2="198" y1="46" y2="55"></line>
+<!-- +60 deg -->
+<line stroke="#4a4a58" stroke-width="1.5" x1="235" x2="228" y1="80" y2="87"></line>
+<!-- Animated Needle Pointer Group -->
+<g class="tuner-needle-arm">
+<!-- Dynamic Glowing Needle Line -->
+<line class="tuner-needle-line" stroke="#22c55e" stroke-linecap="round" stroke-width="2.5" x1="140" x2="140" y1="20" y2="68"></line>
+<!-- Glowing Tip Indicator Circle -->
+<circle class="tuner-needle-circle" cx="140" cy="18" fill="#22c55e" filter="drop-shadow(0 0 4px #22c55e)" r="3.5"></circle>
+</g>
+</svg>
+<!-- Pitch & Frequency Display with Dynamic Tune Indicator -->
+<div class="absolute bottom-1 flex flex-col items-center pointer-events-none z-20">
+<span class="tuner-note-label text-3xl font-extrabold tracking-tight text-white leading-none drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">E2</span>
+<span class="tuner-hz-label text-[11px] text-subText mt-1 font-medium tracking-wide drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">82 Hz</span>
+</div>
+</div>
+</div>
+<!-- String Selection Pills -->
+<div class="grid grid-cols-6 gap-1.5 mt-4 relative z-10" data-purpose="string-selector">
+<!-- Selected String E2 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-white bg-white/5 shadow-sm">
+<span class="text-xs font-bold text-white leading-tight">E2</span>
+<span class="text-[9px] text-[#b3b3bf] font-medium leading-none mt-0.5">82 Hz</span>
+</button>
+<!-- String A2 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-borderDark bg-[#1b1b22] hover:border-white/30">
+<span class="text-xs font-bold text-white leading-tight">A2</span>
+<span class="text-[9px] text-subText font-medium leading-none mt-0.5">110 Hz</span>
+</button>
+<!-- String D3 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-borderDark bg-[#1b1b22] hover:border-white/30">
+<span class="text-xs font-bold text-white leading-tight">D3</span>
+<span class="text-[9px] text-subText font-medium leading-none mt-0.5">147 Hz</span>
+</button>
+<!-- String G3 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-borderDark bg-[#1b1b22] hover:border-white/30">
+<span class="text-xs font-bold text-white leading-tight">G3</span>
+<span class="text-[9px] text-subText font-medium leading-none mt-0.5">196 Hz</span>
+</button>
+<!-- String B3 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-borderDark bg-[#1b1b22] hover:border-white/30">
+<span class="text-xs font-bold text-white leading-tight">B3</span>
+<span class="text-[9px] text-subText font-medium leading-none mt-0.5">247 Hz</span>
+</button>
+<!-- String E4 -->
+<button class="flex flex-col items-center justify-center py-2 px-1 rounded-xl border border-borderDark bg-[#1b1b22] hover:border-white/30">
+<span class="text-xs font-bold text-white leading-tight">E4</span>
+<span class="text-[9px] text-subText font-medium leading-none mt-0.5">330 Hz</span>
+</button>
+</div>
+<!-- Microphone Activation Button -->
+<button class="w-full mt-3 py-2.5 px-4 rounded-xl border border-borderDark bg-[#1c1c22] hover:bg-[#23232b] flex items-center justify-center space-x-2 text-xs font-semibold text-white shadow-sm transition relative z-10">
+<svg class="w-4 h-4 fill-none stroke-current stroke-2" viewbox="0 0 24 24">
+<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+<line x1="12" x2="12" y1="19" y2="23"></line>
+<line x1="8" x2="16" y1="23" y2="23"></line>
+</svg>
+<span>Ativar microfone</span>
+</button>
+</section>
+<!-- END: ChromaticTunerSection -->
+<!-- BEGIN: MasterEqualizerSection -->
+<!-- END: MasterEqualizerSection -->
+<!-- BEGIN: RealTimeEffectsSection -->
+<!-- END: RealTimeEffectsSection -->
+<!-- BEGIN: OpenLocalFileSection -->
+<!-- END: OpenLocalFileSection -->
+<!-- BEGIN: BottomNavAndroidBar -->
+<footer class="w-full flex items-center justify-around pt-6 pb-2 text-[#686873]" data-purpose="system-bottom-bar">
+<!-- Recents button (Three vertical bars) -->
+<button class="p-2 active:opacity-50">
+<svg class="w-4 h-4 fill-none stroke-current stroke-[2.5]" viewbox="0 0 24 24">
+<line x1="7" x2="7" y1="4" y2="20"></line>
+<line x1="12" x2="12" y1="4" y2="20"></line>
+<line x1="17" x2="17" y1="4" y2="20"></line>
+</svg>
+</button>
+<!-- Home button (Rounded rectangle) -->
+<button class="p-2 active:opacity-50">
+<div class="w-4 h-4 border-2 border-[#686873] rounded-[5px]"></div>
+</button>
+<!-- Back button (Chevron left) -->
+<button class="p-2 active:opacity-50">
+<svg class="w-4 h-4 fill-none stroke-current stroke-[2.5]" viewbox="0 0 24 24">
+<polyline points="15 18 9 12 15 6"></polyline>
+</svg>
+</button>
+</footer>
+<!-- END: BottomNavAndroidBar -->
+</div>
+</body></html>

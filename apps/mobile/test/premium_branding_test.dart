@@ -25,6 +25,25 @@ void main() {
     expect(find.text('YouTube'), findsOneWidget);
   });
 
+  testWidgets('abertura não fica presa se o navegador não responder', (
+    tester,
+  ) async {
+    final ready = ValueNotifier(false);
+    addTearDown(ready.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TransponoLaunchGate(
+          revealWhen: ready,
+          child: const Scaffold(body: Text('Player disponível')),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(TransponoLaunchArtwork), findsNothing);
+    expect(find.text('Player disponível'), findsOneWidget);
+  });
+
   testWidgets('opening artwork gives way to the player', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(

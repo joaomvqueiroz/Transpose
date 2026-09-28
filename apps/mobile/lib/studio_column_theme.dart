@@ -28,7 +28,7 @@ ThemeData studioColumnTheme(ThemeData base) {
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderRadius: BorderRadius.all(Radius.circular(24)),
         side: BorderSide(color: Color(0xFF353537)),
       ),
     ),
@@ -39,7 +39,7 @@ ThemeData studioColumnTheme(ThemeData base) {
         backgroundColor: control,
         disabledBackgroundColor: const Color(0xFF202022),
         side: const BorderSide(color: controlBorder),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       ),
     ),
@@ -48,7 +48,7 @@ ThemeData studioColumnTheme(ThemeData base) {
         foregroundColor: Colors.white,
         disabledForegroundColor: muted,
         backgroundColor: const Color(0xFF232326),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -57,7 +57,7 @@ ThemeData studioColumnTheme(ThemeData base) {
         backgroundColor: Colors.white,
         disabledBackgroundColor: control,
         disabledForegroundColor: muted,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
     ),
     sliderTheme: base.sliderTheme.copyWith(

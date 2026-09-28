@@ -5,6 +5,19 @@ import 'package:transpose_mobile/youtube_browser.dart';
 import 'fake_youtube_session.dart';
 
 void main() {
+  test('estimated music key accepts only a valid pitch class', () {
+    final key = YouTubeMediaState.fromJson({
+      'keyRoot': 7,
+      'keyMode': 'major',
+      'keyStatus': 'ready',
+    });
+    expect(key.keyRoot, 7);
+    expect(key.keyMode, 'major');
+    expect(key.keyStatus, 'ready');
+    expect(YouTubeMediaState.fromJson({'keyRoot': 12}).keyRoot, isNull);
+    expect(YouTubeMediaState.fromJson({'keyRoot': -1}).keyRoot, isNull);
+  });
+
   test('loop observations parse only complete safe counter contracts', () {
     final YouTubeMediaState media = YouTubeMediaState.fromJson({
       'hasVideo': true,

@@ -4,6 +4,23 @@ const Color studioBg = Color(0xFF080809);
 const Color studioCard = Color(0xFF18181B);
 const Color studioCardAlt = Color(0xFF222226);
 const Color studioCyan = Color(0xFFFFFFFF);
+
+/// Rounded graphite finish shared by the four Transpono columns.
+/// The YouTube WebView keeps its own appearance.
+BoxDecoration studioPanelDecoration({double radius = 24}) => BoxDecoration(
+  gradient: const LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF303034), Color(0xFF1C1C1F), Color(0xFF111113)],
+    stops: [0, .48, 1],
+  ),
+  borderRadius: BorderRadius.circular(radius),
+  border: Border.all(color: const Color(0xFF55555B), width: .8),
+  boxShadow: const [
+    BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 7)),
+    BoxShadow(color: Color(0x12FFFFFF), blurRadius: 8, offset: Offset(-2, -2)),
+  ],
+);
 const Color studioMuted = Color(0xFFA1A1AA);
 
 /// Resolution-independent recreation of the supplied 390 dp panel designs.

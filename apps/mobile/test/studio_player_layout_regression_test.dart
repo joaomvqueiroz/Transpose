@@ -40,7 +40,7 @@ void main() {
       tester
           .widget<IconButton>(find.byKey(const Key('visualMainAdjustments')))
           .tooltip,
-      'Fechar ajustes',
+      'Expandir ou fechar ajustes',
     );
     expect(tester.takeException(), isNull);
   });

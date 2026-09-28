@@ -15,6 +15,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final GlobalKey<PlayerChordSheetState> _unifiedChordKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
   final ScrollController _tabsScroll = ScrollController();
+  final GlobalKey _adjustmentButtonAnchorKey = GlobalKey();
+  OverlayEntry? _adjustmentChoicesOverlay;
+  Size _adjustmentButtonSize = const Size(40, 40);
   ScrollController? _chordTextScroll;
   Timer? _chordAutoTimer;
   bool _chordAutoScroll = false;
@@ -23,6 +26,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool _browsing = false;
   bool _chordActive = false;
   bool _mainControlsExpanded = false;
+  bool _adjustmentsCoverVideo = false;
+  bool _adjustmentChoicesVisible = false;
+  bool _landscapeColumnsVisible = false;
+  bool _immersiveLandscape = false;
+  Orientation? _lastOrientation;
+  double _adjustmentsDrag = 0;
+  double? _seekPreviewMs;
   String? _practiceTool;
   bool _chordSearching = false;
   String _chordSource = '';
@@ -34,19 +44,62 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool _browserOpenedFromPlayer = false;
   bool _initialBrowserReadyReported = false;
   String _browserOriginVideoId = '';
-  double _bassDb = 0, _midDb = 0, _trebleDb = 0, _delayMix = 0;
-  double _appliedBassDb = 0, _appliedMidDb = 0;
-  double _appliedTrebleDb = 0, _appliedDelayMix = 0;
+  double _bassDb = 0, _midDb = 0, _trebleDb = 0, _gainDb = 0;
+  double _chorusMix = 0, _feedbackMix = 0, _delayMix = 0, _reverbMix = 0;
+  double _appliedBassDb = 0, _appliedMidDb = 0, _appliedTrebleDb = 0;
+  double _appliedGainDb = 0, _appliedChorusMix = 0, _appliedFeedbackMix = 0;
+  double _appliedDelayMix = 0, _appliedReverbMix = 0;
+  final Map<String, int> _audioCommandVersions = <String, int>{};
   YouTubeBrowserSession? _browserOwner;
   Widget? _browser;
+  late final HomeWidgetBridge _homeWidgets;
+  String? _pendingWidgetAction;
+  List<ChordCue> _widgetCues = const [];
+  String _widgetChordTitle = '';
+  String _widgetChordPreview = '';
+  Map<String, Object?>? _lastForegroundWidgetState;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _homeWidgets = HomeWidgetBridge(onAction: _onWidgetAction);
+    unawaited(_homeWidgets.initialize());
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
     unawaited(_initializeStartPage());
+    _lastForegroundWidgetState = _widgetSnapshot();
+    _homeWidgets.schedule(_lastForegroundWidgetState!);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final orientation = MediaQuery.orientationOf(context);
+    if (_lastOrientation == orientation) return;
+    _lastOrientation = orientation;
+    _landscapeColumnsVisible = false;
+    _adjustmentsCoverVideo = false;
+    _hideAdjustmentChoices();
+    _syncSystemUi();
+  }
+
+  void _syncSystemUi() {
+    if (_lastOrientation == null) return;
+    final orientation = MediaQuery.maybeOf(context)?.orientation;
+    if (orientation == null) return;
+    final immersive =
+        orientation == Orientation.landscape &&
+        MediaQuery.sizeOf(context).aspectRatio >= 1.5 &&
+        _player.loaded &&
+        !_browsing;
+    if (immersive == _immersiveLandscape) return;
+    _immersiveLandscape = immersive;
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(
+        immersive ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      ),
+    );
   }
 
   Future<void> _initializeStartPage() async {
@@ -88,16 +141,35 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _reportInitialBrowserReady();
     }
     if (_chordSource != _player.sourceKey) {
+      _hideAdjustmentChoices();
       _chordSource = _player.sourceKey;
+      _widgetCues = const [];
+      _widgetChordTitle = '';
+      _widgetChordPreview = '';
+      unawaited(_loadWidgetCues(_chordSource));
       _chordRevision++;
       _chordActive = false;
       _chordSearching = false;
       _stopChordAutoScroll();
       _mainControlsExpanded = false;
-      _bassDb = _midDb = _trebleDb = _delayMix = 0;
-      _appliedBassDb = _appliedMidDb = _appliedTrebleDb = _appliedDelayMix = 0;
+      _adjustmentsCoverVideo = false;
+      _landscapeColumnsVisible = false;
+      _seekPreviewMs = null;
+      _bassDb = _midDb = _trebleDb = _gainDb = 0;
+      _chorusMix = _feedbackMix = _delayMix = _reverbMix = 0;
+      _appliedBassDb = _appliedMidDb = _appliedTrebleDb = _appliedGainDb = 0;
+      _appliedChorusMix = _appliedFeedbackMix = _appliedDelayMix =
+          _appliedReverbMix = 0;
+      _audioCommandVersions.clear();
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _lastForegroundWidgetState = _widgetSnapshot();
+        _homeWidgets.schedule(_lastForegroundWidgetState!);
+      }
+      _syncSystemUi();
+      setState(() {});
+    }
     if (!_browsing ||
         !_player.isYouTube ||
         _autoSelectingVideo ||
@@ -131,19 +203,152 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _changed();
   }
 
+  Future<void> _loadWidgetCues(String source) async {
+    if (source.isEmpty) return;
+    try {
+      final sheet = await _chords.read(source);
+      if (!mounted || source != _player.sourceKey) return;
+      _widgetCues = parseChordCues(sheet.timeline);
+      _widgetChordTitle = sheet.sourceTitle;
+      final preview = sheet.notes
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .take(4)
+          .join('  |  ');
+      _widgetChordPreview = preview.length > 240
+          ? preview.substring(0, 240)
+          : preview;
+      _homeWidgets.schedule(_widgetSnapshot());
+    } on FormatException {
+      // Keep an unreadable sheet untouched; the widget simply omits it.
+    }
+  }
+
+  String _widgetTime(Duration value) {
+    final seconds = value.inSeconds.clamp(0, 359999);
+    final minutes = seconds ~/ 60;
+    return '$minutes:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+
+  Map<String, Object?> _widgetSnapshot() {
+    final active = _player.loaded;
+    final duration = _player.duration.inMilliseconds;
+    final position = _player.position.inMilliseconds.clamp(0, duration);
+    final cueIndex = currentChordIndex(_widgetCues, _player.position);
+    final chord = cueIndex >= 0
+        ? _widgetCues
+              .skip(cueIndex)
+              .take(4)
+              .map((cue) => cue.chord)
+              .join('  ·  ')
+        : _widgetChordPreview.isNotEmpty
+        ? _widgetChordPreview
+        : _widgetChordTitle.isNotEmpty
+        ? 'Cifra: $_widgetChordTitle'
+        : 'Abra a cifra no app';
+    final markerA = _player.markerA;
+    final markerB = _player.markerB;
+    final loop = markerA == null
+        ? 'A–B: não marcado'
+        : markerB == null
+        ? 'A ${_widgetTime(markerA)} · B por marcar'
+        : 'A ${_widgetTime(markerA)} → B ${_widgetTime(markerB)}'
+              '${_player.loopEnabled ? ' · repetir' : ''}';
+    return {
+      'active': active,
+      'playing': active && _player.playing,
+      'title': active && _player.title.trim().isNotEmpty
+          ? _player.title.trim()
+          : 'Transpono',
+      'subtitle': active ? _player.sourceLabel : '',
+      'position': _widgetTime(_player.position),
+      'duration': _widgetTime(_player.duration),
+      'progress': duration > 0 ? (position * 100 / duration).round() : 0,
+      'pitch': _player.pitch.round(),
+      'speed': '${_player.speed.toStringAsFixed(2)}x',
+      'loop': loop,
+      'chord': chord,
+    };
+  }
+
+  void _onWidgetAction(String action) {
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      _pendingWidgetAction = action;
+      return;
+    }
+    unawaited(_runWidgetAction(action));
+  }
+
+  Future<void> _runWidgetAction(String action) async {
+    if (!mounted || action == 'open') return;
+    if (action == 'tuner') {
+      _select(StudioTab.tuner);
+      return;
+    }
+    if (action == 'chord') {
+      _select(StudioTab.chords);
+      return;
+    }
+    if (action == 'loop') {
+      _select(StudioTab.practice);
+      if (_player.canLoop &&
+          _player.markerA != null &&
+          _player.markerB != null) {
+        await _player.toggleLoop();
+      }
+      return;
+    }
+    if (!_player.loaded) return;
+    switch (action) {
+      case 'play':
+        await _player.playPause();
+      case 'back':
+        if (_player.canSeek) {
+          await _player.seek(_player.position - const Duration(seconds: 10));
+        }
+      case 'forward':
+        if (_player.canSeek) {
+          await _player.seek(_player.position + const Duration(seconds: 10));
+        }
+      case 'pitchMinus':
+        if (_player.canPitch) await _player.changePitch(_player.pitch - 1);
+      case 'pitchPlus':
+        if (_player.canPitch) await _player.changePitch(_player.pitch + 1);
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       unawaited(_practice.pause());
+      _homeWidgets.schedule({
+        ...?_lastForegroundWidgetState,
+        'playing': false,
+        'subtitle': 'Toque para abrir no Transpono',
+      });
+    } else {
+      _lastForegroundWidgetState = _widgetSnapshot();
+      _homeWidgets.schedule(_lastForegroundWidgetState!);
+      if (_pendingWidgetAction == null) return;
+      final action = _pendingWidgetAction!;
+      _pendingWidgetAction = null;
+      unawaited(_runWidgetAction(action));
     }
   }
 
   @override
   void dispose() {
+    _adjustmentChoicesOverlay?.remove();
+    _adjustmentChoicesOverlay?.dispose();
+    if (_immersiveLandscape) {
+      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+    }
     WidgetsBinding.instance.removeObserver(this);
     _player.removeListener(_changed);
     _practice.removeListener(_practiceChanged);
     _practice.dispose();
+    _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();
     _tabsScroll.dispose();
@@ -211,6 +416,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   void _select(StudioTab tab) {
+    _hideAdjustmentChoices();
     if (tab != StudioTab.chords && tab != StudioTab.player) {
       _stopChordAutoScroll();
     }
@@ -224,6 +430,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           : tab;
       _browsing = false;
       _mainControlsExpanded = true;
+      _adjustmentChoicesVisible = false;
     });
     if (tab == StudioTab.tuner) unawaited(_player.pause());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -245,10 +452,135 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   void _toggleMainAdjustments() {
+    _hideAdjustmentChoices();
     if (_mainControlsExpanded) _stopChordAutoScroll();
     setState(() {
       _mainControlsExpanded = !_mainControlsExpanded;
+      _adjustmentsCoverVideo = false;
+      _adjustmentChoicesVisible = false;
+      _seekPreviewMs = null;
     });
+  }
+
+  void _coverVideoWithAdjustments() {
+    setState(() {
+      _mainControlsExpanded = true;
+      _adjustmentsCoverVideo = true;
+    });
+  }
+
+  void _lowerAdjustments() {
+    if (_adjustmentsCoverVideo) {
+      setState(() {
+        _adjustmentsCoverVideo = false;
+        _seekPreviewMs = null;
+      });
+    } else if (_isLandscapePlayer && _landscapeColumnsVisible) {
+      setState(() => _landscapeColumnsVisible = false);
+    } else if (_mainControlsExpanded) {
+      _toggleMainAdjustments();
+    }
+  }
+
+  bool get _isLandscapePlayer =>
+      MediaQuery.orientationOf(context) == Orientation.landscape &&
+      MediaQuery.sizeOf(context).aspectRatio >= 1.5 &&
+      _player.loaded &&
+      !_browsing;
+
+  void _openLandscapeAdjustments() {
+    setState(() {
+      _mainControlsExpanded = true;
+      _landscapeColumnsVisible = true;
+      _adjustmentsCoverVideo = false;
+    });
+  }
+
+  void _chooseAdjustmentDirection(bool expand) {
+    _hideAdjustmentChoices();
+    setState(() {});
+    if (expand) {
+      _coverVideoWithAdjustments();
+    } else {
+      _lowerAdjustments();
+    }
+  }
+
+  void _hideAdjustmentChoices() {
+    final entry = _adjustmentChoicesOverlay;
+    _adjustmentChoicesOverlay = null;
+    entry?.remove();
+    entry?.dispose();
+    _adjustmentChoicesVisible = false;
+  }
+
+  void _showAdjustmentDirections() {
+    final button =
+        _adjustmentButtonAnchorKey.currentContext?.findRenderObject()
+            as RenderBox?;
+    final overlay = Overlay.of(context);
+    final overlayBox = overlay.context.findRenderObject() as RenderBox?;
+    if (button == null || overlayBox == null) return;
+    final center = button.localToGlobal(
+      button.size.center(Offset.zero),
+      ancestor: overlayBox,
+    );
+    _adjustmentButtonSize = button.size;
+    final left = (center.dx - 18).clamp(0.0, overlayBox.size.width - 36);
+    final top = (center.dy - 45).clamp(0.0, overlayBox.size.height - 90);
+
+    _adjustmentChoicesOverlay = OverlayEntry(
+      builder: (_) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              key: const Key('adjustmentDirectionDismiss'),
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                _hideAdjustmentChoices();
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+          Positioned(
+            left: left,
+            top: top,
+            child: Semantics(
+              label: 'Cobrir vídeo com ajustes',
+              button: true,
+              child: GestureDetector(
+                key: const Key('adjustmentsExpandVideo'),
+                onTap: () => _chooseAdjustmentDirection(true),
+                child: const CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Color(0xFF303034),
+                  child: Icon(Icons.keyboard_arrow_up, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: left,
+            top: top + 54,
+            child: Semantics(
+              label: 'Baixar ou fechar ajustes',
+              button: true,
+              child: GestureDetector(
+                key: const Key('adjustmentsClose'),
+                onTap: () => _chooseAdjustmentDirection(false),
+                child: const CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Color(0xFF303034),
+                  child: Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    overlay.insert(_adjustmentChoicesOverlay!);
+    setState(() => _adjustmentChoicesVisible = true);
   }
 
   Future<void> _openYouTubeSearch() async {
@@ -261,6 +593,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _autoSelectingVideo = false;
       _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
     });
+    _syncSystemUi();
     await _player.openYouTube();
     _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
     _browserOpening = false;
@@ -271,6 +604,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (!_player.isYouTube || !_player.loaded) return;
     final session = _player.youtube;
     setState(() => _browsing = false);
+    _syncSystemUi();
     _browserReadyForSelection = false;
     _autoSelectingVideo = false;
     // Focus in the final viewport, not while a smooth scroll is still running
@@ -369,6 +703,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         _chordSearching = false;
         _chordRevision++;
       });
+      unawaited(_loadWidgetCues(source));
     } on Object {
       if (mounted) {
         _notice(
@@ -580,54 +915,77 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
-  Future<void> _setEqualizer({
-    double? bass,
-    double? mid,
-    double? treble,
-    double? delay,
-  }) async {
-    final nextBass = bass ?? _bassDb;
-    final nextMid = mid ?? _midDb;
-    final nextTreble = treble ?? _trebleDb;
-    final nextDelay = delay ?? _delayMix;
+  double _appliedAudioValue(String action) => switch (action) {
+    'bass' => _appliedBassDb,
+    'mid' => _appliedMidDb,
+    'treble' => _appliedTrebleDb,
+    'gain' => _appliedGainDb,
+    'chorus' => _appliedChorusMix,
+    'feedback' => _appliedFeedbackMix,
+    'delay' => _appliedDelayMix,
+    'reverb' => _appliedReverbMix,
+    _ => throw ArgumentError.value(action, 'action'),
+  };
+
+  void _assignAudioValue(String action, double value, {required bool applied}) {
+    switch (action) {
+      case 'bass':
+        if (applied) _appliedBassDb = value;
+        _bassDb = value;
+      case 'mid':
+        if (applied) _appliedMidDb = value;
+        _midDb = value;
+      case 'treble':
+        if (applied) _appliedTrebleDb = value;
+        _trebleDb = value;
+      case 'gain':
+        if (applied) _appliedGainDb = value;
+        _gainDb = value;
+      case 'chorus':
+        if (applied) _appliedChorusMix = value;
+        _chorusMix = value;
+      case 'feedback':
+        if (applied) _appliedFeedbackMix = value;
+        _feedbackMix = value;
+      case 'delay':
+        if (applied) _appliedDelayMix = value;
+        _delayMix = value;
+      case 'reverb':
+        if (applied) _appliedReverbMix = value;
+        _reverbMix = value;
+      default:
+        throw ArgumentError.value(action, 'action');
+    }
+  }
+
+  Future<void> _setAudioControl(String action, double value) async {
     if (!_player.isYouTube || !_player.loaded) return;
+    final version = (_audioCommandVersions[action] ?? 0) + 1;
+    _audioCommandVersions[action] = version;
     final source = _player.sourceKey;
     final session = _player.youtube!;
     try {
-      final action = bass != null
-          ? 'bass'
-          : mid != null
-          ? 'mid'
-          : treble != null
-          ? 'treble'
-          : 'delay';
-      await session.command(action, bass ?? mid ?? treble ?? delay);
+      await session.command(action, value);
       if (!mounted ||
           source != _player.sourceKey ||
-          session != _player.youtube) {
+          session != _player.youtube ||
+          _audioCommandVersions[action] != version) {
         return;
       }
-      setState(() {
-        _bassDb = nextBass;
-        _midDb = nextMid;
-        _trebleDb = nextTreble;
-        _delayMix = nextDelay;
-        _appliedBassDb = nextBass;
-        _appliedMidDb = nextMid;
-        _appliedTrebleDb = nextTreble;
-        _appliedDelayMix = nextDelay;
-      });
+      setState(() => _assignAudioValue(action, value, applied: true));
     } on Object {
       if (mounted &&
           source == _player.sourceKey &&
-          session == _player.youtube) {
-        setState(() {
-          _bassDb = _appliedBassDb;
-          _midDb = _appliedMidDb;
-          _trebleDb = _appliedTrebleDb;
-          _delayMix = _appliedDelayMix;
-        });
-        _notice('Não foi possível aplicar o equalizador neste vídeo.');
+          session == _player.youtube &&
+          _audioCommandVersions[action] == version) {
+        setState(
+          () => _assignAudioValue(
+            action,
+            _appliedAudioValue(action),
+            applied: false,
+          ),
+        );
+        _notice('Não foi possível aplicar este ajuste de áudio no vídeo.');
       }
     }
   }
@@ -651,171 +1009,187 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         child: MicrophoneTunerTool(),
       ),
       Container(
-        decoration: BoxDecoration(
-          color: studioCard,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: studioMuted.withValues(alpha: .2)),
-        ),
-        padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+        decoration: studioPanelDecoration(),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '▥  EQUALIZADOR MASTER · 3 BANDAS',
+              '▥  EQUALIZADOR',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
                 letterSpacing: .7,
               ),
             ),
-            const SizedBox(height: 10),
-            _equalizerSlider(
+            const SizedBox(height: 6),
+            _audioControlRow(
+              'Ganho',
+              'audioGainSlider',
+              _gainDb,
+              -12,
+              6,
+              (value) => _gainDb = value,
+              (value) => _setAudioControl('gain', value),
+            ),
+            _audioControlRow(
               'Graves',
               'audioBassSlider',
               _bassDb,
-              (value) => _setEqualizer(bass: value),
+              -12,
+              12,
+              (value) => _bassDb = value,
+              (value) => _setAudioControl('bass', value),
             ),
-            _equalizerSlider(
+            _audioControlRow(
               'Médios',
               'audioMidSlider',
               _midDb,
-              (value) => _setEqualizer(mid: value),
+              -12,
+              12,
+              (value) => _midDb = value,
+              (value) => _setAudioControl('mid', value),
             ),
-            _equalizerSlider(
+            _audioControlRow(
               'Agudos',
               'audioTrebleSlider',
               _trebleDb,
-              (value) => _setEqualizer(treble: value),
+              -12,
+              12,
+              (value) => _trebleDb = value,
+              (value) => _setAudioControl('treble', value),
             ),
             if (!_player.isYouTube || !_player.loaded)
-              const Text(
-                'Escolha um vídeo do YouTube para ativar o equalizador.',
-                style: TextStyle(color: studioMuted, fontSize: 12),
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'Ajustes disponíveis num vídeo compatível do YouTube.',
+                  style: TextStyle(color: studioMuted, fontSize: 12),
+                ),
               ),
-            TextButton.icon(
-              key: const Key('audioResetEqualizer'),
-              onPressed: _player.isYouTube && _player.loaded
-                  ? () async {
-                      await _setEqualizer(bass: 0);
-                      await _setEqualizer(mid: 0);
-                      await _setEqualizer(treble: 0);
-                      await _setEqualizer(delay: 0);
-                    }
-                  : null,
-              icon: const Icon(Icons.restart_alt),
-              label: const Text('Repor equalizador'),
-            ),
           ],
         ),
       ),
       const SizedBox(height: 12),
-      const Padding(
-        padding: EdgeInsets.fromLTRB(2, 4, 0, 7),
-        child: Text(
-          'EFEITOS EM TEMPO REAL',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
-            color: studioMuted,
-          ),
-        ),
-      ),
       Container(
-        decoration: BoxDecoration(
-          color: studioCard,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: studioMuted.withValues(alpha: .2)),
-        ),
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+        decoration: studioPanelDecoration(),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Efeito Delay de Ensaio',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+              'EFEITOS EM TEMPO REAL',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: .7,
+              ),
             ),
-            const Text(
-              'Eco curto para prática de áudio.',
-              style: TextStyle(fontSize: 10, color: studioMuted),
+            const SizedBox(height: 6),
+            _audioControlRow(
+              'Chorus',
+              'audioChorusSlider',
+              _chorusMix,
+              0,
+              .5,
+              (value) => _chorusMix = value,
+              (value) => _setAudioControl('chorus', value),
             ),
-            Row(
-              children: [
-                const Text(
-                  '0%',
-                  style: TextStyle(fontSize: 9, color: studioMuted),
-                ),
-                Expanded(
-                  child: Slider(
-                    key: const Key('audioDelaySlider'),
-                    min: 0,
-                    max: .35,
-                    divisions: 35,
-                    value: _delayMix,
-                    label: '${(_delayMix * 100).round()}%',
-                    onChanged: _player.isYouTube && _player.loaded
-                        ? (next) => setState(() => _delayMix = next)
-                        : null,
-                    onChangeEnd: _player.isYouTube && _player.loaded
-                        ? (next) => _setEqualizer(delay: next)
-                        : null,
-                  ),
-                ),
-                Text(
-                  '${(_delayMix * 100).round()}%',
-                  style: const TextStyle(fontSize: 10),
-                ),
-              ],
+            _audioControlRow(
+              'Feedback',
+              'audioFeedbackSlider',
+              _feedbackMix,
+              0,
+              .55,
+              (value) => _feedbackMix = value,
+              (value) => _setAudioControl('feedback', value),
+            ),
+            _audioControlRow(
+              'Delay',
+              'audioDelaySlider',
+              _delayMix,
+              0,
+              .35,
+              (value) => _delayMix = value,
+              (value) => _setAudioControl('delay', value),
+            ),
+            _audioControlRow(
+              'Reverb',
+              'audioReverbSlider',
+              _reverbMix,
+              0,
+              .4,
+              (value) => _reverbMix = value,
+              (value) => _setAudioControl('reverb', value),
             ),
           ],
         ),
       ),
       const SizedBox(height: 12),
       Container(
-        decoration: BoxDecoration(
-          color: studioCard,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: studioMuted.withValues(alpha: .2)),
-        ),
+        decoration: studioPanelDecoration(),
         padding: const EdgeInsets.all(12),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: const Row(
           children: [
-            Text(
-              'Isolador de Voz / Playback',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Isolador de Voz / Playback',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Indisponível no YouTube. Não é aplicado ao vídeo.',
+                    style: TextStyle(fontSize: 10, color: studioMuted),
+                  ),
+                ],
+              ),
             ),
-            SizedBox(height: 4),
-            Text(
-              'Indisponível no YouTube. Não é aplicado ao vídeo.',
-              style: TextStyle(fontSize: 10, color: studioMuted),
-            ),
+            Switch.adaptive(value: false, onChanged: null),
           ],
         ),
       ),
       const SizedBox(height: 12),
-      ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: const Icon(Icons.restore),
-        title: const Text('Repor tom, velocidade e loop'),
-        subtitle: const Text('0 st · 1,00× · sem A/B'),
-        enabled: _player.loaded,
-        onTap: _player.loaded
-            ? () {
-                onClose?.call();
-                unawaited(_player.resetProcessing());
-              }
-            : null,
+      Card(
+        color: studioCard,
+        child: ListTile(
+          leading: const Icon(Icons.restore),
+          title: const Text(
+            'Repor tom, velocidade e loop',
+            style: TextStyle(fontSize: 13),
+          ),
+          subtitle: const Text(
+            '0 st · 1,00× · sem A/B',
+            style: TextStyle(fontSize: 10),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          enabled: _player.loaded,
+          onTap: _player.loaded
+              ? () {
+                  onClose?.call();
+                  unawaited(_player.resetProcessing());
+                }
+              : null,
+        ),
       ),
       const Text(
         'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
         style: TextStyle(color: studioMuted, fontSize: 12),
       ),
-      TextButton.icon(
-        key: const Key('audioOpenLocalFile'),
-        onPressed: _pickFile,
-        icon: const Icon(Icons.folder_open),
-        label: const Text('Abrir ficheiro local'),
+      Card(
+        color: studioCard,
+        child: ListTile(
+          key: const Key('audioOpenLocalFile'),
+          onTap: _pickFile,
+          leading: const Icon(Icons.folder_open),
+          title: const Text(
+            'Abrir ficheiro local',
+            style: TextStyle(fontSize: 13),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+        ),
       ),
       if (onClose != null) ...[
         const SizedBox(height: 12),
@@ -830,58 +1204,66 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     ],
   );
 
-  Widget _equalizerSlider(
+  Widget _audioControlRow(
     String label,
     String key,
     double value,
+    double min,
+    double max,
+    ValueChanged<double> preview,
     ValueChanged<double> apply,
-  ) => Padding(
-    padding: const EdgeInsets.only(top: 12),
-    child: Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                switch (label) {
-                  'Graves' => 'Graves (200 Hz)',
-                  'Médios' => 'Médios (1 kHz)',
-                  _ => 'Agudos (3 kHz)',
-                },
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
+  ) {
+    final enabled = _player.isYouTube && _player.loaded;
+    final isDecibels = min < 0;
+    return SizedBox(
+      height: 34,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 64,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+            ),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                key: Key(key),
+                min: min,
+                max: max,
+                divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
+                value: value,
+                label: isDecibels
+                    ? '${value.toStringAsFixed(0)} dB'
+                    : '${(value * 100).round()}%',
+                onChanged: enabled
+                    ? (next) => setState(() => preview(next))
+                    : null,
+                onChangeEnd: enabled ? apply : null,
               ),
             ),
-            Text(
-              '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)} dB',
-              style: const TextStyle(fontSize: 10, color: Colors.white),
-            ),
-          ],
-        ),
-        Slider(
-          key: Key(key),
-          min: -12,
-          max: 12,
-          divisions: 24,
-          value: value,
-          onChanged: _player.isYouTube && _player.loaded
-              ? (next) => setState(() {
-                  if (key == 'audioBassSlider') {
-                    _bassDb = next;
-                  } else if (key == 'audioMidSlider') {
-                    _midDb = next;
-                  } else {
-                    _trebleDb = next;
-                  }
-                })
-              : null,
-          onChangeEnd: _player.isYouTube && _player.loaded ? apply : null,
-        ),
-      ],
-    ),
-  );
+          ),
+          IconButton(
+            key: Key('${key}Reset'),
+            tooltip: 'Repor $label a zero',
+            onPressed: enabled && value != 0 ? () => apply(0) : null,
+            icon: const Icon(Icons.restart_alt, size: 15),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 27, height: 27),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _browserPage(Widget media) {
     final session = _player.youtube;
@@ -928,9 +1310,31 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             child: Text(_player.message!),
           ),
         Expanded(
-          child: SizedBox(
-            key: const Key('youtubeBrowserViewport'),
-            child: media,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: SizedBox(
+                  key: const Key('youtubeBrowserViewport'),
+                  child: media,
+                ),
+              ),
+              if (!_player.loaded)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 8,
+                  child: _MainAdjustmentsBar(
+                    expanded: false,
+                    onPressed: () {
+                      setState(() {
+                        _browsing = false;
+                        _mainControlsExpanded = true;
+                        _adjustmentsCoverVideo = false;
+                      });
+                    },
+                  ),
+                ),
+            ],
           ),
         ),
       ],
@@ -948,7 +1352,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Widget _mainPanel(Widget media) {
     return LayoutBuilder(
       builder: (_, box) {
-        final open = _mainControlsExpanded;
+        final landscapePlayer = _isLandscapePlayer;
+        final open = landscapePlayer
+            ? _landscapeColumnsVisible
+            : _mainControlsExpanded;
         final localVideo = _player.local.videoController;
         final localVideoHeight =
             localVideo != null &&
@@ -968,7 +1375,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         final videoBottom = _player.isYouTube
             ? (box.maxWidth * 9 / 16 + 48).clamp(0.0, panelTop)
             : panelTop;
-        final chordTopGap = panelTop - videoBottom;
+        final chordTopGap = landscapePlayer ? 0.0 : panelTop - videoBottom;
+        final overlayTop = _adjustmentsCoverVideo
+            ? 0.0
+            : landscapePlayer
+            ? box.maxHeight * .58
+            : chordPanel
+            ? videoBottom
+            : box.maxHeight < 450
+            ? (panelTop - 48).clamp(0.0, panelTop)
+            : panelTop;
         return Stack(
           children: [
             SizedBox(
@@ -991,11 +1407,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
             if (open)
               Positioned(
-                top: chordPanel
-                    ? videoBottom
-                    : box.maxHeight < 450
-                    ? (panelTop - 48).clamp(0.0, panelTop)
-                    : panelTop,
+                top: overlayTop,
                 left: 0,
                 right: 0,
                 bottom: 0,
@@ -1004,16 +1416,31 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: chordPanel
+                        child: _adjustmentsCoverVideo
+                            ? Material(
+                                color: studioBg,
+                                child: Column(
+                                  children: [
+                                    _coveredVideoTransport(box.maxHeight),
+                                    Expanded(
+                                      child: _sectionContent(
+                                        media,
+                                        viewportHeight: box.maxHeight,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : chordPanel
                             ? ClipRRect(
                                 key: const Key('unifiedChordOverlay'),
                                 borderRadius: const BorderRadius.vertical(
-                                  top: Radius.circular(18),
+                                  top: Radius.circular(26),
                                 ),
                                 child: _sectionContent(
                                   media,
                                   topGap: chordTopGap,
-                                  viewportHeight: box.maxHeight - videoBottom,
+                                  viewportHeight: box.maxHeight - overlayTop,
                                 ),
                               )
                             : ColoredBox(
@@ -1038,15 +1465,127 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     (StudioTab.audioSettings, 'Áudio'),
   ];
 
+  Widget _coveredVideoTransport(double availableHeight) {
+    final durationMs = _player.duration.inMilliseconds;
+    final canSeek = _player.canSeek && durationMs > 0;
+    final positionMs =
+        (_seekPreviewMs ?? _player.position.inMilliseconds.toDouble()).clamp(
+          0.0,
+          durationMs.toDouble(),
+        );
+    final height = (availableHeight / 8).clamp(0.0, 76.0);
+    final topInset = height >= 64 ? 10.0 : 5.0;
+    String stamp(double ms) {
+      final seconds = (ms / 1000).floor();
+      final minutes = seconds ~/ 60;
+      return '$minutes:${(seconds % 60).toString().padLeft(2, '0')}';
+    }
+
+    void skip(int seconds) {
+      final target = (_player.position.inMilliseconds + seconds * 1000).clamp(
+        0,
+        durationMs,
+      );
+      unawaited(_player.seek(Duration(milliseconds: target)));
+    }
+
+    return SizedBox(
+      key: const Key('coveredVideoTransport'),
+      height: height,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: studioPanelDecoration(radius: 28),
+        padding: EdgeInsets.fromLTRB(12, topInset, 12, 0),
+        child: Column(
+          children: [
+            SizedBox(
+              height: (height - topInset) * .55,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(stamp(positionMs), style: const TextStyle(fontSize: 10)),
+                  const Spacer(),
+                  IconButton(
+                    key: const Key('coveredVideoBack10'),
+                    tooltip: 'Recuar 10 segundos',
+                    onPressed: canSeek ? () => skip(-10) : null,
+                    icon: const Icon(Icons.replay_10, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                  ),
+                  IconButton(
+                    key: const Key('coveredVideoPlayPause'),
+                    tooltip: _player.playing
+                        ? 'Pausar vídeo'
+                        : 'Reproduzir vídeo',
+                    onPressed: _player.loaded
+                        ? () => unawaited(_player.playPause())
+                        : null,
+                    icon: Icon(
+                      _player.playing ? Icons.pause : Icons.play_arrow,
+                      size: 23,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                  ),
+                  IconButton(
+                    key: const Key('coveredVideoForward10'),
+                    tooltip: 'Avançar 10 segundos',
+                    onPressed: canSeek ? () => skip(10) : null,
+                    icon: const Icon(Icons.forward_10, size: 20),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                  ),
+                  const Spacer(),
+                  Text(
+                    stamp(durationMs.toDouble()),
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 5,
+                  ),
+                  overlayShape: SliderComponentShape.noOverlay,
+                ),
+                child: Slider(
+                  key: const Key('coveredVideoTimeline'),
+                  min: 0,
+                  max: durationMs > 0 ? durationMs.toDouble() : 1,
+                  value: canSeek ? positionMs : 0,
+                  onChanged: canSeek
+                      ? (value) => setState(() => _seekPreviewMs = value)
+                      : null,
+                  onChangeEnd: canSeek
+                      ? (value) {
+                          setState(() => _seekPreviewMs = null);
+                          unawaited(
+                            _player.seek(Duration(milliseconds: value.round())),
+                          );
+                        }
+                      : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _sectionTabs() {
     final selected = _tab == StudioTab.player ? StudioTab.chords : _tab;
+    final width = MediaQuery.sizeOf(context).width;
+    final tabWidth = ((width - 80) / 4).clamp(43.0, 82.0);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1B1B1D),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: studioPanelDecoration(radius: 26),
       child: Row(
         children: [
           Expanded(
@@ -1058,7 +1597,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 children: [
                   for (final (tab, label) in _visibleTabs)
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
                       child: OutlinedButton(
                         key: Key('unifiedSection${tab.name}'),
                         onPressed: () => _select(tab),
@@ -1070,16 +1609,35 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           backgroundColor: selected == tab
                               ? Colors.white
                               : Colors.transparent,
-                          minimumSize: const Size(70, 34),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: Size(tabWidth, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(19),
                           ),
                         ),
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(switch (tab) {
+                              StudioTab.chords => Icons.music_note_outlined,
+                              StudioTab.practice => Icons.graphic_eq,
+                              StudioTab.setlist => Icons.queue_music,
+                              StudioTab.audioSettings => Icons.equalizer,
+                              _ => Icons.music_note_outlined,
+                            }, size: 12),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -1087,18 +1645,49 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ),
           ),
-          IconButton(
-            key: const Key('visualMainAdjustments'),
-            tooltip: 'Fechar ajustes',
-            onPressed: _toggleMainAdjustments,
-            style: IconButton.styleFrom(
-              backgroundColor: const Color(0xFF2A2A2C),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(34, 34),
-              padding: EdgeInsets.zero,
+          if (_adjustmentChoicesVisible)
+            SizedBox(
+              key: const Key('adjustmentDirectionChoices'),
+              width: _adjustmentButtonSize.width,
+              height: _adjustmentButtonSize.height,
+            )
+          else
+            SizedBox(
+              key: _adjustmentButtonAnchorKey,
+              child: GestureDetector(
+                onVerticalDragStart: (_) => _adjustmentsDrag = 0,
+                onVerticalDragUpdate: (details) =>
+                    _adjustmentsDrag += details.delta.dy,
+                onVerticalDragEnd: (details) {
+                  final direction = _adjustmentsDrag.abs() >= 20
+                      ? _adjustmentsDrag
+                      : details.primaryVelocity ?? 0;
+                  if (direction < -20) {
+                    _coverVideoWithAdjustments();
+                  } else if (direction > 20) {
+                    _lowerAdjustments();
+                  }
+                },
+                child: IconButton(
+                  key: const Key('visualMainAdjustments'),
+                  tooltip: 'Expandir ou fechar ajustes',
+                  onPressed: _showAdjustmentDirections,
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF303034),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(34, 34),
+                    padding: EdgeInsets.zero,
+                  ),
+                  icon: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.keyboard_arrow_up, size: 15),
+                      Icon(Icons.keyboard_arrow_down, size: 15),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            icon: const Icon(Icons.keyboard_arrow_down, size: 23),
-          ),
         ],
       ),
     );
@@ -1111,41 +1700,55 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     required VoidCallback onTap,
     bool expanded = false,
     Widget? trailing,
+    Widget? content,
   }) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.only(bottom: 8),
     child: Material(
-      color: const Color(0xFF1B1B1D),
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        key: key,
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Row(
-            children: [
-              Icon(icon, size: 15, color: Colors.white),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+      color: const Color(0xFF202023),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: const BorderSide(color: Color(0xFF4A4A50)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          InkWell(
+            key: key,
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(icon, size: 16, color: Colors.white),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
+                  trailing ??
+                      Icon(
+                        expanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: studioMuted,
+                      ),
+                ],
               ),
-              trailing ??
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 20,
-                    color: studioMuted,
-                  ),
-            ],
+            ),
           ),
-        ),
+          if (content != null)
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: expanded ? content : const SizedBox.shrink(),
+            ),
+        ],
       ),
     ),
   );
@@ -1204,17 +1807,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       );
     }
     if (_tab == StudioTab.audioSettings) {
-      return Column(
-        children: [
-          _sectionTabs(),
-          Expanded(
-            child: SingleChildScrollView(
-              key: const Key('unifiedAudioSettingsScroll'),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 88),
+      return SingleChildScrollView(
+        key: const Key('unifiedAudioSettingsScroll'),
+        padding: const EdgeInsets.only(bottom: 88),
+        child: Column(
+          children: [
+            _sectionTabs(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _audioSettingsContent(),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
     if (_tab == StudioTab.practice) {
@@ -1259,17 +1863,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           : 'metronome',
                     ),
                     expanded: _practiceTool == 'metronome',
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    child: _practiceTool == 'metronome'
-                        ? Padding(
-                            key: const Key('practiceMetronomeContent'),
-                            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
-                            child: embeddedStudyTool('metronome'),
-                          )
-                        : const SizedBox.shrink(),
+                    content: Padding(
+                      key: const Key('practiceMetronomeContent'),
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                      child: embeddedStudyTool('metronome'),
+                    ),
                   ),
                   _practiceToolRow(
                     key: const Key('practiceProgression'),
@@ -1281,19 +1879,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           : 'progression',
                     ),
                     expanded: _practiceTool == 'progression',
-                  ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    child: _practiceTool == 'progression'
-                        ? Padding(
-                            key: const Key('practiceProgressionContent'),
-                            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
-                            child: PracticeProgressionCard(
-                              controller: _practice,
-                            ),
-                          )
-                        : const SizedBox.shrink(),
+                    content: Padding(
+                      key: const Key('practiceProgressionContent'),
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                      child: PracticeProgressionCard(
+                        controller: _practice,
+                        embedded: true,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1305,47 +1898,66 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     final controls = Column(
       children: [
         _sectionTabs(),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const Key('unifiedChooseChord'),
-                  onPressed: _chordActive ? _searchChord : _toggleChord,
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2A2A2C),
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF444447)),
-                    minimumSize: const Size.fromHeight(42),
-                  ),
-                  icon: Icon(
-                    _chordActive
-                        ? Icons.swap_horiz
-                        : Icons.library_music_outlined,
-                  ),
-                  label: Text(_chordActive ? 'Trocar cifra' : 'Escolher cifra'),
-                ),
-              ),
-            ],
-          ),
-        ),
         UnifiedPlayerAdjustments(
           model: _player,
           youtubeNativeTransport: _player.isYouTube,
           showPracticeControls: false,
+          compactBottom: true,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Material(
+            color: const Color(0xFF242427),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: const BorderSide(color: Color(0xFF55555B)),
+            ),
+            child: InkWell(
+              key: const Key('unifiedChooseChord'),
+              onTap: _chordActive ? _searchChord : _toggleChord,
+              borderRadius: BorderRadius.circular(24),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _chordActive
+                          ? Icons.library_music_outlined
+                          : Icons.queue_music,
+                      size: 17,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _chordActive ? 'Trocar cifra' : 'Escolher cifra',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: studioMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
     final autoScrollControls = _chordActive
         ? Padding(
-            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: studioCard,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: studioMuted.withValues(alpha: .25)),
-              ),
+              key: const Key('chordAutoScrollCard'),
+              decoration: studioPanelDecoration(),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
@@ -1419,13 +2031,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               children: [
                 if (topGap > 0) SizedBox(height: topGap),
                 DecoratedBox(
+                  key: const Key('unifiedChordControlsBackdrop'),
                   decoration: const BoxDecoration(
                     color: studioBg,
                     borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(18),
+                      top: Radius.circular(26),
                     ),
                   ),
-                  child: controls,
+                  child: Column(
+                    children: [
+                      controls,
+                      autoScrollControls,
+                      const SizedBox(height: 4),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1439,17 +2058,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               color: studioBg,
               child: Padding(
                 key: const Key('unifiedChordFrame'),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF101012),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: studioCyan.withValues(alpha: .2)),
-                  ),
+                  decoration: studioPanelDecoration(radius: 26),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
-                      autoScrollControls,
                       Expanded(
                         child: NotificationListener<ScrollStartNotification>(
                           onNotification: (notification) {
@@ -1497,7 +2111,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               key: const Key('unifiedChordControlsBackdrop'),
               decoration: const BoxDecoration(
                 color: studioBg,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
               ),
               child: controls,
             ),
@@ -1510,6 +2124,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   @override
   Widget build(BuildContext context) {
     final media = _mediaSurface();
+    final landscapePlayer = _isLandscapePlayer;
     return PopScope(
       canPop: !_browsing,
       onPopInvokedWithResult: (didPop, result) {
@@ -1527,7 +2142,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     Column(
                       children: <Widget>[Expanded(child: _mainPanel(media))],
                     ),
-                    if (!_mainControlsExpanded)
+                    if ((landscapePlayer && !_landscapeColumnsVisible) ||
+                        (!landscapePlayer && !_mainControlsExpanded))
                       Positioned(
                         bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
                         left: 0,
@@ -1535,7 +2151,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         child: Center(
                           child: _MainAdjustmentsBar(
                             expanded: false,
-                            onPressed: _toggleMainAdjustments,
+                            onPressed: landscapePlayer
+                                ? _openLandscapeAdjustments
+                                : _toggleMainAdjustments,
                           ),
                         ),
                       ),
