@@ -29,8 +29,8 @@ QA de dois telefones: foi pedido explicitamente que não se repita.
 1. A cadeia mapa sintético QA → scheduler → `NativeBandAudio` passou num
    Samsung (5 cliques, pausa remove lease). Próximo: só após revisão de
    conformidade/consentimento, decidir se e como associar um mapa revisto a
-   conteúdo real. O árbitro partilhado com `BandSession` tem testes unitários,
-   mas ainda não foi exercitado em hardware com as duas sessões.
+   conteúdo real. O árbitro partilhado com `BandSession` passou testes unitários
+   e uma prova de alternância no mesmo Samsung; falta medir som acústico.
 2. Validar com conteúdo permitido somente se o utilizador pedir para retomar a
    QA em aparelhos.
 3. Rever compliance antes de qualquer distribuição.

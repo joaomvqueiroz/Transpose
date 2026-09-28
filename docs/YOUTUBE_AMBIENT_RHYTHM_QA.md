@@ -108,6 +108,16 @@ grelha interna 13,55 µs e lease desligado após Pausa. Isto prova a cadeia
 sintética no dispositivo, **não** a sincronização audível com um vídeo real,
 calibração acústica, conformidade para distribuição ou N1/N2 concluídos.
 
+Após a introdução do árbitro comum, o mesmo APK QA foi atualizado sem remover
+dados (a substituição `adb install -r` passou) e a prova foi repetida no mesmo
+Samsung: 6 cliques na cadeia sintética, erro máximo interno 16,43 µs. Um segundo
+teste no mesmo APK exerceu a passagem de posse: a banda manteve os cliques
+ativos após a tentativa bloqueada da saída QA (contador 2 → 3); depois de
+`BandSession.leave()`, a saída QA produziu 2 cliques, com erro máximo de grade
+interna 17,77 µs, e parou. O pacote principal permaneceu instalado. Estas
+medições vêm do relógio de apresentação do AudioTrack, **não do microfone**;
+não demonstram o instante audível, nem sincronização com YouTube.
+
 Na primeira execução, o APK QA antigo tinha assinatura incompatível. O Flutter
 Drive desinstalou-o automaticamente e instalou o novo pacote `.qa`; os dados
 locais do pacote QA antigo podem ter sido perdidos. O pacote de produção
@@ -119,7 +129,9 @@ teste foi repetido no aparelho só para validar esta proteção; a sintaxe
 PowerShell passou.
 
 A associação de um mapa derivado de microfone a um vídeo real e a revisão de
-conformidade/consentimento continuam pendentes. O árbitro comum passou testes
+conformidade/consentimento continuam pendentes; ver
+[`YOUTUBE_COMPLIANCE_DECISION_2026-09-28.md`](YOUTUBE_COMPLIANCE_DECISION_2026-09-28.md).
+O árbitro comum passou testes
 unitários de contenção, saída sem posse, pausa durante a preparação e falha
 no `stop`; ainda não foi provado acusticamente nem testado com as duas sessões
 num telemóvel. Não ligar este probe à UI de produção.
