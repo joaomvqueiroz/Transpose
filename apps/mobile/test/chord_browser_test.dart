@@ -7,6 +7,9 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:transpose_mobile/chord_browser.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
+import 'package:transpose_mobile/youtube_browser.dart';
+
+import 'fake_youtube_session.dart';
 
 void main() {
   setUp(() {
@@ -183,6 +186,33 @@ void main() {
       find.byKey(const Key('playerChordSheet'), skipOffstage: false),
       findsOneWidget,
     );
+  });
+
+  testWidgets('pesquisar cifra não pausa o vídeo em reprodução', (
+    tester,
+  ) async {
+    final session = FakeYouTubeSession();
+    await tester.pumpWidget(
+      StudioVisualApp(
+        youtubeSessionFactory: () => session,
+        chordBrowserFactory: _Browser.new,
+        openSearchWhenEmpty: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    session.state = const YouTubeMediaState(
+      videoId: 'video-em-reproducao',
+      title: 'Santo Pra Sempre',
+      hasVideo: true,
+      playing: true,
+      duration: 180,
+    );
+    session.notifyListeners();
+    await tester.pumpAndSettle();
+    await tap(tester, 'visualMainAdjustments');
+    await tap(tester, 'unifiedChooseChord');
+    expect(find.byKey(const Key('unifiedChordSearch')), findsOneWidget);
+    expect(session.commands.where((command) => command.$1 == 'pause'), isEmpty);
   });
 
   testWidgets('cancelar pesquisa não abre cifra', (tester) async {

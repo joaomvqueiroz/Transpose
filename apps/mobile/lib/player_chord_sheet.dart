@@ -142,6 +142,7 @@ List<InlineSpan> playerChordColorSpans(
               pitchClass,
               StudioAppearance(mode: mode, noteColors: noteColors),
             ),
+            backgroundColor: Colors.transparent,
             fontWeight: FontWeight.w700,
             shadows: mode == StudioAppearanceMode.light
                 ? _lightChordOutline
@@ -231,6 +232,7 @@ class PlayerChordSheet extends StatefulWidget {
     this.onHide,
     this.onPullDown,
     this.lyricsOnly = false,
+    this.premiumDarkBars = false,
     this.revision = 0,
     this.appearance = const StudioAppearance(),
   });
@@ -242,6 +244,7 @@ class PlayerChordSheet extends StatefulWidget {
   final VoidCallback? onHide;
   final VoidCallback? onPullDown;
   final bool lyricsOnly;
+  final bool premiumDarkBars;
   final int revision;
   final StudioAppearance appearance;
 
@@ -250,28 +253,36 @@ class PlayerChordSheet extends StatefulWidget {
 }
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
-  // An opaque graphite surface keeps the notes crisp without making glass black.
-  BoxDecoration get _sheetDecoration {
-    final base = studioPanelDecoration(
-      radius: 26,
-      mode: widget.appearance.mode,
-    );
-    if (widget.appearance.mode != StudioAppearanceMode.glass) return base;
-    return base.copyWith(
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF4F5969), Color(0xFF303B4A), Color(0xFF202937)],
-        stops: [0, .48, 1],
-      ),
-    );
-  }
+  BoxDecoration get _sheetDecoration =>
+      studioPanelDecoration(radius: 26, mode: widget.appearance.mode);
 
   Color get _textSurfaceColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => Colors.white,
-    StudioAppearanceMode.dark => const Color(0xFF242427),
-    StudioAppearanceMode.glass => const Color(0xFF303B4A),
+    StudioAppearanceMode.dark => const Color(0xFF151619),
+    StudioAppearanceMode.glass => const Color(0xAA303B4A),
   };
+  Widget _darkSectionBar(Widget child) =>
+      widget.appearance.mode != StudioAppearanceMode.dark ||
+          !widget.premiumDarkBars
+      ? child
+      : Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF303136), Color(0xFF1D1E22)],
+            ),
+            border: Border.all(color: const Color(0xFF53545A), width: .8),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x55000000),
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: child,
+        );
   Color get _controlColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => const Color(0xFFE8EEF4),
     StudioAppearanceMode.glass => const Color(0xAA303841),
@@ -583,74 +594,86 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.library_music_outlined,
-                    color: _accentColor,
-                    size: 21,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _showExample
-                              ? 'Cifra de exemplo'
-                              : _sheet.sourceTitle.isNotEmpty
-                              ? _sheet.sourceTitle
-                              : 'Minha cifra',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        if (_sheet.sourceUrl.isNotEmpty)
-                          SelectableText(
-                            'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
-                            key: const Key('playerChordSource'),
+              _darkSectionBar(
+                Row(
+                  children: [
+                    Icon(
+                      Icons.library_music_outlined,
+                      color: _accentColor,
+                      size: 21,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _showExample
+                                ? 'Cifra de exemplo'
+                                : _sheet.sourceTitle.isNotEmpty
+                                ? _sheet.sourceTitle
+                                : 'Minha cifra',
                             maxLines: 1,
-                            style: TextStyle(color: _mutedColor, fontSize: 11),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                      ],
+                          if (_sheet.sourceUrl.isNotEmpty)
+                            SelectableText(
+                              'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
+                              key: const Key('playerChordSource'),
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: _mutedColor,
+                                fontSize: 11,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('playerChordPitchReset'),
-                    tooltip: 'Repor cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed: ready ? () => _saveTone(0, false) : null,
-                    icon: const Icon(Icons.restore, size: 20),
-                  ),
-                  IconButton(
-                    key: const Key('playerChordEdit'),
-                    tooltip: widget.onSearch == null
-                        ? 'Editar cifra'
-                        : 'Pesquisar outra cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed: _loading ? null : widget.onSearch ?? choose,
-                    icon: Icon(
-                      widget.onSearch == null
-                          ? Icons.edit_outlined
-                          : Icons.search,
-                      size: 20,
-                    ),
-                  ),
-                  if (widget.onHide != null)
                     IconButton(
-                      key: const Key('playerChordHide'),
-                      tooltip: 'Esconder cifra',
+                      key: const Key('playerChordPitchReset'),
+                      tooltip: 'Repor cifra',
                       style: IconButton.styleFrom(
                         backgroundColor: _controlColor,
                       ),
-                      onPressed: widget.onHide,
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.visibility_off_outlined, size: 20),
+                      onPressed: ready ? () => _saveTone(0, false) : null,
+                      icon: const Icon(Icons.restore, size: 20),
                     ),
-                ],
+                    IconButton(
+                      key: const Key('playerChordEdit'),
+                      tooltip: widget.onSearch == null
+                          ? 'Editar cifra'
+                          : 'Pesquisar outra cifra',
+                      style: IconButton.styleFrom(
+                        backgroundColor: _controlColor,
+                      ),
+                      onPressed: _loading ? null : widget.onSearch ?? choose,
+                      icon: Icon(
+                        widget.onSearch == null
+                            ? Icons.edit_outlined
+                            : Icons.search,
+                        size: 20,
+                      ),
+                    ),
+                    if (widget.onHide != null)
+                      IconButton(
+                        key: const Key('playerChordHide'),
+                        tooltip: 'Esconder cifra',
+                        style: IconButton.styleFrom(
+                          backgroundColor: _controlColor,
+                        ),
+                        onPressed: widget.onHide,
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(
+                          Icons.visibility_off_outlined,
+                          size: 20,
+                        ),
+                      ),
+                  ],
+                ),
               ),
               if (_showExample || widget.sourceKey.isEmpty)
                 Text(
@@ -661,54 +684,68 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       : widget.model.title,
                   style: TextStyle(color: _mutedColor, fontSize: 12),
                 ),
-              Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 6,
-                children: [
-                  const Text('Tom da cifra'),
-                  IconButton(
-                    key: const Key('playerChordPitchDown'),
-                    tooltip: 'Diminuir tonalidade da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch > -12
-                                : _sheet.transpose > -24)
-                        ? () => _changeTone(-1)
-                        : null,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  Text(
-                    pitch == 0
-                        ? 'Original'
-                        : '${pitch > 0 ? '+' : ''}$pitch st',
-                    key: const Key('playerChordPitchValue'),
-                    style: TextStyle(
-                      color: _accentColor,
-                      fontWeight: FontWeight.w700,
+              if (widget.appearance.mode == StudioAppearanceMode.dark &&
+                  widget.premiumDarkBars)
+                const SizedBox(height: 8),
+              _darkSectionBar(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  children: [
+                    const Text('Tom da cifra'),
+                    IconButton(
+                      key: const Key('playerChordPitchDown'),
+                      tooltip: 'Diminuir tonalidade da cifra',
+                      style: IconButton.styleFrom(
+                        backgroundColor: _controlColor,
+                      ),
+                      onPressed:
+                          canChange &&
+                              (_sheet.followAudio
+                                  ? widget.model.pitch > -12
+                                  : _sheet.transpose > -24)
+                          ? () => _changeTone(-1)
+                          : null,
+                      icon: const Icon(Icons.remove),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('playerChordPitchUp'),
-                    tooltip: 'Aumentar tonalidade da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch < 12
-                                : _sheet.transpose < 24)
-                        ? () => _changeTone(1)
-                        : null,
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
+                    Text(
+                      pitch == 0
+                          ? 'Original'
+                          : '${pitch > 0 ? '+' : ''}$pitch st',
+                      key: const Key('playerChordPitchValue'),
+                      style: TextStyle(
+                        color: _accentColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('playerChordPitchUp'),
+                      tooltip: 'Aumentar tonalidade da cifra',
+                      style: IconButton.styleFrom(
+                        backgroundColor: _controlColor,
+                      ),
+                      onPressed:
+                          canChange &&
+                              (_sheet.followAudio
+                                  ? widget.model.pitch < 12
+                                  : _sheet.transpose < 24)
+                          ? () => _changeTone(1)
+                          : null,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
               ),
-              Text(
-                _sheet.followAudio
-                    ? 'Acordes · acompanham o áudio'
-                    : 'Acordes · independente do áudio',
-                style: TextStyle(color: _mutedColor, fontSize: 11),
+              if (widget.appearance.mode == StudioAppearanceMode.dark &&
+                  widget.premiumDarkBars)
+                const SizedBox(height: 8),
+              _darkSectionBar(
+                Text(
+                  _sheet.followAudio
+                      ? 'Acordes · acompanham o áudio'
+                      : 'Acordes · independente do áudio',
+                  style: TextStyle(color: _mutedColor, fontSize: 11),
+                ),
               ),
               const SizedBox(height: 8),
               if (_loading) const LinearProgressIndicator(),
@@ -728,6 +765,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                 decoration: BoxDecoration(
                   color: _textSurfaceColor,
                   borderRadius: BorderRadius.circular(20),
+                  border: widget.appearance.mode == StudioAppearanceMode.dark
+                      ? Border.all(color: const Color(0xFF4B4C52), width: .8)
+                      : null,
                 ),
                 child: LayoutBuilder(
                   builder: (context, box) {

@@ -679,8 +679,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Future<void> _searchChord() async {
     if (_choosingChord || _chordSearching) return;
     _stopChordAutoScroll();
-    await _player.pause();
-    if (!mounted) return;
     setState(() => _chordSearching = true);
   }
 
@@ -1565,12 +1563,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             filter: ImageFilter.blur(
                               sigmaX:
                                   widget.appearance.mode ==
-                                      StudioAppearanceMode.glass
+                                          StudioAppearanceMode.glass &&
+                                      !chordPanel
                                   ? 10
                                   : 0,
                               sigmaY:
                                   widget.appearance.mode ==
-                                      StudioAppearanceMode.glass
+                                          StudioAppearanceMode.glass &&
+                                      !chordPanel
                                   ? 10
                                   : 0,
                             ),
@@ -2317,6 +2317,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                               store: _chords,
                               onSearch: _searchChord,
                               onHide: _toggleChord,
+                              premiumDarkBars: true,
                               revision: _chordRevision,
                               appearance: widget.appearance,
                             ),

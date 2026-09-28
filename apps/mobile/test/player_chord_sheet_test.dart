@@ -115,9 +115,7 @@ void main() {
     expect(outline.every((shadow) => shadow.color == Colors.black), isTrue);
   });
 
-  testWidgets('cifra fica opaca acima do desfoque no modo Vidro', (
-    tester,
-  ) async {
+  testWidgets('fundo da cifra é translúcido no modo Vidro', (tester) async {
     final store = ChordSheetStore()
       ..temporarySheet = const ChordSheet(notes: 'C\nMinha letra');
     await tester.pumpWidget(
@@ -135,14 +133,14 @@ void main() {
     );
     final gradient =
         (sheet.decoration! as BoxDecoration).gradient! as LinearGradient;
-    expect(gradient.colors.every((color) => color.a == 1), isTrue);
-    expect(gradient.colors.first, const Color(0xFF4F5969));
+    expect(gradient.colors.every((color) => color.a < 1), isTrue);
+    expect(gradient.colors.first, const Color(0x994F5969));
     final textSurface = tester.widget<Container>(
       find.byKey(const Key('playerChordTextSurface')),
     );
     expect(
       (textSurface.decoration! as BoxDecoration).color,
-      const Color(0xFF303B4A),
+      const Color(0xAA303B4A),
     );
   });
 
@@ -160,7 +158,7 @@ void main() {
     );
     expect(
       (textSurface.decoration! as BoxDecoration).color,
-      const Color(0xFF242427),
+      const Color(0xFF151619),
     );
   });
 
