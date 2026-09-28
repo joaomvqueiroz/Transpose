@@ -1,10 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 
 import 'fake_youtube_session.dart';
 
 void main() {
+  test(
+    'embedded YouTube appearance follows dark and light without touching media',
+    () {
+      final dark = youtubeAppearanceScript(StudioAppearanceMode.dark);
+      final light = youtubeAppearanceScript(StudioAppearanceMode.light);
+      expect(dark, contains('const dark = true'));
+      expect(light, contains('const dark = false'));
+      expect(dark, contains("host.endsWith('.youtube.com')"));
+      expect(light, contains("root.toggleAttribute('dark', dark)"));
+      expect(dark, isNot(contains('video.style')));
+    },
+  );
   test('sampled YouTube timeline invalidates seeks, pauses, ads, rates and stale replies', () {
     final tracker = YouTubeTimelineTracker();
     Map<String, dynamic> snapshot(

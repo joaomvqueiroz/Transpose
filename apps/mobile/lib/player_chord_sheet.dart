@@ -257,6 +257,17 @@ class PlayerChordSheet extends StatefulWidget {
 }
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
+  Color get _controlColor => switch (widget.appearance.mode) {
+    StudioAppearanceMode.light => const Color(0xFFE8EEF4),
+    StudioAppearanceMode.glass => const Color(0xAA303841),
+    StudioAppearanceMode.dark => const Color(0xFF303034),
+  };
+  Color get _accentColor => widget.appearance.mode == StudioAppearanceMode.light
+      ? const Color(0xFF193244)
+      : Colors.white;
+  Color get _mutedColor => widget.appearance.mode == StudioAppearanceMode.light
+      ? const Color(0xFF526273)
+      : studioMuted;
   final ScrollController _horizontalScroll = ScrollController();
   ChordSheet _sheet = const ChordSheet();
   bool _visible = true,
@@ -555,9 +566,9 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
             children: [
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.library_music_outlined,
-                    color: studioCyan,
+                    color: _accentColor,
                     size: 21,
                   ),
                   const SizedBox(width: 8),
@@ -583,10 +594,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                             'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
                             key: const Key('playerChordSource'),
                             maxLines: 1,
-                            style: const TextStyle(
-                              color: studioMuted,
-                              fontSize: 11,
-                            ),
+                            style: TextStyle(color: _mutedColor, fontSize: 11),
                           ),
                       ],
                     ),
@@ -594,9 +602,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchReset'),
                     tooltip: 'Repor cifra',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF303034),
-                    ),
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
                     onPressed: ready ? () => _saveTone(0, false) : null,
                     icon: const Icon(Icons.restore, size: 20),
                   ),
@@ -605,9 +611,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     tooltip: widget.onSearch == null
                         ? 'Editar cifra'
                         : 'Pesquisar outra cifra',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF303034),
-                    ),
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
                     onPressed: _loading ? null : widget.onSearch ?? choose,
                     icon: Icon(
                       widget.onSearch == null
@@ -621,7 +625,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       key: const Key('playerChordHide'),
                       tooltip: 'Esconder cifra',
                       style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFF303034),
+                        backgroundColor: _controlColor,
                       ),
                       onPressed: widget.onHide,
                       visualDensity: VisualDensity.compact,
@@ -636,7 +640,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       : widget.sourceKey.isEmpty
                       ? 'Cifra temporária · escolha uma música para guardar por faixa.'
                       : widget.model.title,
-                  style: const TextStyle(color: studioMuted, fontSize: 12),
+                  style: TextStyle(color: _mutedColor, fontSize: 12),
                 ),
               Wrap(
                 crossAxisAlignment: WrapCrossAlignment.center,
@@ -646,9 +650,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                   IconButton(
                     key: const Key('playerChordPitchDown'),
                     tooltip: 'Diminuir tonalidade da cifra',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF303034),
-                    ),
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
                     onPressed:
                         canChange &&
                             (_sheet.followAudio
@@ -663,17 +665,15 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         ? 'Original'
                         : '${pitch > 0 ? '+' : ''}$pitch st',
                     key: const Key('playerChordPitchValue'),
-                    style: const TextStyle(
-                      color: studioCyan,
+                    style: TextStyle(
+                      color: _accentColor,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   IconButton(
                     key: const Key('playerChordPitchUp'),
                     tooltip: 'Aumentar tonalidade da cifra',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF303034),
-                    ),
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
                     onPressed:
                         canChange &&
                             (_sheet.followAudio
@@ -689,7 +689,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                 _sheet.followAudio
                     ? 'Acordes · acompanham o áudio'
                     : 'Acordes · independente do áudio',
-                style: const TextStyle(color: studioMuted, fontSize: 11),
+                style: TextStyle(color: _mutedColor, fontSize: 11),
               ),
               const SizedBox(height: 8),
               if (_loading) const LinearProgressIndicator(),

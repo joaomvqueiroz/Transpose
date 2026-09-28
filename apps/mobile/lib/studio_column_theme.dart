@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'studio_appearance.dart';
+
 /// Stitch-inspired monochrome controls scoped to the four adjustments tabs.
 /// The embedded YouTube page keeps its own visual styling.
-ThemeData studioColumnTheme(ThemeData base) {
+ThemeData studioColumnTheme(
+  ThemeData base, {
+  StudioAppearanceMode mode = StudioAppearanceMode.dark,
+}) {
   if (base.brightness == Brightness.light) {
     const ink = Color(0xFF193244);
     const panel = Color(0xFFFFFFFF);
@@ -57,9 +62,13 @@ ThemeData studioColumnTheme(ThemeData base) {
     );
   }
   const muted = Color(0xFFA1A1AA);
-  const control = Color(0xFF2A2A2C);
+  final control = mode == StudioAppearanceMode.glass
+      ? const Color(0xAA303841)
+      : const Color(0xFF2A2A2C);
   const controlBorder = Color(0xFF444447);
-  const panel = Color(0xFF1B1B1D);
+  final panel = mode == StudioAppearanceMode.glass
+      ? const Color(0x991B222B)
+      : const Color(0xFF1B1B1D);
   final scheme = base.colorScheme.copyWith(
     primary: Colors.white,
     onPrimary: const Color(0xFF161618),
@@ -76,7 +85,7 @@ ThemeData studioColumnTheme(ThemeData base) {
   return base.copyWith(
     colorScheme: scheme,
     cardColor: panel,
-    cardTheme: const CardThemeData(
+    cardTheme: CardThemeData(
       color: panel,
       elevation: 0,
       margin: EdgeInsets.zero,

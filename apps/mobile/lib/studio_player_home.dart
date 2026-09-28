@@ -4,6 +4,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     with WidgetsBindingObserver {
   Color get _background => widget.appearance.mode == StudioAppearanceMode.light
       ? const Color(0xFFF4F7FB)
+      : widget.appearance.mode == StudioAppearanceMode.glass
+      ? const Color(0x77080809)
       : studioBg;
   late final MainPlayerController _player =
       widget.playerController ??
@@ -75,6 +77,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   @override
+  void didUpdateWidget(covariant StudioVisualHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.appearance.mode != widget.appearance.mode) {
+      final light = widget.appearance.mode == StudioAppearanceMode.light;
+      SystemChrome.setSystemUIOverlayStyle(
+        SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: light ? Brightness.dark : Brightness.light,
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarIconBrightness: light
+              ? Brightness.dark
+              : Brightness.light,
+          systemNavigationBarContrastEnforced: false,
+        ),
+      );
+      final session = _player.youtube;
+      if (session is WebViewYouTubeSession) {
+        unawaited(session.setAppearanceMode(widget.appearance.mode));
+      }
+    }
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final orientation = MediaQuery.orientationOf(context);
@@ -139,6 +164,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   void _changed() {
     final startupSession = _player.youtube;
+    if (startupSession is WebViewYouTubeSession) {
+      unawaited(startupSession.setAppearanceMode(widget.appearance.mode));
+    }
     if (startupSession != null && startupSession.contentReady) {
       _reportInitialBrowserReady();
     }
@@ -1524,41 +1552,58 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 right: 0,
                 bottom: 0,
                 child: Theme(
-                  data: studioColumnTheme(Theme.of(context)),
+                  data: studioColumnTheme(
+                    Theme.of(context),
+                    mode: widget.appearance.mode,
+                  ),
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: _adjustmentsCoverVideo
-                            ? Material(
-                                color: _background,
-                                child: Column(
-                                  children: [
-                                    _coveredVideoTransport(box.maxHeight),
-                                    Expanded(
-                                      child: _sectionContent(
-                                        media,
-                                        viewportHeight: box.maxHeight,
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(
+                            sigmaX:
+                                widget.appearance.mode ==
+                                    StudioAppearanceMode.glass
+                                ? 10
+                                : 0,
+                            sigmaY:
+                                widget.appearance.mode ==
+                                    StudioAppearanceMode.glass
+                                ? 10
+                                : 0,
+                          ),
+                          child: _adjustmentsCoverVideo
+                              ? Material(
+                                  color: _background,
+                                  child: Column(
+                                    children: [
+                                      _coveredVideoTransport(box.maxHeight),
+                                      Expanded(
+                                        child: _sectionContent(
+                                          media,
+                                          viewportHeight: box.maxHeight,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
+                                )
+                              : chordPanel
+                              ? ClipRRect(
+                                  key: const Key('unifiedChordOverlay'),
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(26),
+                                  ),
+                                  child: _sectionContent(
+                                    media,
+                                    topGap: chordTopGap,
+                                    viewportHeight: box.maxHeight - overlayTop,
+                                  ),
+                                )
+                              : ColoredBox(
+                                  color: _background,
+                                  child: _sectionContent(media),
                                 ),
-                              )
-                            : chordPanel
-                            ? ClipRRect(
-                                key: const Key('unifiedChordOverlay'),
-                                borderRadius: const BorderRadius.vertical(
-                                  top: Radius.circular(26),
-                                ),
-                                child: _sectionContent(
-                                  media,
-                                  topGap: chordTopGap,
-                                  viewportHeight: box.maxHeight - overlayTop,
-                                ),
-                              )
-                            : ColoredBox(
-                                color: _background,
-                                child: _sectionContent(media),
-                              ),
+                        ),
                       ),
                     ],
                   ),
@@ -1829,10 +1874,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
     child: Material(
-      color: const Color(0xFF202023),
+      color: switch (widget.appearance.mode) {
+        StudioAppearanceMode.light => const Color(0xFFF7F9FC),
+        StudioAppearanceMode.glass => const Color(0x99303943),
+        StudioAppearanceMode.dark => const Color(0xFF202023),
+      },
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: const BorderSide(color: Color(0xFF4A4A50)),
+        side: BorderSide(
+          color: widget.appearance.mode == StudioAppearanceMode.light
+              ? const Color(0xFFB7C4D2)
+              : const Color(0xFF4A4A50),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -1844,7 +1897,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
-                  Icon(icon, size: 16, color: Colors.white),
+                  Icon(icon, size: 16),
                   const SizedBox(width: 9),
                   Expanded(
                     child: Text(
@@ -1981,6 +2034,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             UnifiedPlayerAdjustments(
               model: _player,
               youtubeNativeTransport: _player.isYouTube,
+              appearanceMode: widget.appearance.mode,
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2051,7 +2105,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     ),
                   ),
                   if (const bool.fromEnvironment('TRANSPONO_PERSONAL_RHYTHM'))
-                    const AmbientRhythmTrial(),
+                    AmbientRhythmTrial(appearanceMode: widget.appearance.mode),
                 ],
               ),
             ),
@@ -2065,16 +2119,25 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         UnifiedPlayerAdjustments(
           model: _player,
           youtubeNativeTransport: _player.isYouTube,
+          appearanceMode: widget.appearance.mode,
           showPracticeControls: false,
           compactBottom: true,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Material(
-            color: const Color(0xFF242427),
+            color: switch (widget.appearance.mode) {
+              StudioAppearanceMode.light => const Color(0xFFF7F9FC),
+              StudioAppearanceMode.glass => const Color(0x99303943),
+              StudioAppearanceMode.dark => const Color(0xFF242427),
+            },
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
-              side: const BorderSide(color: Color(0xFF55555B)),
+              side: BorderSide(
+                color: widget.appearance.mode == StudioAppearanceMode.light
+                    ? const Color(0xFFB7C4D2)
+                    : const Color(0xFF55555B),
+              ),
             ),
             child: InkWell(
               key: const Key('unifiedChooseChord'),

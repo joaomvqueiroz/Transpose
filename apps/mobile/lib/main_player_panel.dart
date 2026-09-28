@@ -6,6 +6,7 @@ import 'chord_sheet.dart';
 import 'player_chord_sheet.dart';
 import 'player_panel_model.dart';
 import 'studio_native_pages.dart';
+import 'studio_appearance.dart';
 
 /// Shared player controls with a reading area and on-demand audio settings.
 class MainPlayerPanel extends StatefulWidget {
@@ -1157,6 +1158,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
   const UnifiedPlayerAdjustments({
     required this.model,
     required this.youtubeNativeTransport,
+    this.appearanceMode = StudioAppearanceMode.dark,
     this.showPracticeControls = true,
     this.compactBottom = false,
     super.key,
@@ -1164,6 +1166,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
 
   final PlayerPanelModel model;
   final bool youtubeNativeTransport;
+  final StudioAppearanceMode appearanceMode;
   final bool showPracticeControls;
   final bool compactBottom;
 
@@ -1203,7 +1206,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
         key: key,
         margin: const EdgeInsets.only(bottom: 8),
         padding: padding ?? const EdgeInsets.all(10),
-        decoration: studioPanelDecoration(),
+        decoration: studioPanelDecoration(mode: appearanceMode),
         child: child,
       );
 
@@ -1238,9 +1241,11 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.music_note,
-                        color: Colors.white,
+                        color: appearanceMode == StudioAppearanceMode.light
+                            ? const Color(0xFF182636)
+                            : Colors.white,
                         size: 14,
                       ),
                       const SizedBox(width: 5),

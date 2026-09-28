@@ -10,6 +10,69 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'youtube_search.dart';
 import 'web_media_command.dart';
+import 'studio_appearance.dart';
+
+/// Appearance-only override for the embedded mobile site. It never touches
+/// video frames, playback or audio, and is reapplied after page navigation.
+String youtubeAppearanceScript(StudioAppearanceMode mode) {
+  final dark = mode != StudioAppearanceMode.light;
+  return '''
+    (() => {
+      const host = location.hostname.toLowerCase();
+      if (host !== 'youtube.com' && !host.endsWith('.youtube.com')) return;
+      const dark = $dark;
+      const root = document.documentElement;
+      const desired = dark ? 'dark' : 'light';
+      root.setAttribute('data-transpono-theme', desired);
+      root.toggleAttribute('dark', dark);
+      root.style.colorScheme = desired;
+      for (const app of document.querySelectorAll('ytm-app, ytd-app')) {
+        app.toggleAttribute('dark', dark);
+      }
+      let style = document.getElementById('transpono-youtube-appearance');
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'transpono-youtube-appearance';
+        (document.head || root).appendChild(style);
+      }
+      style.textContent = `
+        html[data-transpono-theme="dark"],
+        html[data-transpono-theme="dark"] ytm-app {
+          --yt-spec-base-background: #0f0f0f;
+          --yt-spec-raised-background: #272727;
+          --yt-spec-menu-background: #272727;
+          --yt-spec-text-primary: #f1f1f1;
+          --yt-spec-text-secondary: #aaaaaa;
+        }
+        html[data-transpono-theme="light"],
+        html[data-transpono-theme="light"] ytm-app {
+          --yt-spec-base-background: #ffffff;
+          --yt-spec-raised-background: #f2f2f2;
+          --yt-spec-menu-background: #ffffff;
+          --yt-spec-text-primary: #0f0f0f;
+          --yt-spec-text-secondary: #606060;
+        }
+        html[data-transpono-theme="dark"] body,
+        html[data-transpono-theme="dark"] ytm-app {
+          background-color: #0f0f0f !important;
+          color: #f1f1f1 !important;
+        }
+        html[data-transpono-theme="light"] body,
+        html[data-transpono-theme="light"] ytm-app {
+          background-color: #ffffff !important;
+          color: #0f0f0f !important;
+        }
+      `;
+      if (window.__transponoThemeObserver) window.__transponoThemeObserver.disconnect();
+      window.__transponoThemeObserver = new MutationObserver(() => {
+        if (root.hasAttribute('dark') !== dark) root.toggleAttribute('dark', dark);
+      });
+      window.__transponoThemeObserver.observe(root, {
+        attributes: true, attributeFilter: ['dark']
+      });
+    })();
+  ''';
+}
 
 /// Values reported by the media element and the in-browser audio graph.
 /// A successful command alone never changes the displayed pitch.
@@ -355,6 +418,31 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   String? _dsp;
   String? _dspAdapter;
   String? _keyDetector;
+  StudioAppearanceMode _appearanceMode = StudioAppearanceMode.dark;
+
+  Future<void> setAppearanceMode(StudioAppearanceMode mode) async {
+    if (_disposed || _appearanceMode == mode) return;
+    _appearanceMode = mode;
+    try {
+      await controller.setBackgroundColor(
+        mode == StudioAppearanceMode.light
+            ? Colors.white
+            : const Color(0xFF080809),
+      );
+    } on Object {
+      // The document may be navigating; its next load reapplies the theme.
+    }
+    await _applyAppearance();
+  }
+
+  Future<void> _applyAppearance() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(youtubeAppearanceScript(_appearanceMode));
+    } on Object {
+      // A navigation may replace the document; onPageFinished retries.
+    }
+  }
 
   @override
   YouTubeMediaState get media => _media;
@@ -387,7 +475,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     );
     if (_disposed) return;
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    await controller.setBackgroundColor(const Color(0xFF080809));
+    await controller.setBackgroundColor(
+      _appearanceMode == StudioAppearanceMode.light
+          ? Colors.white
+          : const Color(0xFF080809),
+    );
     if (controller.platform is AndroidWebViewController) {
       await AndroidWebViewController.enableDebugging(kDebugMode);
       await (controller.platform as AndroidWebViewController)
@@ -409,6 +501,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           _notify();
         },
         onPageFinished: (_) {
+          unawaited(_applyAppearance());
           unawaited(_installBridge());
           unawaited(_checkContentReady());
         },

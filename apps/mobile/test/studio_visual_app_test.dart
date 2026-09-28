@@ -74,6 +74,67 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('claro ilumina cartões de Cifra e Treino; Vidro é translúcido', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('appearanceModelight')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pumpAndSettle();
+    final lightPitch = tester.widget<Container>(
+      find.byKey(const Key('unifiedPitchCard')),
+    );
+    final lightGradient =
+        (lightPitch.decoration! as BoxDecoration).gradient! as LinearGradient;
+    expect(lightGradient.colors.first, Colors.white);
+    expect(
+      tester
+          .widget<Material>(
+            find
+                .ancestor(
+                  of: find.byKey(const Key('practiceMetronome')),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .color,
+      isNot(const Color(0xFF202023)),
+    );
+    await tester.tap(find.byKey(const Key('unifiedSectionchords')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Material>(
+            find
+                .ancestor(
+                  of: find.byKey(const Key('unifiedChooseChord')),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .color,
+      const Color(0xFFF7F9FC),
+    );
+    await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('appearanceModeglass')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pumpAndSettle();
+    final glassPitch = tester.widget<Container>(
+      find.byKey(const Key('unifiedPitchCard')),
+    );
+    final glassGradient =
+        (glassPitch.decoration! as BoxDecoration).gradient! as LinearGradient;
+    expect(glassGradient.colors.first.a, lessThan(1));
+  });
   testWidgets('empty startup opens YouTube without duplicate search', (
     tester,
   ) async {

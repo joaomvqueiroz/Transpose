@@ -5,14 +5,20 @@ import 'package:flutter/services.dart';
 import 'package:record/record.dart';
 
 import 'rhythm_map.dart';
+import 'studio_appearance.dart';
 
 /// Personal/development build only. This listens to the room, not to a video
 /// stream; a resulting tempo must never be presented as verified YouTube sync.
 class AmbientRhythmTrial extends StatefulWidget {
-  const AmbientRhythmTrial({super.key, this.requestPermission});
+  const AmbientRhythmTrial({
+    super.key,
+    this.requestPermission,
+    this.appearanceMode = StudioAppearanceMode.dark,
+  });
 
   /// Test seam; the personal app uses Android's microphone permission dialog.
   final Future<bool> Function()? requestPermission;
+  final StudioAppearanceMode appearanceMode;
 
   @override
   State<AmbientRhythmTrial> createState() => _AmbientRhythmTrialState();
@@ -154,8 +160,16 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
     key: const Key('personalAmbientRhythmTrial'),
     width: double.infinity,
     decoration: BoxDecoration(
-      color: const Color(0xFF202023),
-      border: Border.all(color: const Color(0xFF4A4A50)),
+      color: switch (widget.appearanceMode) {
+        StudioAppearanceMode.light => const Color(0xFFF7F9FC),
+        StudioAppearanceMode.glass => const Color(0x99303943),
+        StudioAppearanceMode.dark => const Color(0xFF202023),
+      },
+      border: Border.all(
+        color: widget.appearanceMode == StudioAppearanceMode.light
+            ? const Color(0xFFB7C4D2)
+            : const Color(0xFF4A4A50),
+      ),
       borderRadius: BorderRadius.circular(24),
     ),
     padding: const EdgeInsets.all(12),
@@ -164,9 +178,14 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
       children: [
         const Text('Ritmo pelo microfone · experimental'),
         const SizedBox(height: 5),
-        const Text(
+        Text(
           'Ouve 10 segundos do ambiente. Usa o altifalante; auscultadores e ruído podem impedir a medição. Não guarda áudio.',
-          style: TextStyle(fontSize: 11, color: Color(0xFFB6B6BC)),
+          style: TextStyle(
+            fontSize: 11,
+            color: widget.appearanceMode == StudioAppearanceMode.light
+                ? const Color(0xFF526273)
+                : const Color(0xFFB6B6BC),
+          ),
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
