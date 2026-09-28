@@ -135,19 +135,10 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('unifiedSectionchords')));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<Material>(
-            find
-                .ancestor(
-                  of: find.byKey(const Key('unifiedChooseChord')),
-                  matching: find.byType(Material),
-                )
-                .first,
-          )
-          .color,
-      const Color(0xFFF7F9FC),
+    final chooseCard = tester.widget<DecoratedBox>(
+      find.byKey(const Key('unifiedChooseChordCard')),
     );
+    expect((chooseCard.decoration as BoxDecoration).gradient, isNotNull);
     await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('appearanceModeglass')));
@@ -494,10 +485,20 @@ void main() {
     final autoCard = find.byKey(const Key('chordAutoScrollCard'));
     final chooser = find.byKey(const Key('unifiedChooseChord'));
     final pitchCard = find.byKey(const Key('unifiedPitchCard'));
-    expect(tester.getRect(chooser).left, tester.getRect(pitchCard).left);
-    expect(tester.getRect(chooser).right, tester.getRect(pitchCard).right);
-    expect(tester.getRect(autoCard).left, tester.getRect(pitchCard).left);
+    final chooseCard = find.byKey(const Key('unifiedChooseChordCard'));
+    expect(tester.getRect(chooseCard).left, tester.getRect(pitchCard).left);
     expect(tester.getRect(autoCard).right, tester.getRect(pitchCard).right);
+    expect(
+      tester.getRect(chooser).right,
+      lessThan(tester.getRect(autoCard).left),
+    );
+    expect(tester.getRect(chooseCard).top, tester.getRect(autoCard).top);
+    expect(tester.getRect(chooseCard).height, tester.getRect(autoCard).height);
+    expect(find.text('Rolar'), findsOneWidget);
+    expect(
+      tester.widget<DecoratedBox>(chooseCard).decoration,
+      tester.widget<DecoratedBox>(autoCard).decoration,
+    );
     final controlsBackdrop = find.byKey(
       const Key('unifiedChordControlsBackdrop'),
     );
@@ -568,12 +569,31 @@ void main() {
     final frame = find.byKey(const Key('unifiedChordFrame'));
     final frameTop = tester.getTopLeft(frame).dy;
     expect(frameTop, closeTo(overlayTop, 2));
+    final fixedBackground = find.byKey(
+      const Key('unifiedChordFixedBackground'),
+    );
+    final fixedGradient =
+        (tester.widget<Container>(fixedBackground).decoration! as BoxDecoration)
+                .gradient!
+            as LinearGradient;
+    expect(fixedGradient.begin, Alignment.topRight);
+    expect(fixedGradient.end, Alignment.bottomLeft);
+    expect(fixedGradient.colors.first, const Color(0xFF0D0E10));
+    expect(fixedGradient.colors.last, const Color(0xFF292A2F));
+    final textSurface = tester.widget<Container>(
+      find.byKey(const Key('playerChordTextSurface')),
+    );
+    final textDecoration = textSurface.decoration! as BoxDecoration;
+    expect(textDecoration.color, Colors.transparent);
+    expect(textDecoration.gradient, isNull);
+    final fixedTop = tester.getTopLeft(fixedBackground).dy;
     await tester.drag(
       find.byKey(const Key('unifiedChordTextScroll')),
       const Offset(0, -180),
     );
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(frame).dy, closeTo(frameTop, 1));
+    expect(tester.getTopLeft(fixedBackground).dy, closeTo(fixedTop, 1));
     expect(
       tester
           .widget<Container>(find.byKey(const Key('playerChordSheet')))

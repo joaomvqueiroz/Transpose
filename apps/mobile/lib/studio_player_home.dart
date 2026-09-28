@@ -2117,87 +2117,67 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         ),
       );
     }
-    final controls = Column(
-      children: [
-        _sectionTabs(),
-        UnifiedPlayerAdjustments(
-          model: _player,
-          youtubeNativeTransport: _player.isYouTube,
-          appearanceMode: widget.appearance.mode,
-          showPracticeControls: false,
-          compactBottom: true,
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          child: Material(
-            color: switch (widget.appearance.mode) {
-              StudioAppearanceMode.light => const Color(0xFFF7F9FC),
-              StudioAppearanceMode.glass => const Color(0x99303943),
-              StudioAppearanceMode.dark => const Color(0xFF242427),
-            },
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(
-                color: widget.appearance.mode == StudioAppearanceMode.light
-                    ? const Color(0xFFB7C4D2)
-                    : const Color(0xFF55555B),
-              ),
-            ),
-            child: InkWell(
-              key: const Key('unifiedChooseChord'),
-              onTap: _chordActive ? _searchChord : _toggleChord,
-              borderRadius: BorderRadius.circular(24),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 11,
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _chordActive
-                          ? Icons.library_music_outlined
-                          : Icons.queue_music,
-                      size: 17,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _chordActive ? 'Trocar cifra' : 'Escolher cifra',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
+    final chooseChordButton = DecoratedBox(
+      key: const Key('unifiedChooseChordCard'),
+      decoration: studioPanelDecoration(mode: widget.appearance.mode),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: const Key('unifiedChooseChord'),
+          onTap: _chordActive ? _searchChord : _toggleChord,
+          borderRadius: BorderRadius.circular(24),
+          child: SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  Icon(
+                    _chordActive
+                        ? Icons.library_music_outlined
+                        : Icons.queue_music,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _chordActive ? 'Trocar cifra' : 'Escolher cifra',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
+                  ),
+                  if (!_chordActive)
                     const Icon(
                       Icons.chevron_right,
                       size: 18,
                       color: studioMuted,
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
         ),
-      ],
+      ),
     );
     final autoScrollControls = _chordActive
-        ? Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-            child: DecoratedBox(
-              key: const Key('chordAutoScrollCard'),
-              decoration: studioPanelDecoration(mode: widget.appearance.mode),
+        ? DecoratedBox(
+            key: const Key('chordAutoScrollCard'),
+            decoration: studioPanelDecoration(mode: widget.appearance.mode),
+            child: SizedBox(
+              height: 48,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 5),
                 child: Row(
                   children: [
-                    const Icon(Icons.auto_mode, size: 17),
-                    const SizedBox(width: 6),
+                    const Icon(Icons.auto_mode, size: 15),
+                    const SizedBox(width: 3),
                     const Expanded(
                       child: Text(
-                        'Rolagem automática da cifra',
+                        'Rolar',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -2209,6 +2189,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     IconButton(
                       key: const Key('chordAutoScrollSlower'),
                       tooltip: 'Rolar cifra mais devagar',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 36,
+                      ),
+                      padding: EdgeInsets.zero,
                       visualDensity: VisualDensity.compact,
                       onPressed: _chordScrollSpeed > .5
                           ? () => setState(
@@ -2216,16 +2201,21 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   (_chordScrollSpeed - .25).clamp(.5, 2),
                             )
                           : null,
-                      icon: const Icon(Icons.remove, size: 18),
+                      icon: const Icon(Icons.remove, size: 16),
                     ),
                     Text(
                       '${_chordScrollSpeed.toStringAsFixed(2)}×',
                       key: const Key('chordAutoScrollSpeed'),
-                      style: const TextStyle(fontSize: 11),
+                      style: const TextStyle(fontSize: 10),
                     ),
                     IconButton(
                       key: const Key('chordAutoScrollFaster'),
                       tooltip: 'Rolar cifra mais depressa',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 36,
+                      ),
+                      padding: EdgeInsets.zero,
                       visualDensity: VisualDensity.compact,
                       onPressed: _chordScrollSpeed < 2
                           ? () => setState(
@@ -2233,13 +2223,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   (_chordScrollSpeed + .25).clamp(.5, 2),
                             )
                           : null,
-                      icon: const Icon(Icons.add, size: 18),
+                      icon: const Icon(Icons.add, size: 16),
                     ),
                     IconButton.filledTonal(
                       key: const Key('chordAutoScrollToggle'),
                       tooltip: _chordAutoScroll
                           ? 'Pausar rolagem da cifra'
                           : 'Iniciar rolagem da cifra',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      padding: EdgeInsets.zero,
                       onPressed: _toggleChordAutoScroll,
                       icon: Icon(
                         _chordAutoScroll ? Icons.pause : Icons.play_arrow,
@@ -2252,6 +2247,30 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
           )
         : const SizedBox.shrink();
+    final controls = Column(
+      children: [
+        _sectionTabs(),
+        UnifiedPlayerAdjustments(
+          model: _player,
+          youtubeNativeTransport: _player.isYouTube,
+          appearanceMode: widget.appearance.mode,
+          showPracticeControls: false,
+          compactBottom: true,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+          child: Row(
+            children: [
+              Expanded(flex: _chordActive ? 35 : 1, child: chooseChordButton),
+              if (_chordActive) ...[
+                const SizedBox(width: 6),
+                Expanded(flex: 65, child: autoScrollControls),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
     if (_chordActive) {
       return NestedScrollView(
         key: const Key('unifiedChordScroll'),
@@ -2270,11 +2289,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     ),
                   ),
                   child: Column(
-                    children: [
-                      controls,
-                      autoScrollControls,
-                      const SizedBox(height: 4),
-                    ],
+                    children: [controls, const SizedBox(height: 4)],
                   ),
                 ),
               ],
@@ -2291,10 +2306,17 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 key: const Key('unifiedChordFrame'),
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 child: Container(
-                  decoration: studioPanelDecoration(
-                    radius: 26,
-                    mode: widget.appearance.mode,
-                  ),
+                  key: const Key('unifiedChordFixedBackground'),
+                  decoration:
+                      studioPanelDecoration(
+                        radius: 26,
+                        mode: widget.appearance.mode,
+                      ).copyWith(
+                        gradient:
+                            widget.appearance.mode == StudioAppearanceMode.dark
+                            ? playerChordDarkGradient
+                            : null,
+                      ),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
@@ -2317,7 +2339,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                               store: _chords,
                               onSearch: _searchChord,
                               onHide: _toggleChord,
-                              premiumDarkBars: true,
+                              fixedDarkBackground: true,
                               revision: _chordRevision,
                               appearance: widget.appearance,
                             ),

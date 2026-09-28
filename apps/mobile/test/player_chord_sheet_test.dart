@@ -144,7 +144,7 @@ void main() {
     );
   });
 
-  testWidgets('cifra escura usa o mesmo grafite dos outros cartões', (
+  testWidgets('cifra escura mistura grafite e preto sem alterar o conteúdo', (
     tester,
   ) async {
     final store = ChordSheetStore()
@@ -156,10 +156,17 @@ void main() {
     final textSurface = tester.widget<Container>(
       find.byKey(const Key('playerChordTextSurface')),
     );
-    expect(
-      (textSurface.decoration! as BoxDecoration).color,
-      const Color(0xFF151619),
-    );
+    final decoration = textSurface.decoration! as BoxDecoration;
+    final gradient = decoration.gradient! as LinearGradient;
+    expect(decoration.color, isNull);
+    expect(gradient.begin, Alignment.topRight);
+    expect(gradient.end, Alignment.bottomLeft);
+    expect(gradient.colors, const [
+      Color(0xFF0D0E10),
+      Color(0xFF1A1B1F),
+      Color(0xFF292A2F),
+    ]);
+    expect(textSurface.padding, const EdgeInsets.all(14));
   });
 
   test('nomes enarmónicos recebem exatamente a mesma cor', () {
