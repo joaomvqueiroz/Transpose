@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transpono</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon-48.png" alt="" width="28" height="28">
+    <div class="head-text">
+      <div class="brand">Transpono</div>
+      <div id="title" class="title">Abre um vídeo do YouTube.</div>
+    </div>
+  </header>
+
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <section class="card">
+    <div class="row">
+      <span class="label">Tom</span>
+      <div class="ctrl stepper">
+        <button id="pitchDown" class="round" aria-label="Baixar meio-tom">−</button>
+        <output id="pitchValue" class="value">0</output>
+        <button id="pitchUp" class="round" aria-label="Subir meio-tom">+</button>
+      </div>
+      <button class="reset" data-reset="pitch" aria-label="Repor tom"></button>
+    </div>
+    <div class="row">
+      <span class="label">Velocidade</span>
+      <div class="ctrl">
+        <input id="speed" type="range" min="0.5" max="1.5" step="0.01" value="1" aria-label="Velocidade">
+        <output id="speedValue" class="value">1x</output>
+      </div>
+      <button class="reset" data-reset="speed" aria-label="Repor velocidade"></button>
+    </div>
+  </section>
+
+  <section class="card" id="effects"></section>
+
+  <footer>Processamento local no navegador. Nada é descarregado. Experimental.</footer>
+  <script src="popup.js"></script>
+</body>
+</html>

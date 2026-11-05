@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Transpono — Tom e efeitos",
+  "short_name": "Transpono",
+  "version": "0.1.0",
+  "description": "Muda o tom, a velocidade, o EQ e os efeitos do vídeo do YouTube que estás a ver. Processamento local no navegador; nada é descarregado.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "transpono@joaomvqueiroz.github.io",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  },
+  "host_permissions": ["https://*.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://*.youtube.com/*"],
+      "js": [
+        "web/SignalsmithStretch.js",
+        "web/transpono_stretch.js",
+        "web/transpono_key_detector.js",
+        "web/transpono_media.js",
+        "src/page_shim.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.youtube.com/*"],
+      "js": ["src/relay.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "web/SignalsmithStretch.js",
+        "web/transpono_stretch.js",
+        "web/transpono_key_detector.js",
+        "web/transpono_media.js",
+        "src/page_shim.js"
+      ],
+      "matches": ["https://*.youtube.com/*"]
+    }
+  ],
+  "action": {
+    "default_title": "Transpono",
+    "default_popup": "popup/popup.html",
+    "default_icon": { "48": "icons/icon-48.png", "96": "icons/icon-96.png" }
+  },
+  "icons": { "48": "icons/icon-48.png", "96": "icons/icon-96.png", "128": "icons/icon-128.png" }
+}
