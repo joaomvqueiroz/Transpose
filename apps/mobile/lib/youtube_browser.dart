@@ -415,6 +415,46 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   Widget buildView();
 }
 
+/// Android Chrome identity used only by the iOS WebKit YouTube view.
+@visibleForTesting
+const String youtubeIosUserAgent =
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+
+/// iPhone WebKit exposes only ManagedMediaSource (iOS 17.1+). Alias it as
+/// MediaSource and opt videos out of AirPlay, which ManagedMediaSource needs.
+@visibleForTesting
+const String youtubeIosMseShimScript = r'''(() => {
+  if (window.__transponoMseShim) return;
+  window.__transponoMseShim = true;
+  if (!window.MediaSource && window.ManagedMediaSource) {
+    window.MediaSource = window.ManagedMediaSource;
+    if (!window.SourceBuffer && window.ManagedSourceBuffer) {
+      window.SourceBuffer = window.ManagedSourceBuffer;
+    }
+  }
+  const mark = (node) => {
+    if (node && node.tagName === 'VIDEO') {
+      try { node.disableRemotePlayback = true; } catch (_) {}
+    }
+  };
+  const create = document.createElement;
+  document.createElement = function (tag, options) {
+    const node = create.call(this, tag, options);
+    mark(node);
+    return node;
+  };
+  document.querySelectorAll('video').forEach(mark);
+  new MutationObserver((records) => {
+    for (const record of records) {
+      record.addedNodes.forEach((node) => {
+        mark(node);
+        if (node.querySelectorAll) node.querySelectorAll('video').forEach(mark);
+      });
+    }
+  }).observe(document.documentElement, {childList: true, subtree: true});
+})();''';
+
 Uri _youtubeVideoUri(String videoId) {
   if (!RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(videoId)) {
     throw ArgumentError.value(videoId, 'videoId', 'Invalid YouTube video ID');
@@ -531,11 +571,19 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       await (controller.platform as AndroidWebViewController)
           .setMediaPlaybackRequiresUserGesture(false);
     }
+    final bool webKit = controller.platform is WebKitWebViewController;
+    if (webKit) {
+      // Experimental: on iPhone YouTube serves native HLS, which Web Audio
+      // cannot read. Presenting as Android Chrome asks for MSE (blob:) media,
+      // the only kind the pitch/EQ bridge can process.
+      await controller.setUserAgent(youtubeIosUserAgent);
+    }
     await controller.setNavigationDelegate(
       NavigationDelegate(
         onProgress: (int value) {
           _progress = value;
           _notify();
+          if (webKit) unawaited(_installMseShim());
         },
         onPageStarted: (_) {
           _document++;
@@ -575,6 +623,15 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       unawaited(_checkContentReady());
     });
     await controller.loadRequest(uri);
+  }
+
+  Future<void> _installMseShim() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(youtubeIosMseShimScript);
+    } on Object {
+      // The document can be replaced mid-load; the next progress tick retries.
+    }
   }
 
   Future<void> _checkContentReady() async {
