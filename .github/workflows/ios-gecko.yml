@@ -1,0 +1,89 @@
+name: iOS build with Gecko
+
+# Transpono for iPhone with YouTube rendered by Gecko (Firefox's engine)
+# instead of WebKit, whose native HLS playback never feeds Web Audio, so
+# pitch/EQ/effects cannot work there. See .github/gecko/*.sh.
+#
+# macOS minutes are billed 10x on private repos: on demand or on `ios-gecko`.
+# The engine kit (~25 min) is cached; app-only runs take ~10-15 min.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-gecko]
+
+env:
+  REYNARD_TAG: "0.20.0"
+  REYNARD_IPA_SHA256: 6ebc53836a232d0bb1b655c97dd7b44156e1ee6ca0889ef383069fc7b0a1c1ea
+  XCODE_VERSION: "26.6"
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      # The kit's GeckoView.swiftmodule must come from the same Swift compiler.
+      - name: Restore Gecko engine kit
+        id: kit
+        uses: actions/cache@v4
+        with:
+          path: engine-kit
+          key: gecko-kit-v1-${{ env.REYNARD_TAG }}-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('.github/gecko/build-engine-kit.sh') }}
+
+      - name: Install engine-kit build dependencies
+        if: steps.kit.outputs.cache-hit != 'true'
+        run: |
+          brew install python@3.12 lld cbindgen llvm
+          echo "$(brew --prefix python@3.12)/libexec/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust toolchain
+        if: steps.kit.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Build Gecko engine kit
+        if: steps.kit.outputs.cache-hit != 'true'
+        run: bash .github/gecko/build-engine-kit.sh
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter dependencies
+        working-directory: apps/mobile
+        run: |
+          flutter --version
+          flutter pub get
+
+      - name: Build app (unsigned)
+        working-directory: apps/mobile
+        run: flutter build ios --release --no-codesign
+
+      - name: Embed Gecko
+        run: bash .github/gecko/embed-gecko.sh engine-kit apps/mobile/build/ios/iphoneos/Runner.app
+
+      - name: Package unsigned IPA
+        working-directory: apps/mobile
+        run: |
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          cp ../../engine-kit/VERSIONS.txt Payload/Runner.app/GECKO_VERSIONS.txt
+          zip -qry Transpono-gecko-unsigned.ipa Payload
+          ls -la Transpono-gecko-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Transpono-iOS-gecko-unsigned
+          path: apps/mobile/Transpono-gecko-unsigned.ipa
+          retention-days: 14

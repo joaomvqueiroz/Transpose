@@ -305,6 +305,13 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  gecko_view:
+    dependency: "direct main"
+    description:
+      path: "../../packages/gecko_view"
+      relative: true
+    source: path
+    version: "0.1.0"
   glob:
     dependency: transitive
     description:

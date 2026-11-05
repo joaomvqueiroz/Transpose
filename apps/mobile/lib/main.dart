@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gecko_view/gecko_view.dart';
 import 'package:player_core/player_core.dart';
 import 'package:video_player/video_player.dart';
 
@@ -12,8 +13,10 @@ import 'media/native_audio_media_loader.dart';
 import 'media/video_player_media_loader.dart';
 import 'studio_visual_app.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // iOS builds with the Gecko engine kit render YouTube with Gecko.
+  await GeckoEngine.ensureInitialized();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,

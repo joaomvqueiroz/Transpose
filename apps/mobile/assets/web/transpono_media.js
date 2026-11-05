@@ -865,7 +865,7 @@
   }
 
   async function createStretchNode() {
-    const createStretch = window.TransponoCreateStretch || window.SignalsmithStretch;
+    const createStretch = window.TransponoCreateStretch || globalThis.SignalsmithStretch || window.SignalsmithStretch;
     if (typeof createStretch !== 'function')
       throw new Error('A alteração de tom não está disponível neste navegador.');
     const creation = Promise.resolve(createStretch(audioContext, {

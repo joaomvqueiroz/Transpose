@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
@@ -461,6 +462,14 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       this.controller = controller;
       return;
     }
+    if (GeckoEngine.isAvailable) {
+      // iPhone builds with the Gecko engine kit: YouTube plays through MSE,
+      // so the same page-local Web Audio bridge as on Android can attach.
+      final GeckoWebViewController gecko = GeckoWebViewController();
+      _gecko = gecko;
+      this.controller = WebViewController.fromPlatform(gecko);
+      return;
+    }
     final PlatformWebViewControllerCreationParams params =
         WebViewPlatform.instance is WebKitWebViewPlatform
         ? WebKitWebViewControllerCreationParams(
@@ -472,6 +481,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   late final WebViewController controller;
+  GeckoWebViewController? _gecko;
+
+  /// Whether this session renders with Gecko instead of the platform WebView.
+  bool get usesGecko => _gecko != null;
   late final WebMediaCommandRunner _commands = WebMediaCommandRunner(
     submitScript: controller.runJavaScript,
     readScript: controller.runJavaScriptReturningResult,
@@ -502,7 +515,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   /// iPhone WebKit cannot feed YouTube's HLS audio to Web Audio, so pitch and
   /// effects are rendered by a native copy of the audio track instead.
   late final NativeYouTubeAudioFollower? _native =
-      defaultTargetPlatform == TargetPlatform.iOS
+      defaultTargetPlatform == TargetPlatform.iOS && _gecko == null
       ? NativeYouTubeAudioFollower(
           setWebMuted: _setWebMuted,
           onChanged: _notify,
@@ -580,7 +593,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           .setMediaPlaybackRequiresUserGesture(false);
     }
     await controller.setNavigationDelegate(
-      NavigationDelegate(
+      _navigationDelegate(
         onProgress: (int value) {
           _progress = value;
           _notify();
@@ -877,9 +890,43 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (await controller.canGoBack()) await controller.goBack();
   }
 
+  NavigationDelegate _navigationDelegate({
+    required void Function(int) onProgress,
+    required void Function(String) onPageStarted,
+    required void Function(String) onPageFinished,
+    required void Function(WebResourceError) onWebResourceError,
+    required FutureOr<NavigationDecision> Function(NavigationRequest)
+    onNavigationRequest,
+  }) => _gecko == null
+      ? NavigationDelegate(
+          onProgress: onProgress,
+          onPageStarted: onPageStarted,
+          onPageFinished: onPageFinished,
+          onWebResourceError: onWebResourceError,
+          onNavigationRequest: onNavigationRequest,
+        )
+      : NavigationDelegate.fromPlatform(
+          GeckoNavigationDelegate(),
+          onProgress: onProgress,
+          onPageStarted: onPageStarted,
+          onPageFinished: onPageFinished,
+          onWebResourceError: onWebResourceError,
+          onNavigationRequest: onNavigationRequest,
+        );
+
   @override
-  Widget buildView() =>
-      WebViewWidget(key: const Key('youtubeWebView'), controller: controller);
+  Widget buildView() {
+    final GeckoWebViewController? gecko = _gecko;
+    if (gecko != null) {
+      return WebViewWidget.fromPlatform(
+        platform: GeckoWebViewWidget(gecko, key: const Key('youtubeWebView')),
+      );
+    }
+    return WebViewWidget(
+      key: const Key('youtubeWebView'),
+      controller: controller,
+    );
+  }
 
   @override
   void dispose() {
@@ -893,6 +940,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           )
           .catchError((Object _) {}),
     );
+    if (_gecko case final gecko?) {
+      unawaited(gecko.dispose().catchError((Object _) {}));
+    }
     super.dispose();
   }
 }

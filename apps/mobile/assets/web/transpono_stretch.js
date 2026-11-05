@@ -6,10 +6,12 @@
  */
 (function () {
   'use strict';
+  // Gecko content-script sandboxes keep `var` globals off the Xray `window`.
+  const stretchFactory = () => globalThis.SignalsmithStretch || window.SignalsmithStretch;
   const blockedWorklets = new WeakSet();
 
   async function compatibilityNode(context) {
-    const factory = window.SignalsmithStretch?.wasmModuleFactory;
+    const factory = stretchFactory()?.wasmModuleFactory;
     if (typeof factory !== 'function' || !context.createScriptProcessor) {
       throw new Error('O processamento de tom não está disponível neste navegador.');
     }
@@ -81,7 +83,7 @@
   window.TransponoCreateStretch = async function (context, options) {
     if (!blockedWorklets.has(context)) {
       try {
-        const node = await window.SignalsmithStretch(context, options);
+        const node = await stretchFactory()(context, options);
         node.transponoBackend = 'audio-worklet';
         return node;
       } catch (_) {

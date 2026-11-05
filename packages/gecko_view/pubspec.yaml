@@ -1,0 +1,26 @@
+name: gecko_view
+description: >-
+  iOS-only webview_flutter backend that renders pages with Gecko (Firefox's
+  engine) instead of WebKit, so page-local Web Audio can read YouTube media.
+  Available only in builds that embed the Transpono Gecko engine kit.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  webview_flutter_platform_interface: ^2.15.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: GeckoViewPlugin

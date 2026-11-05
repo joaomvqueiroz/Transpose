@@ -16,6 +16,8 @@ dependencies:
   path_provider: ^2.1.6
   youtube_native_audio:
     path: ../../packages/youtube_native_audio
+  gecko_view:
+    path: ../../packages/gecko_view
   player_core:
     path: ../../packages/player_core
   video_player: ^2.14.0
