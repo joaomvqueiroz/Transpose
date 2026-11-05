@@ -1,0 +1,45 @@
+name: iOS build
+
+# macOS runners are billed at 10x on private repos, so this only runs on
+# demand or when the `ios` branch is pushed.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios]
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build (unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        run: |
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry Transpono-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Transpono-iOS-unsigned
+          path: apps/mobile/Transpono-unsigned.ipa
+          retention-days: 14
