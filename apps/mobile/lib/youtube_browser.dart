@@ -8,6 +8,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import 'youtube_native_audio_follower.dart';
 import 'youtube_search.dart';
 import 'web_media_command.dart';
 import 'studio_appearance.dart';
@@ -219,6 +220,38 @@ class YouTubeMediaState {
       keyStatus: string('keyStatus'),
     );
   }
+
+  YouTubeMediaState copyWith({
+    bool? muted,
+    double? pitch,
+    String? pitchStatus,
+    String? pitchMessage,
+    Map<String, double>? audioEffects,
+  }) => YouTubeMediaState(
+    videoId: videoId,
+    title: title,
+    hasVideo: hasVideo,
+    playing: playing,
+    muted: muted ?? this.muted,
+    position: position,
+    duration: duration,
+    speed: speed,
+    pitch: pitch ?? this.pitch,
+    pitchStatus: pitchStatus ?? this.pitchStatus,
+    pitchMessage: pitchMessage ?? this.pitchMessage,
+    loopA: loopA,
+    loopB: loopB,
+    loopEnabled: loopEnabled,
+    isAd: isAd,
+    loopCount: loopCount,
+    loopEpoch: loopEpoch,
+    loopEventsSupported: loopEventsSupported,
+    playbackReady: playbackReady,
+    keyRoot: keyRoot,
+    keyMode: keyMode,
+    keyStatus: keyStatus,
+    audioEffects: audioEffects ?? this.audioEffects,
+  );
 
   final String videoId, title, pitchStatus, pitchMessage;
   final bool hasVideo, playing, muted, loopEnabled, isAd;
@@ -466,6 +499,21 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   String? _keyDetector;
   StudioAppearanceMode _appearanceMode = StudioAppearanceMode.dark;
 
+  /// iPhone WebKit cannot feed YouTube's HLS audio to Web Audio, so pitch and
+  /// effects are rendered by a native copy of the audio track instead.
+  late final NativeYouTubeAudioFollower? _native =
+      defaultTargetPlatform == TargetPlatform.iOS
+      ? NativeYouTubeAudioFollower(
+          setWebMuted: _setWebMuted,
+          onChanged: _notify,
+        )
+      : null;
+
+  Future<void> _setWebMuted(bool muted) => controller.runJavaScript('''(() => {
+    const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    if (video) video.muted = $muted;
+  })()''');
+
   Future<void> setAppearanceMode(StudioAppearanceMode mode) async {
     if (_disposed || _appearanceMode == mode) return;
     _appearanceMode = mode;
@@ -491,7 +539,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   @override
-  YouTubeMediaState get media => _media;
+  YouTubeMediaState get media => _native?.overlay(_media) ?? _media;
 
   /// Local monotonic epoch for timeline brackets; not Android System.nanoTime.
   int get timelineClockUs => _timelineClock.elapsedMicroseconds;
@@ -728,6 +776,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         state['restoreReady'] == true) {
       _media = YouTubeMediaState.fromJson(state);
       _timeline.observe(state, startUs: startUs, endUs: endUs);
+      final native = _native;
+      if (native != null) unawaited(native.sync(_media));
       if (state['restoreReady'] == true) _pauseOnReadyVideoId = null;
     }
   }
@@ -735,6 +785,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   Future<void> command(String action, [num? value]) async {
     if (_disposed) return;
+    final native = _native;
+    if (native != null && value != null && native.handles(action)) {
+      await native.command(action, value);
+      return;
+    }
     final generation = _document;
     bool current() => !_disposed && generation == _document;
     try {
@@ -830,6 +885,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    if (_native case final native?) native.dispose();
     unawaited(
       controller
           .runJavaScript(
