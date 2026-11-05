@@ -11,6 +11,13 @@ import 'studio_native_pages.dart';
 
 final Uri cifrasHome = Uri.https('www.cifras.com.br', '/');
 
+/// Flutter skips compositing an iOS platform view at opacity 0, so WebKit
+/// treats the hidden site as off-screen and every element reports no client
+/// rects. A near-zero opacity keeps it laid out while staying invisible.
+@visibleForTesting
+double get hiddenChordSiteOpacity =>
+    defaultTargetPlatform == TargetPlatform.iOS ? 0.01 : 0;
+
 bool isChordSourceUri(Uri uri) =>
     uri.scheme == 'https' &&
     uri.userInfo.isEmpty &&
@@ -539,7 +546,9 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
         top: 0,
         height: 320,
         child: IgnorePointer(
-          child: ExcludeSemantics(child: Opacity(opacity: 0, child: _siteView)),
+          child: ExcludeSemantics(
+            child: Opacity(opacity: hiddenChordSiteOpacity, child: _siteView),
+          ),
         ),
       ),
       SingleChildScrollView(
