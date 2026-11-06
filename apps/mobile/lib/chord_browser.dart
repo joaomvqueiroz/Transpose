@@ -539,6 +539,23 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
     if (target != null) await gecko.open(target);
   }
 
+  // The song title can arrive after the panel opened (YouTube Music fills its
+  // player bar late): put it in the search bar and search, unless the user
+  // already typed something.
+  @override
+  void didUpdateWidget(ChordSearchPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final title = widget.initialQuery.trim();
+    if (title.isNotEmpty &&
+        title != oldWidget.initialQuery.trim() &&
+        _query.text.trim().isEmpty) {
+      _query.text = title;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search();
+      });
+    }
+  }
+
   @override
   void dispose() {
     _generation++;

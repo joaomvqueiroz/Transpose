@@ -231,8 +231,19 @@
     const sessionTitle = session && session.title
       ? (session.artist ? `${session.title} - ${session.artist}` : session.title)
       : '';
+    // YouTube Music's player bar: song title plus the first part of the
+    // byline ("Artist • Album • Year"). Read before Media Session, which
+    // carries the advert's name while one plays.
+    const musicBar = (() => {
+      if (!/(^|\.)music\.youtube\.com$/i.test(window.location.hostname)) return '';
+      const song = document.querySelector('ytmusic-player-bar .title')?.textContent?.trim() || '';
+      const artist = (document.querySelector('ytmusic-player-bar .byline')?.textContent || '')
+        .split('•')[0].trim();
+      return song ? (artist ? `${song} - ${artist}` : song) : '';
+    })();
     const candidates = [
-      /(^|\.)(music\.youtube|soundcloud)\.com$/i.test(window.location.hostname)
+      musicBar,
+      /(^|\.)(music\.youtube|soundcloud)\.com$/i.test(window.location.hostname) && !isAd
         ? sessionTitle : '',
       // m.youtube.com now shows the title in an h2 "ytVideoMetadataViewModelTitle";
       // after a page change document.title stays "YouTube" and og:title is gone.
@@ -242,7 +253,7 @@
       document.title,
     ];
     for (const candidate of candidates) {
-      const value = (candidate || '').replace(/\s*[-–]\s*YouTube(?: Music)?\s*$/i, '').trim();
+      const value = (candidate || '').replace(/\s*[-–|]\s*YouTube(?: Music)?\s*$/i, '').trim();
       if (value && !/^(?:youtube(?: music)?|vídeo do youtube)$/i.test(value)) return value;
     }
     return '';
