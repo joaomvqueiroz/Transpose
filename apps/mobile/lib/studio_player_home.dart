@@ -143,7 +143,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _browserReadyForSelection = false;
       _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
     });
-    await _player.openYouTube();
+    final String query = widget.initialYouTubeQuery?.trim() ?? '';
+    if (query.isEmpty) {
+      await _player.openYouTube();
+    } else {
+      // A song handed over from Spotify: open its YouTube results directly.
+      await _player.search(query);
+    }
     _browserOriginVideoId = _player.youtube?.media.videoId ?? '';
     _browserOpening = false;
     if (mounted && _player.youtube == null) {

@@ -22,6 +22,7 @@ import 'practice_controller.dart';
 import 'player_collections.dart';
 import 'session_snapshot.dart';
 import 'premium_branding.dart';
+import 'source_picker.dart';
 import 'microphone_tuner.dart';
 import 'home_widget_bridge.dart';
 import 'studio_appearance.dart';
@@ -44,6 +45,7 @@ class StudioVisualApp extends StatefulWidget {
     this.openSearchWhenEmpty = false,
     this.deferHomeUntilLaunch = false,
     this.waitForStartupBrowser = false,
+    this.chooseSourceAtStart = false,
   });
 
   final Widget? functionalPlayer;
@@ -56,6 +58,9 @@ class StudioVisualApp extends StatefulWidget {
   final bool openSearchWhenEmpty;
   final bool deferHomeUntilLaunch;
   final bool waitForStartupBrowser;
+
+  /// Show the YouTube / Spotify choice after the launch artwork.
+  final bool chooseSourceAtStart;
 
   @override
   State<StudioVisualApp> createState() => _StudioVisualAppState();
@@ -123,20 +128,28 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     ),
     home: TransponoLaunchGate(
       deferChild: widget.deferHomeUntilLaunch,
-      revealWhen: widget.waitForStartupBrowser ? _startupBrowserReady : null,
-      child: StudioVisualHome(
-        functionalPlayer: widget.functionalPlayer,
-        youtubeSessionFactory: widget.youtubeSessionFactory,
-        playerController: widget.playerController,
-        presetStore: widget.presetStore,
-        recoveryRepository: widget.recoveryRepository,
-        chordBrowserFactory: widget.chordBrowserFactory,
-        openSearchWhenEmpty: widget.openSearchWhenEmpty,
-        appearance: _appearance,
-        onAppearanceChanged: _changeAppearance,
-        onInitialBrowserReady: () => _startupBrowserReady.value = true,
-      ),
+      // The choice screen has no browser to wait for behind the artwork.
+      revealWhen: widget.waitForStartupBrowser && !widget.chooseSourceAtStart
+          ? _startupBrowserReady
+          : null,
+      child: widget.chooseSourceAtStart
+          ? TransponoSourcePicker(youtubeBuilder: _studio)
+          : _studio(null),
     ),
+  );
+
+  Widget _studio(String? query) => StudioVisualHome(
+    functionalPlayer: widget.functionalPlayer,
+    youtubeSessionFactory: widget.youtubeSessionFactory,
+    playerController: widget.playerController,
+    presetStore: widget.presetStore,
+    recoveryRepository: widget.recoveryRepository,
+    chordBrowserFactory: widget.chordBrowserFactory,
+    openSearchWhenEmpty: widget.openSearchWhenEmpty,
+    initialYouTubeQuery: query,
+    appearance: _appearance,
+    onAppearanceChanged: _changeAppearance,
+    onInitialBrowserReady: () => _startupBrowserReady.value = true,
   );
 }
 
@@ -163,6 +176,7 @@ class StudioVisualHome extends StatefulWidget {
     this.recoveryRepository,
     this.chordBrowserFactory,
     this.openSearchWhenEmpty = false,
+    this.initialYouTubeQuery,
     this.appearance = const StudioAppearance(),
     this.onAppearanceChanged,
     this.onInitialBrowserReady,
@@ -176,6 +190,9 @@ class StudioVisualHome extends StatefulWidget {
   final SessionSnapshotRepository? recoveryRepository;
   final ChordBrowserSession Function()? chordBrowserFactory;
   final bool openSearchWhenEmpty;
+
+  /// YouTube search to open first, e.g. a song handed over from Spotify.
+  final String? initialYouTubeQuery;
   final StudioAppearance appearance;
   final ValueChanged<StudioAppearance>? onAppearanceChanged;
   final VoidCallback? onInitialBrowserReady;

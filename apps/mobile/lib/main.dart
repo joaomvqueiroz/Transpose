@@ -29,6 +29,8 @@ Future<void> main() async {
     const StudioVisualApp(
       openSearchWhenEmpty: true,
       waitForStartupBrowser: true,
+      // First screen: choose YouTube (full studio) or Spotify (listening).
+      chooseSourceAtStart: true,
     ),
   );
 }

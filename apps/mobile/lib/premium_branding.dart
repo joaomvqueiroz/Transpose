@@ -51,6 +51,28 @@ class TransponoWordmark extends StatelessWidget {
   }
 }
 
+/// The Transpono chrome-bars symbol, drawn as vectors (sharp at any size).
+class TransponoMark extends StatelessWidget {
+  const TransponoMark({super.key, this.height = 120});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: height,
+    width: height * 210 / 228,
+    child: FittedBox(
+      child: CustomPaint(
+        painter: _ChromeBarsPainter(
+          animation: const AlwaysStoppedAnimation<double>(0),
+          reducedMotion: true,
+        ),
+        size: const Size(210, 228),
+      ),
+    ),
+  );
+}
+
 /// A brief in-app launch screen, distinct from the launcher icon.
 class TransponoLaunchGate extends StatefulWidget {
   const TransponoLaunchGate({

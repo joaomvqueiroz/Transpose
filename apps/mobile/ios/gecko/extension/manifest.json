@@ -4,11 +4,11 @@
     "gecko": { "id": "transpono-gecko@transpono.app" }
   },
   "name": "Transpono Gecko bridge",
-  "version": "1.0",
-  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube. No media is captured, fetched or exported.",
+  "version": "1.1",
+  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube and read the song title on Spotify. No media is captured, fetched or exported.",
   "content_scripts": [
     {
-      "matches": ["https://*.youtube.com/*"],
+      "matches": ["https://*.youtube.com/*", "https://open.spotify.com/*"],
       "js": ["relay.js"],
       "run_at": "document_start",
       "all_frames": false
@@ -18,7 +18,8 @@
     "geckoViewAddons",
     "nativeMessaging",
     "nativeMessagingFromContent",
-    "https://*.youtube.com/*"
+    "https://*.youtube.com/*",
+    "https://open.spotify.com/*"
   ],
   "content_security_policy": "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self'"
 }
