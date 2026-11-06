@@ -244,12 +244,13 @@ abstract class ChordBrowserSession extends ChangeNotifier {
 }
 
 class WebViewChordBrowser extends ChordBrowserSession {
-  WebViewChordBrowser() {
-    // In iPhone builds that run Gecko (Gecko owns the app's start-up), the
-    // chord site never finished loading in a WKWebView: the search stayed on
-    // its progress bar. Use the same Gecko engine as YouTube there; its relay
-    // extension also covers cifras.com.br for the result/extraction scripts.
-    if (GeckoEngine.isAvailable) {
+  /// [gecko] picks the engine in iPhone builds that embed Gecko (default:
+  /// Gecko when available). Cifras.com.br puts song pages behind a Cloudflare
+  /// check that Gecko on iPhone does not pass, while Safari's engine does; but
+  /// an earlier build saw the site never finish loading in WKWebView there.
+  /// The search panel therefore tries WKWebView first and falls back to Gecko.
+  WebViewChordBrowser({bool? gecko}) {
+    if (gecko ?? GeckoEngine.isAvailable) {
       final gecko = GeckoWebViewController();
       _gecko = gecko;
       controller = WebViewController.fromPlatform(gecko);
@@ -261,6 +262,7 @@ class WebViewChordBrowser extends ChordBrowserSession {
   }
   late final WebViewController controller;
   GeckoWebViewController? _gecko;
+  bool get usesGecko => _gecko != null;
   Uri? _uri;
   int _progress = 0, _revision = 0;
   bool _disposed = false, _back = false;
@@ -469,9 +471,16 @@ class ChordSearchPanel extends StatefulWidget {
 }
 
 class _ChordSearchPanelState extends State<ChordSearchPanel> {
-  late final ChordBrowserSession _session =
-      widget.sessionFactory?.call() ?? WebViewChordBrowser();
-  late final Widget _siteView = _session.buildView();
+  // In Gecko builds the chord site first opens in Safari's engine (it passes
+  // the site's Cloudflare check); if that page never finishes loading, the
+  // panel switches to Gecko once and repeats the last step.
+  late bool _canFallBack =
+      widget.sessionFactory == null && GeckoEngine.isAvailable;
+  late ChordBrowserSession _session =
+      widget.sessionFactory?.call() ??
+      WebViewChordBrowser(gecko: _canFallBack ? false : null);
+  late Widget _siteView = _session.buildView();
+  Uri? _lastOpened;
   late final TextEditingController _query = TextEditingController(
     text: widget.initialQuery,
   );
@@ -493,6 +502,41 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
     }
   }
 
+  Future<void> _openWatched(Uri uri) async {
+    _lastOpened = uri;
+    final generation = _generation;
+    final session = _session;
+    await session.open(uri);
+    if (_canFallBack) unawaited(_fallBackIfStuck(generation, session));
+  }
+
+  Future<void> _fallBackIfStuck(
+    int generation,
+    ChordBrowserSession session,
+  ) async {
+    // Safari's engine did not load a page in 15 s: use Gecko instead.
+    await Future<void>.delayed(const Duration(seconds: 15));
+    if (!mounted ||
+        !_canFallBack ||
+        generation != _generation ||
+        !identical(session, _session) ||
+        session.progress >= 100) {
+      return;
+    }
+    _canFallBack = false;
+    session.removeListener(_changed);
+    final gecko = WebViewChordBrowser(gecko: true);
+    setState(() {
+      _session = gecko;
+      _siteView = gecko.buildView();
+      _lastReadyUri = null;
+    });
+    session.dispose();
+    gecko.addListener(_changed);
+    final target = _lastOpened;
+    if (target != null) await gecko.open(target);
+  }
+
   @override
   void dispose() {
     _generation++;
@@ -507,6 +551,7 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
     final uri = _session.currentUri;
     if (uri != null && _session.progress >= 100 && uri != _lastReadyUri) {
       _lastReadyUri = uri;
+      _canFallBack = false; // This engine loads the site: keep it.
       final generation = _generation;
       if (uri.path == '/busca') {
         unawaited(_readResults(generation));
@@ -534,7 +579,7 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
       _lastReadyUri = null;
     });
     try {
-      await _session.open(uri);
+      await _openWatched(uri);
     } on Object {
       if (mounted && generation == _generation) {
         setState(() {
@@ -587,7 +632,7 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
       _lastReadyUri = null;
     });
     try {
-      await _session.open(result.url);
+      await _openWatched(result.url);
     } on Object {
       if (mounted && generation == _generation) {
         setState(() {
