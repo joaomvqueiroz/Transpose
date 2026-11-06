@@ -4,21 +4,31 @@ import 'package:flutter/material.dart';
 
 import 'premium_branding.dart';
 import 'spotify_browser.dart';
+import 'youtube_browser.dart';
 
 /// Where the user listens from, chosen on the first screen.
 enum ListeningSource { youtube, spotify }
 
+/// Builds the studio for a source. [sessionFactory] replaces the YouTube
+/// browser (Spotify); [query] is a YouTube search to open first.
+typedef StudioBuilder =
+    Widget Function(
+      Key key,
+      String? query,
+      YouTubeBrowserSession Function()? sessionFactory,
+    );
+
 /// First screen: black, the Transpono symbol and two large choices.
 ///
-/// YouTube opens the full Transpono studio (pitch, EQ, effects, chords).
-/// Spotify opens its web player inside Transpono for listening, with chords
-/// and a shortcut that plays the same song on YouTube, where pitch works.
+/// Both open the same studio. With YouTube everything works (pitch, EQ,
+/// effects, chords). With Spotify the studio looks the same, but Spotify's
+/// protected audio cannot be processed, so only playback and chords work;
+/// a button hands the song to YouTube, where pitch works.
 /// Everything is drawn as vectors, so it stays sharp on any screen.
 class TransponoSourcePicker extends StatefulWidget {
-  const TransponoSourcePicker({super.key, required this.youtubeBuilder});
+  const TransponoSourcePicker({super.key, required this.studioBuilder});
 
-  /// Builds the YouTube studio; [query] is a search to open, if any.
-  final Widget Function(String? query) youtubeBuilder;
+  final StudioBuilder studioBuilder;
 
   @override
   State<TransponoSourcePicker> createState() => _TransponoSourcePickerState();
@@ -27,32 +37,160 @@ class TransponoSourcePicker extends StatefulWidget {
 class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   ListeningSource? _source;
   String? _query;
+  int _generation = 0;
+  SpotifyStudioSession? _spotify;
 
-  void _openYouTube([String? query]) {
+  void _choose(ListeningSource? source, [String? query]) {
     setState(() {
-      // The studio reads its first search once; it stays open afterwards.
+      _source = source;
       _query = query;
-      _source = ListeningSource.youtube;
+      // A new studio (and player) for every choice; the old one is disposed.
+      _generation++;
+      // The studio's player owns and disposes this session; keep a handle
+      // only to read the song for "YouTube com tom".
+      _spotify = source == ListeningSource.spotify
+          ? SpotifyStudioSession()
+          : null;
     });
+  }
+
+  YouTubeBrowserSession _spotifySession() => _spotify!;
+
+  void _playOnYouTube() {
+    final track = _spotify?.track;
+    if (track == null || track.isEmpty) return;
+    _choose(ListeningSource.youtube, track.query);
   }
 
   @override
   Widget build(BuildContext context) {
-    switch (_source) {
-      case ListeningSource.youtube:
-        return widget.youtubeBuilder(_query);
-      case ListeningSource.spotify:
-        return SpotifyPage(
-          onBack: () => setState(() => _source = null),
-          onPlayOnYouTube: _openYouTube,
-        );
-      case null:
-        return _PickerScreen(
-          onYouTube: _openYouTube,
-          onSpotify: () => setState(() => _source = ListeningSource.spotify),
-        );
+    final source = _source;
+    if (source == null) {
+      return _PickerScreen(
+        onYouTube: () => _choose(ListeningSource.youtube),
+        onSpotify: () => _choose(ListeningSource.spotify),
+      );
     }
+    final studio = widget.studioBuilder(
+      ValueKey<String>('studio-${source.name}-$_generation'),
+      _query,
+      source == ListeningSource.spotify ? _spotifySession : null,
+    );
+    return Stack(
+      children: [
+        Positioned.fill(child: studio),
+        Positioned(
+          left: 10,
+          top: 0,
+          child: SafeArea(
+            child: _SourceSwitch(
+              spotify: source == ListeningSource.spotify,
+              session: _spotify,
+              onHome: () => _choose(null),
+              onPlayOnYouTube: _playOnYouTube,
+            ),
+          ),
+        ),
+      ],
+    );
   }
+}
+
+/// Small floating controls over the studio: back to the choice screen and,
+/// on Spotify, "Tocar no YouTube com tom" for the song that is playing.
+class _SourceSwitch extends StatelessWidget {
+  const _SourceSwitch({
+    required this.spotify,
+    required this.session,
+    required this.onHome,
+    required this.onPlayOnYouTube,
+  });
+
+  final bool spotify;
+  final SpotifyStudioSession? session;
+  final VoidCallback onHome;
+  final VoidCallback onPlayOnYouTube;
+
+  @override
+  Widget build(BuildContext context) {
+    final home = _Pill(
+      key: const Key('sourceHome'),
+      tooltip: 'Escolher YouTube ou Spotify',
+      onPressed: onHome,
+      child: const Icon(Icons.apps_rounded, size: 18, color: Colors.white),
+    );
+    final current = session;
+    if (!spotify || current == null) return home;
+    return ListenableBuilder(
+      listenable: current,
+      builder: (context, _) {
+        final track = current.track;
+        final ready = track != null && !track.isEmpty;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            home,
+            const SizedBox(width: 6),
+            _Pill(
+              key: const Key('spotifyPlayOnYouTube'),
+              tooltip: ready
+                  ? 'Tocar «${track?.title}» no YouTube com tom'
+                  : 'Toque uma música no Spotify primeiro',
+              color: ready ? const Color(0xFFFF0033) : const Color(0xCC2A2A2E),
+              onPressed: ready ? onPlayOnYouTube : null,
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.play_arrow_rounded, size: 18, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    'YouTube com tom',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({
+    super.key,
+    required this.tooltip,
+    required this.onPressed,
+    required this.child,
+    this.color = const Color(0xCC18181B),
+  });
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Widget child;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: Material(
+      color: color,
+      shape: const StadiumBorder(side: BorderSide(color: Color(0x44FFFFFF))),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: child,
+        ),
+      ),
+    ),
+  );
 }
 
 class _PickerScreen extends StatelessWidget {
@@ -77,27 +215,6 @@ class _PickerScreen extends StatelessWidget {
                 wide ? box.maxHeight * .46 : (box.maxWidth - 56) / 2.14,
                 230.0,
               );
-              final tiles = <Widget>[
-                _SourceTile(
-                  key: const Key('pickYouTube'),
-                  size: tile,
-                  label: 'YouTube',
-                  caption: 'Tom, EQ e efeitos',
-                  logo: const _YouTubeLogo(),
-                  accent: const Color(0xFFFF0033),
-                  onPressed: onYouTube,
-                ),
-                SizedBox(width: tile * .14, height: tile * .14),
-                _SourceTile(
-                  key: const Key('pickSpotify'),
-                  size: tile,
-                  label: 'Spotify',
-                  caption: 'Ouvir e ver a cifra',
-                  logo: const _SpotifyLogo(),
-                  accent: const Color(0xFF1ED760),
-                  onPressed: onSpotify,
-                ),
-              ];
               return Center(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(
@@ -121,7 +238,30 @@ class _PickerScreen extends StatelessWidget {
                         ),
                       ),
                       SizedBox(height: wide ? 24 : 44),
-                      Row(mainAxisSize: MainAxisSize.min, children: tiles),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _SourceTile(
+                            key: const Key('pickYouTube'),
+                            size: tile,
+                            label: 'YouTube',
+                            caption: 'Tom, EQ e efeitos',
+                            logo: const _YouTubeLogo(),
+                            accent: const Color(0xFFFF0033),
+                            onPressed: onYouTube,
+                          ),
+                          SizedBox(width: tile * .14),
+                          _SourceTile(
+                            key: const Key('pickSpotify'),
+                            size: tile,
+                            label: 'Spotify',
+                            caption: 'Ouvir e ver a cifra',
+                            logo: const _SpotifyLogo(),
+                            accent: const Color(0xFF1ED760),
+                            onPressed: onSpotify,
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -288,11 +428,12 @@ class _SpotifyLogoPainter extends CustomPainter {
       final left = Offset(c.dx - d * arc.w / 2, c.dy + d * arc.y + d * .02);
       final right = Offset(c.dx + d * arc.w / 2, c.dy + d * arc.y + d * .05);
       final control = Offset(c.dx, c.dy + d * arc.y - d * arc.bow);
+      stroke.strokeWidth = d * arc.t;
       canvas.drawPath(
         Path()
           ..moveTo(left.dx, left.dy)
           ..quadraticBezierTo(control.dx, control.dy, right.dx, right.dy),
-        stroke..strokeWidth = d * arc.t,
+        stroke,
       );
     }
   }

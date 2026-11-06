@@ -42,6 +42,20 @@ void main() {
     expect(track?.artist, 'Hillsong UNITED');
   });
 
+  test('player clock labels become seconds', () {
+    expect(parseSpotifyClock('1:23'), 83);
+    expect(parseSpotifyClock('1:02:03'), 3723);
+    expect(parseSpotifyClock(''), 0);
+    expect(parseSpotifyClock('-:--'), 0);
+  });
+
+  test('a Spotify id is never an 11-character YouTube id', () {
+    const track = SpotifyTrack(title: 'Oceans', artist: 'Hillsong UNITED');
+    expect(track.id, startsWith('spotify-'));
+    expect(RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(track.id), isFalse);
+    expect(track.displayTitle, 'Oceans - Hillsong UNITED');
+  });
+
   test('no track while nothing plays', () {
     expect(
       SpotifyTrack.decode(

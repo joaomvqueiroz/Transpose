@@ -133,14 +133,19 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
           ? _startupBrowserReady
           : null,
       child: widget.chooseSourceAtStart
-          ? TransponoSourcePicker(youtubeBuilder: _studio)
-          : _studio(null),
+          ? TransponoSourcePicker(studioBuilder: _studio)
+          : _studio(null, null, null),
     ),
   );
 
-  Widget _studio(String? query) => StudioVisualHome(
+  Widget _studio(
+    Key? key,
+    String? query,
+    YouTubeBrowserSession Function()? sessionFactory,
+  ) => StudioVisualHome(
+    key: key,
     functionalPlayer: widget.functionalPlayer,
-    youtubeSessionFactory: widget.youtubeSessionFactory,
+    youtubeSessionFactory: sessionFactory ?? widget.youtubeSessionFactory,
     playerController: widget.playerController,
     presetStore: widget.presetStore,
     recoveryRepository: widget.recoveryRepository,
