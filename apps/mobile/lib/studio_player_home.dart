@@ -2405,7 +2405,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Widget build(BuildContext context) {
     final media = _mediaSurface();
     final landscapePlayer = _isLandscapePlayer;
-    return PopScope(
+    return Listener(
+      // A touch outside the page (an app button, the adjustments) takes the
+      // focus away from the page's search field, as tapping elsewhere does
+      // in a normal browser. Gecko keeps it otherwise, and then tapping the
+      // field again opens no keyboard.
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _releasePageFocusOutside,
+      child: PopScope(
       canPop: !_browsing,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
@@ -2492,7 +2499,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 ),
               ),
       ),
+    ),
     );
+  }
+
+  void _releasePageFocusOutside(PointerDownEvent event) {
+    final session = _player.youtube;
+    if (session == null || !(_player.isYouTube || _browsing)) return;
+    final box = _mediaKey.currentContext?.findRenderObject();
+    if (box is RenderBox && box.hasSize) {
+      final local = box.globalToLocal(event.position);
+      if (box.size.contains(local)) return; // A touch on the page itself.
+    }
+    unawaited(session.releaseFocus());
   }
 }
 

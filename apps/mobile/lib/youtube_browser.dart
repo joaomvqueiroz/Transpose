@@ -447,6 +447,10 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// page's video list is scrolled back to the player at the top; on
   /// closing, it returns to where the user was.
   Future<void> adjustmentsShown(bool shown) async {}
+
+  /// The user touched the app outside the page: the page's text field gives
+  /// up its focus, so touching it again opens the keyboard.
+  Future<void> releaseFocus() async {}
   Future<void> search(String query);
   Future<void> reload();
   Future<void> goBack();
@@ -893,6 +897,19 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _progress = 0;
     _notify();
     await controller.loadRequest(uri);
+  }
+
+  @override
+  Future<void> releaseFocus() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript('''(() => {
+          const field = document.activeElement;
+          if (field && field !== document.body && field.blur) field.blur();
+        })()''');
+    } on Object {
+      // No page context (navigating); nothing has the focus then.
+    }
   }
 
   @override
