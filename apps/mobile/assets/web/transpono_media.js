@@ -99,6 +99,23 @@
       }
     }, 500);
   }
+  // Gecko on iOS opens the keyboard only when a text field GAINS focus. If
+  // the user taps outside the page (an app button) the keyboard closes but the
+  // search field keeps its focus, so tapping it again changes nothing: no
+  // keyboard, and YouTube's search overlay stays over the results. Tapping a
+  // field that already has focus therefore drops and retakes the focus, which
+  // makes Gecko ask for the keyboard again.
+  if (!window.__transponoRefocus) {
+    window.__transponoRefocus = true;
+    document.addEventListener('touchend', event => {
+      const target = event.target;
+      const field = target && target.closest &&
+        target.closest('input, textarea, [contenteditable="true"]');
+      if (!field || field !== document.activeElement) return;
+      field.blur();
+      setTimeout(() => field.focus(), 0);
+    }, true);
+  }
   // WebView can reinject after an SPA navigation. Reuse MediaElementAudioSource
   // ownership: creating a second source for the same element is not supported.
   if (window.TransponoMedia && window.TransponoMedia._activate) {
