@@ -55,8 +55,28 @@ MSE e o Web Audio recebe o áudio, como no Android.
   JavaScript (`apps/mobile/tool/tests/*.cjs`) a passar, incluindo um novo para a via nativa.
 - Build iOS no GitHub Actions com sucesso; o `Runner.app` contém `GeckoView.framework`,
   `XUL`, dylibs do Gecko, `TransponoGecko.framework`, `PlugIns/Reynard Helper.appex` e a
-  extensão em `GeckoView.framework/Frameworks/extensions/transpono/`.
-- **Nada disto foi ainda executado num iPhone.**
+  extensão em `GeckoView.framework/Frameworks/extensions/readerview/`.
+- **Testado num iPhone a 2026-11-06** (iPhone 15, iOS 26.6, instalado pelo AltServer 1.8.1 no
+  portátil): com o build `996824d` o YouTube aparece, responde aos toques e o **TOM muda**.
+  EQ, efeitos, loop A–B e velocidade ainda não foram verificados.
+
+### Problemas encontrados no iPhone e corrigidos
+
+1. **Ecrã preto no YouTube** (`5017674`): o Gecko do Reynard procura o processo de conteúdo
+   em `PlugIns/Reynard Helper.appex` (nome fixo no `NSExtensionUtils.mm` dos patches do
+   Reynard). O `embed-gecko.sh` mudava o nome para `Transpono Helper.appex`, por isso nunca
+   arrancava nenhum processo de conteúdo. O nome da pasta tem de ficar; o bundle id pode mudar.
+   No mesmo commit, `load()` deixou de esperar pela instalação da extensão (não tem tempo
+   limite) e a sessão passa a ter foco com `setFocused`, como no Reynard.
+2. **Toques e diagnóstico** (`6fdca8f`): a vista Gecko recebe todos os toques
+   (`EagerGestureRecognizer`); a instalação da ponte repete durante até 8 s enquanto não há
+   ligação, e o aviso «os controlos de áudio não carregaram» mostra entre parênteses o passo e o
+   motivo (estado da extensão e ligações recusadas).
+3. **«Os controlos de áudio não carregaram»** (`996824d`): o `ensureBuiltIn` recusava
+   `resource://app/extensions/transpono/` com «Only resource://android/... URIs are allowed».
+   O patch do Reynard a `GeckoViewWebExtension.sys.mjs` só aceita `resource://android/` ou
+   exatamente `resource://app/extensions/readerview/`. A extensão de relay passou para essa
+   pasta (o Transpono não usa o modo de leitura do Reynard).
 
 ## IPAs
 
@@ -77,7 +97,9 @@ gh release download ios-gecko-test-1 -R joaomvqueiroz/Transpose -D <pasta>
 No PC de casa o AltServer (1.8.00, iCloud com sessão) falhou duas vezes com `−80046`.
 Desde ~22/10/2026 a Apple recusa o token de desenvolvedor a pedidos que se identificam como
 Android; no portátil o AltServer funcionou. Não insistir: tentativas repetidas podem
-bloquear a conta temporariamente.
+bloquear a conta temporariamente. A 06/11 o portátil também deu `−80046` uma vez, depois de
+várias instalações seguidas; o AltServer atualizou-se sozinho para 1.8.1 e, um pouco mais
+tarde, as instalações seguintes funcionaram.
 
 1. iPhone ligado por cabo ao portátil, desbloqueado.
 2. Shift + clique no ◆ do AltServer → **Sideload .ipa…** → iPhone → `Transpono-Gecko.ipa`.
