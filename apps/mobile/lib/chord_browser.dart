@@ -82,6 +82,13 @@ Uri? chordNavigationUri(String value) {
   return null;
 }
 
+/// The chord site is showing its Cloudflare check ("Just a moment...")
+/// instead of the song.
+class ChordSiteCheckException extends FormatException {
+  const ChordSiteCheckException()
+    : super('O Cifras.com.br está a verificar o navegador.');
+}
+
 class ImportedChord {
   const ImportedChord({
     required this.title,
@@ -107,6 +114,7 @@ class ImportedChord {
         'Não foi possível ler uma cifra nesta página.',
       );
     }
+    if (value['error'] == 'challenge') throw const ChordSiteCheckException();
     if (value['error'] != null) {
       final detail = '${value['error']}';
       throw FormatException(
@@ -148,6 +156,11 @@ class ImportedChord {
 const chordExtractionScript = r'''(() => {
   const result = {title: (document.querySelector('h1')?.innerText || document.title || '').trim().slice(0, 240),
     url: location.href, text: '', error: null};
+  if (/just a moment|um momento|attention required|verif/i.test(document.title || '') ||
+      document.querySelector('#challenge-form, #challenge-running, script[src*="challenge-platform"]')) {
+    result.error = 'challenge';
+    return JSON.stringify(result);
+  }
   const visible = el => {
     for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
       const css = getComputedStyle(node);
@@ -467,6 +480,9 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
   Uri? _lastReadyUri;
   bool _loading = false;
   int _generation = 0;
+  // The site's browser check is on screen: show the page so it can finish
+  // (and be answered by a tap if it asks for one).
+  bool _siteCheck = false;
 
   @override
   void initState() {
@@ -585,21 +601,38 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
   Future<void> _readChord(int generation, Uri uri) async {
     // Gecko on iPhone has no JIT, so the site can take a few seconds longer
     // to show the chord; keep trying for about 5 s and say why it failed.
+    // When the site shows its Cloudflare check instead ("Just a moment..."),
+    // wait up to a minute with the page on screen: the check usually passes
+    // by itself, and if it asks for a tap the user can give it.
     var lastReason = '';
-    for (var attempt = 0; attempt < 12; attempt++) {
+    var attempts = 12;
+    for (var attempt = 0; attempt < attempts; attempt++) {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 450));
       }
       if (!mounted ||
           generation != _generation ||
           !sameChordPage(_session.currentUri, uri)) {
+        if (mounted && _siteCheck) setState(() => _siteCheck = false);
         return;
       }
       try {
         final chord = await _session.extract();
         if (!mounted || generation != _generation) return;
+        if (_siteCheck) setState(() => _siteCheck = false);
         await widget.onSelected(chord);
         return;
+      } on ChordSiteCheckException catch (failure) {
+        lastReason = failure.message;
+        attempts = 135; // About a minute in all.
+        if (!_siteCheck && mounted) {
+          setState(() {
+            _siteCheck = true;
+            _error =
+                'O Cifras.com.br está a verificar o navegador. Aguarde; se '
+                'aparecer uma caixa na página acima, toque nela.';
+          });
+        }
       } on FormatException catch (failure) {
         // A visible chord can be inserted shortly after page load.
         lastReason = failure.message;
@@ -608,10 +641,11 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
       }
     }
     if (mounted && generation == _generation) {
-      final reason = lastReason.length > 140
-          ? '${lastReason.substring(0, 140)}…'
+      final reason = lastReason.length > 260
+          ? '${lastReason.substring(0, 260)}…'
           : lastReason;
       setState(() {
+        _siteCheck = false;
         _loading = false;
         _error =
             'Não foi possível ler esta cifra. Escolha outro resultado.'
@@ -626,15 +660,20 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
       Positioned(
         left: 0,
         right: 0,
-        top: 0,
+        top: _siteCheck ? 150 : 0,
         height: 320,
         child: IgnorePointer(
+          ignoring: !_siteCheck,
           child: ExcludeSemantics(
-            child: Opacity(opacity: hiddenChordSiteOpacity, child: _siteView),
+            excluding: !_siteCheck,
+            child: Opacity(
+              opacity: _siteCheck ? 1 : hiddenChordSiteOpacity,
+              child: _siteView,
+            ),
           ),
         ),
       ),
-      SingleChildScrollView(
+      if (!_siteCheck) SingleChildScrollView(
         key: const Key('chordNativeResults'),
         child: Column(
           children: [
@@ -724,6 +763,35 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
           ],
         ),
       ),
+      if (_siteCheck)
+        Positioned(
+          left: 16,
+          right: 8,
+          top: 8,
+          height: 134,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  _error ?? '',
+                  key: const Key('chordSiteCheck'),
+                  style: const TextStyle(fontSize: 15, height: 1.3),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Cancelar',
+                onPressed: () => setState(() {
+                  _generation++;
+                  _siteCheck = false;
+                  _loading = false;
+                  _error = null;
+                }),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+        ),
     ],
   );
 }
