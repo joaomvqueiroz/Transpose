@@ -3,9 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
-
 import 'player_chord_sheet.dart';
 import 'studio_native_pages.dart';
 
@@ -204,11 +204,23 @@ abstract class ChordBrowserSession extends ChangeNotifier {
 }
 
 class WebViewChordBrowser extends ChordBrowserSession {
-  WebViewChordBrowser()
-    : controller = WebViewController(
+  WebViewChordBrowser() {
+    // In iPhone builds that run Gecko (Gecko owns the app's start-up), the
+    // chord site never finished loading in a WKWebView: the search stayed on
+    // its progress bar. Use the same Gecko engine as YouTube there; its relay
+    // extension also covers cifras.com.br for the result/extraction scripts.
+    if (GeckoEngine.isAvailable) {
+      final gecko = GeckoWebViewController();
+      _gecko = gecko;
+      controller = WebViewController.fromPlatform(gecko);
+    } else {
+      controller = WebViewController(
         onPermissionRequest: (request) => request.deny(),
       );
-  final WebViewController controller;
+    }
+  }
+  late final WebViewController controller;
+  GeckoWebViewController? _gecko;
   Uri? _uri;
   int _progress = 0, _revision = 0;
   bool _disposed = false, _back = false;
@@ -234,68 +246,89 @@ class WebViewChordBrowser extends ChordBrowserSession {
       await (controller.platform as AndroidWebViewController)
           .setMediaPlaybackRequiresUserGesture(true);
     }
-    await controller.setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (request) {
-          if (!request.isMainFrame) return NavigationDecision.navigate;
-          final target = chordNavigationUri(request.url);
-          if (target == null) {
-            _error = 'Só é possível abrir páginas do Cifras.com.br.';
-            _notify();
-            return NavigationDecision.prevent;
-          }
-          if (target.toString() != request.url) {
-            unawaited(open(target));
-            return NavigationDecision.prevent;
-          }
-          return NavigationDecision.navigate;
-        },
-        onPageStarted: (url) {
-          _revision++;
-          _uri = Uri.tryParse(url);
-          _progress = 0;
-          _error = null;
-          _notify();
-        },
-        onUrlChange: (change) {
-          final uri = Uri.tryParse(change.url ?? '');
-          if (uri != _uri) {
-            _revision++;
-            _uri = uri;
-            _notify();
-          }
-        },
-        onProgress: (value) {
-          _progress = value;
-          _notify();
-        },
-        onPageFinished: (_) async {
-          final revision = _revision;
-          try {
-            final back = await controller.canGoBack();
-            if (_disposed || revision != _revision) return;
-            _back = back;
-            _progress = 100;
-            _notify();
-            if (_uri?.path == '/busca' || _uri?.path == '/') {
-              unawaited(_scrollSearchResults(revision));
-            }
-          } on Object {
-            // Closing the browser may destroy its platform view mid-callback.
-            if (!_disposed && revision == _revision) {
-              _progress = 100;
-              _notify();
-            }
-          }
-        },
-        onWebResourceError: (failure) {
-          if (failure.isForMainFrame != true) return;
-          _error =
-              'Não foi possível abrir o Cifras.com.br. Verifique a ligação.';
+    NavigationDecision onNavigationRequest(NavigationRequest request) {
+      if (!request.isMainFrame) return NavigationDecision.navigate;
+      final target = chordNavigationUri(request.url);
+      if (target == null) {
+        _error = 'Só é possível abrir páginas do Cifras.com.br.';
+        _notify();
+        return NavigationDecision.prevent;
+      }
+      if (target.toString() != request.url) {
+        unawaited(open(target));
+        return NavigationDecision.prevent;
+      }
+      return NavigationDecision.navigate;
+    }
+
+    void onPageStarted(String url) {
+      _revision++;
+      _uri = Uri.tryParse(url);
+      _progress = 0;
+      _error = null;
+      _notify();
+    }
+
+    void onUrlChange(UrlChange change) {
+      final uri = Uri.tryParse(change.url ?? '');
+      if (uri != _uri) {
+        _revision++;
+        _uri = uri;
+        _notify();
+      }
+    }
+
+    void onProgress(int value) {
+      _progress = value;
+      _notify();
+    }
+
+    Future<void> onPageFinished(String _) async {
+      final revision = _revision;
+      try {
+        final back = await controller.canGoBack();
+        if (_disposed || revision != _revision) return;
+        _back = back;
+        _progress = 100;
+        _notify();
+        if (_uri?.path == '/busca' || _uri?.path == '/') {
+          unawaited(_scrollSearchResults(revision));
+        }
+      } on Object {
+        // Closing the browser may destroy its platform view mid-callback.
+        if (!_disposed && revision == _revision) {
           _progress = 100;
           _notify();
-        },
-      ),
+        }
+      }
+    }
+
+    void onWebResourceError(WebResourceError failure) {
+      if (failure.isForMainFrame != true) return;
+      _error = 'Não foi possível abrir o Cifras.com.br. Verifique a ligação.';
+      _progress = 100;
+      _notify();
+    }
+
+    await controller.setNavigationDelegate(
+      _gecko == null
+          ? NavigationDelegate(
+              onNavigationRequest: onNavigationRequest,
+              onPageStarted: onPageStarted,
+              onUrlChange: onUrlChange,
+              onProgress: onProgress,
+              onPageFinished: onPageFinished,
+              onWebResourceError: onWebResourceError,
+            )
+          : NavigationDelegate.fromPlatform(
+              GeckoNavigationDelegate(),
+              onNavigationRequest: onNavigationRequest,
+              onPageStarted: onPageStarted,
+              onUrlChange: onUrlChange,
+              onProgress: onProgress,
+              onPageFinished: onPageFinished,
+              onWebResourceError: onWebResourceError,
+            ),
     );
   }
 
@@ -356,11 +389,20 @@ class WebViewChordBrowser extends ChordBrowserSession {
   }
 
   @override
-  Widget buildView() => WebViewWidget(controller: controller);
+  Widget buildView() {
+    final gecko = _gecko;
+    if (gecko != null) {
+      return WebViewWidget.fromPlatform(platform: GeckoWebViewWidget(gecko));
+    }
+    return WebViewWidget(controller: controller);
+  }
+
   @override
   void dispose() {
     _disposed = true;
     _revision++;
+    final gecko = _gecko;
+    if (gecko != null) unawaited(gecko.dispose());
     super.dispose();
   }
 }
