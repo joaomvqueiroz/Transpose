@@ -71,6 +71,26 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
 
   @objc(isRunning) public static var isRunning: Bool { geckoRunning }
 
+  /// Present as Firefox for Android, exactly as Reynard does by default
+  /// (UserAgentPolicy.defaultConfiguration, "useAndroidUserAgent" on).
+  /// Without it Gecko reports its own iOS identity, which YouTube does not
+  /// expect from this engine: playback then stops after about a minute
+  /// ("Algo correu mal") and seeking past it fails, while Reynard plays on.
+  static var androidMobileMode: WebsiteModeSetting {
+    let major =
+      GeckoRuntime.version.split(whereSeparator: { !$0.isNumber }).first.map(String.init)
+      ?? "159"
+    return WebsiteModeSetting(
+      userAgentOverride:
+        "Mozilla/5.0 (Android 15; Mobile; rv:\(major).0) Gecko/\(major).0 Firefox/\(major).0",
+      platformOverride: "Linux armv81",
+      appVersionOverride: "5.0 (Android 15)",
+      oscpuOverride: "Linux armv81",
+      buildIDOverride: nil,
+      userAgentMode: 0,
+      viewportMode: 0)
+  }
+
   @objc(makeHostWithEventSink:)
   public static func makeHost(eventSink: @escaping EventSink) -> TransponoGeckoBridge? {
     guard geckoRunning else { return nil }
@@ -93,7 +113,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     sink = eventSink
     session = GeckoSession(
       settings: GeckoSessionSettings(
-        websiteMode: .mobile,
+        websiteMode: Self.androidMobileMode,
         pageZoom: .default,
         language: LanguageSetting(codes: ["pt-PT", "pt", "en"])))
     super.init()
