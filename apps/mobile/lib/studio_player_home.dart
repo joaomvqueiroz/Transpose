@@ -475,10 +475,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (tab == StudioTab.tuner) unawaited(_player.pause());
   }
 
+  /// The close control is the small arrow (after scrolling down) rather than
+  /// the full "Fechar ajustes" button.
+  bool _closeCompact = false;
+
   void _toggleMainAdjustments() {
     _hideAdjustmentChoices();
     if (_mainControlsExpanded) _stopChordAutoScroll();
     setState(() {
+      _closeCompact = false;
       _mainControlsExpanded = !_mainControlsExpanded;
       _adjustmentsCoverVideo = false;
       _adjustmentChoicesVisible = false;
@@ -2414,9 +2419,60 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 bottom: false,
                 child: Stack(
                   children: <Widget>[
-                    Column(
-                      children: <Widget>[Expanded(child: _mainPanel(media))],
+                    // Scrolling down in the open adjustments shrinks the close
+                    // control to a small arrow; scrolling up brings back the
+                    // full "Fechar ajustes" button.
+                    NotificationListener<UserScrollNotification>(
+                      onNotification: (notification) {
+                        if (!_mainControlsExpanded || landscapePlayer) {
+                          return false;
+                        }
+                        final compact =
+                            notification.direction == ScrollDirection.reverse
+                            ? true
+                            : notification.direction == ScrollDirection.forward
+                            ? false
+                            : null;
+                        if (compact != null && compact != _closeCompact) {
+                          setState(() => _closeCompact = compact);
+                        }
+                        return false;
+                      },
+                      child: Column(
+                        children: <Widget>[Expanded(child: _mainPanel(media))],
+                      ),
                     ),
+                    if (!landscapePlayer &&
+                        _mainControlsExpanded &&
+                        !_adjustmentsCoverVideo)
+                      Positioned(
+                        bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 180),
+                            transitionBuilder: (child, animation) =>
+                                FadeTransition(
+                                  opacity: animation,
+                                  child: ScaleTransition(
+                                    scale: animation,
+                                    child: child,
+                                  ),
+                                ),
+                            child: _closeCompact
+                                ? _CompactCloseAdjustments(
+                                    key: const ValueKey('compactClose'),
+                                    onPressed: _toggleMainAdjustments,
+                                  )
+                                : _MainAdjustmentsBar(
+                                    key: const ValueKey('fullClose'),
+                                    expanded: true,
+                                    onPressed: _toggleMainAdjustments,
+                                  ),
+                          ),
+                        ),
+                      ),
                     if ((landscapePlayer && !_landscapeColumnsVisible) ||
                         (!landscapePlayer && !_mainControlsExpanded))
                       Positioned(
@@ -2438,6 +2494,30 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
     );
   }
+}
+
+/// Small round "close adjustments" arrow shown while scrolling down.
+class _CompactCloseAdjustments extends StatelessWidget {
+  const _CompactCloseAdjustments({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 46,
+    height: 46,
+    child: IconButton.filled(
+      key: const Key('visualCloseAdjustmentsCompact'),
+      tooltip: 'Fechar ajustes',
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF161618),
+        padding: EdgeInsets.zero,
+      ),
+      icon: const Icon(Icons.keyboard_arrow_down, size: 30),
+    ),
+  );
 }
 
 class _PresetNameDialog extends StatefulWidget {

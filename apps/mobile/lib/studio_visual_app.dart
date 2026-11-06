@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
@@ -214,7 +215,11 @@ class StudioVisualHome extends StatefulWidget {
 }
 
 class _MainAdjustmentsBar extends StatelessWidget {
-  const _MainAdjustmentsBar({required this.expanded, required this.onPressed});
+  const _MainAdjustmentsBar({
+    super.key,
+    required this.expanded,
+    required this.onPressed,
+  });
 
   final bool expanded;
   final VoidCallback onPressed;
