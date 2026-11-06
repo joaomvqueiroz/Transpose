@@ -92,16 +92,20 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     return Stack(
       children: [
         Positioned.fill(child: studio),
+        // Bottom left, beside "Abrir ajustes": at the top left it covered
+        // the YouTube search bar's back arrow, so after opening the search
+        // the page could not leave it (no typing, no video taps). On Spotify
+        // the wider pill row sits just above the adjustments bar.
         Positioned(
-          left: 10,
-          top: 0,
-          child: SafeArea(
-            child: _SourceSwitch(
-              spotify: source == ListeningSource.spotify,
-              session: _spotify,
-              onHome: () => _choose(null),
-              onPlayOnYouTube: _playOnYouTube,
-            ),
+          left: 12,
+          bottom:
+              MediaQuery.viewPaddingOf(context).bottom +
+              (source == ListeningSource.spotify ? 72 : 16),
+          child: _SourceSwitch(
+            spotify: source == ListeningSource.spotify,
+            session: _spotify,
+            onHome: () => _choose(null),
+            onPlayOnYouTube: _playOnYouTube,
           ),
         ),
       ],
