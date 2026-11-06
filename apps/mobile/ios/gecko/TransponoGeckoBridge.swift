@@ -59,7 +59,9 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   public typealias DecisionHandler = (String, Bool, @escaping (Bool) -> Void) -> Void
 
   static let extensionID = "transpono-gecko@transpono.app"
-  static let extensionLocation = "resource://app/extensions/transpono/"
+  // The only resource://app location Reynard's Gecko accepts for a built-in
+  // extension (see embed-gecko.sh); our relay is installed there.
+  static let extensionLocation = "resource://app/extensions/readerview/"
   static let nativeApp = "transpono"
 
   @MainActor private static var extensionTask: Task<Void, Never>?

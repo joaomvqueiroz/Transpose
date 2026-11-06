@@ -44,7 +44,12 @@ mkdir -p "$APP/Frameworks" "$APP/PlugIns"
 cp -R "$KIT/Frameworks/GeckoView.framework" "$APP/Frameworks/"
 cp -f "$KIT/Frameworks/XUL" "$KIT/Frameworks/"*.dylib "$APP/Frameworks/"
 cp -R "$FW" "$APP/Frameworks/"
-EXT="$APP/Frameworks/GeckoView.framework/Frameworks/extensions/transpono"
+# Reynard's Gecko only lets GeckoView install built-in extensions from
+# resource://android/... or exactly resource://app/extensions/readerview/
+# (patches/mobile/shared/modules/geckoview/GeckoViewWebExtension.sys.mjs.patch).
+# Transpono does not use Reynard's reader view, so its relay takes that slot.
+EXT="$APP/Frameworks/GeckoView.framework/Frameworks/extensions/readerview"
+rm -rf "$EXT" "$APP/Frameworks/GeckoView.framework/Frameworks/extensions/transpono"
 mkdir -p "$EXT"
 cp -f "$SRC/extension/"* "$EXT/"
 
