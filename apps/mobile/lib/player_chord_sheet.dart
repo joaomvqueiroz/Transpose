@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 
 import 'chord_sheet.dart';
@@ -305,6 +307,36 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   TextScaler? _measuredScaler;
   double _fittedFontSize = _chordFontMax;
   bool _needsHorizontalScroll = false;
+  // The user's chord text size ("A-"/"A+"), kept between songs and sources.
+  static const _textScaleKey = 'transpono.chordTextScale';
+  static const _textScaleMin = 0.7, _textScaleMax = 2.0;
+  double _textScale = 1;
+  double? _measuredScale;
+
+  Future<void> _loadTextScale() async {
+    try {
+      final saved = await SharedPreferencesAsync().getDouble(_textScaleKey);
+      if (saved != null && mounted) {
+        setState(
+          () => _textScale = saved.clamp(_textScaleMin, _textScaleMax),
+        );
+      }
+    } on Object {
+      // No preference store (tests): keep the default size.
+    }
+  }
+
+  void _changeTextScale(double step) {
+    final next = ((_textScale + step) * 10).round() / 10;
+    setState(() => _textScale = next.clamp(_textScaleMin, _textScaleMax));
+    unawaited(() async {
+      try {
+        await SharedPreferencesAsync().setDouble(_textScaleKey, _textScale);
+      } on Object {
+        // Only the remembered size is lost.
+      }
+    }());
+  }
 
   int get _displayPitch =>
       _sheet.transpose + (_sheet.followAudio ? widget.model.pitch.round() : 0);
@@ -312,7 +344,8 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   double _fontSizeFor(String text, double width, TextScaler scaler) {
     if (_measuredText == text &&
         _measuredWidth == width &&
-        _measuredScaler == scaler) {
+        _measuredScaler == scaler &&
+        _measuredScale == _textScale) {
       return _fittedFontSize;
     }
     final painter = TextPainter(
@@ -335,10 +368,14 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     }
     painter.dispose();
     final available = width.isFinite ? width.clamp(1.0, double.infinity) : 1.0;
-    _fittedFontSize = widest > available
+    final fitted = widest > available
         ? (_chordFontMax * available / widest).clamp(9.0, _chordFontMax)
         : _chordFontMax;
-    _needsHorizontalScroll = widest * _fittedFontSize / 15 > available + 1;
+    // A larger chosen size may no longer fit: the sheet then scrolls sideways.
+    _fittedFontSize = fitted * _textScale;
+    _needsHorizontalScroll =
+        widest * _fittedFontSize / _chordFontMax > available + 1;
+    _measuredScale = _textScale;
     _measuredText = text;
     _measuredWidth = width;
     _measuredScaler = scaler;
@@ -407,6 +444,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   void initState() {
     super.initState();
     _read();
+    unawaited(_loadTextScale());
   }
 
   @override
@@ -713,6 +751,34 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         ? () => _changeTone(1)
                         : null,
                     icon: const Icon(Icons.add),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('Letra'),
+                  IconButton(
+                    key: const Key('playerChordTextSmaller'),
+                    tooltip: 'Diminuir letra da cifra',
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    onPressed: _textScale > _textScaleMin + 0.01
+                        ? () => _changeTextScale(-0.1)
+                        : null,
+                    icon: const Icon(Icons.text_decrease),
+                  ),
+                  Text(
+                    '${(_textScale * 100).round()}%',
+                    key: const Key('playerChordTextScale'),
+                    style: TextStyle(
+                      color: _accentColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('playerChordTextLarger'),
+                    tooltip: 'Aumentar letra da cifra',
+                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    onPressed: _textScale < _textScaleMax - 0.01
+                        ? () => _changeTextScale(0.1)
+                        : null,
+                    icon: const Icon(Icons.text_increase),
                   ),
                 ],
               ),
