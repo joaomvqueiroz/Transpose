@@ -63,6 +63,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   static let nativeApp = "transpono"
 
   @MainActor private static var extensionTask: Task<Void, Never>?
+  @MainActor private static var extensionReady = false
 
   @objc(isRunning) public static var isRunning: Bool { geckoRunning }
 
@@ -99,6 +100,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     session.open()
     geckoView.session = session
     session.setActive(true)
+    session.setFocused(true)
     Task { @MainActor in await Self.ensureExtension() }
   }
 
@@ -111,6 +113,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
         } catch {
           NSLog("Transpono: Gecko bridge extension failed: %@", "\(error)")
         }
+        extensionReady = true
       }
     }
     await extensionTask?.value
@@ -122,17 +125,26 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   @objc(currentUrl) public var currentUrl: String? { url }
   @objc(canGoBack) public var canGoBack: Bool { back }
 
+  /// Loads at once. The relay extension installs alongside; its install has no
+  /// timeout, so waiting for it could leave the page never loading. If it
+  /// finishes after the page started, reload once so the relay content script
+  /// (document_start) is present for the bridge.
   @objc(load:) public func load(_ target: String) {
+    session.load(target)
     Task { @MainActor in
+      let alreadyInstalled = Self.extensionReady
       await Self.ensureExtension()
-      guard !self.closed else { return }
-      self.session.load(target)
+      guard !self.closed, !alreadyInstalled, self.port == nil else { return }
+      self.session.reload()
     }
   }
 
   @objc(reload) public func reload() { session.reload() }
   @objc(goBack) public func goBack() { session.goBack() }
-  @objc(setActive:) public func setActive(_ active: Bool) { session.setActive(active) }
+  @objc(setActive:) public func setActive(_ active: Bool) {
+    session.setActive(active)
+    session.setFocused(active)
+  }
   @objc(setBackground:) public func setBackground(_ color: UIColor) {
     geckoView.backgroundColor = color
   }

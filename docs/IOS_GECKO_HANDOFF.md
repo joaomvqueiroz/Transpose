@@ -54,7 +54,7 @@ MSE e o Web Audio recebe o áudio, como no Android.
 - `flutter analyze` sem problemas; 407 testes da app, 5 do plugin `gecko_view` e 70 testes
   JavaScript (`apps/mobile/tool/tests/*.cjs`) a passar, incluindo um novo para a via nativa.
 - Build iOS no GitHub Actions com sucesso; o `Runner.app` contém `GeckoView.framework`,
-  `XUL`, dylibs do Gecko, `TransponoGecko.framework`, `PlugIns/Transpono Helper.appex` e a
+  `XUL`, dylibs do Gecko, `TransponoGecko.framework`, `PlugIns/Reynard Helper.appex` e a
   extensão em `GeckoView.framework/Frameworks/extensions/transpono/`.
 - **Nada disto foi ainda executado num iPhone.**
 
@@ -81,7 +81,7 @@ bloquear a conta temporariamente.
 
 1. iPhone ligado por cabo ao portátil, desbloqueado.
 2. Shift + clique no ◆ do AltServer → **Sideload .ipa…** → iPhone → `Transpono-Gecko.ipa`.
-3. Manter as **App Extensions** (sem a `Transpono Helper.appex` o Gecko não arranca).
+3. Manter as **App Extensions** (sem a `Reynard Helper.appex` o Gecko não arranca).
 4. Conta gratuita: no máximo 3 apps ativas contando com o AltStore.
 
 ## O que testar e o que pode falhar

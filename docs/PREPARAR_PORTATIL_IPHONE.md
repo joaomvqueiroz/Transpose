@@ -98,7 +98,7 @@ Get-Service 'Apple Mobile Device Service'   # deve estar Running
 
 Limites da conta gratuita: assinatura válida 7 dias (o AltStore renova por Wi-Fi com o
 AltServer aberto), no máximo 3 apps ativas contando com o AltStore, e 10 IDs de app novos
-por semana. As extensões, como a `Transpono Helper.appex`, contam como ID.
+por semana. As extensões, como a `Reynard Helper.appex`, contam como ID.
 
 ## 6. Instalar um IPA
 

@@ -49,7 +49,12 @@ mkdir -p "$EXT"
 cp -f "$SRC/extension/"* "$EXT/"
 
 APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")"
-HELPER="$APP/PlugIns/Transpono Helper.appex"
+# Keep Reynard's folder name: Gecko (NSExtensionUtils.mm in Reynard's patches)
+# finds the content-process extension at PlugIns/"Reynard Helper.appex" and
+# reads its bundle id from there. Any other name means no content process and
+# a blank (black) view. The bundle id itself may change.
+HELPER="$APP/PlugIns/Reynard Helper.appex"
+rm -rf "$APP/PlugIns/Transpono Helper.appex"
 rm -rf "$HELPER"
 cp -R "$KIT/PlugIns/Reynard Helper.appex" "$HELPER"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${APP_ID}.Helper" "$HELPER/Info.plist"
