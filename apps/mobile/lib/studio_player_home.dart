@@ -484,6 +484,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _adjustmentChoicesVisible = false;
       _seekPreviewMs = null;
     });
+    // "Abrir ajustes" brings the page's video list back up to the player;
+    // closing the adjustments returns the list to where it was.
+    final session = _player.youtube;
+    if (_player.isYouTube && session != null) {
+      unawaited(session.adjustmentsShown(_mainControlsExpanded));
+    }
   }
 
   void _coverVideoWithAdjustments() {

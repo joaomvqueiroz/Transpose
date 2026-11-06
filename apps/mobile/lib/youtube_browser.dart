@@ -442,6 +442,11 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   Future<void> start(Uri uri);
   Future<void> openVideo(String videoId) => start(_youtubeVideoUri(videoId));
   Future<void> focusVideo() async {}
+
+  /// The studio's adjustments opened ([shown]) or closed: on opening, the
+  /// page's video list is scrolled back to the player at the top; on
+  /// closing, it returns to where the user was.
+  Future<void> adjustmentsShown(bool shown) async {}
   Future<void> search(String query);
   Future<void> reload();
   Future<void> goBack();
@@ -888,6 +893,29 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _progress = 0;
     _notify();
     await controller.loadRequest(uri);
+  }
+
+  @override
+  Future<void> adjustmentsShown(bool shown) async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(
+        shown
+            ? '''(() => {
+                window.__transponoScrollBefore = window.scrollY;
+                window.scrollTo({top: 0, left: 0, behavior: 'instant'});
+              })()'''
+            : '''(() => {
+                const y = window.__transponoScrollBefore;
+                window.__transponoScrollBefore = undefined;
+                if (typeof y === 'number' && y > 0) {
+                  window.scrollTo({top: y, left: 0, behavior: 'instant'});
+                }
+              })()''',
+      );
+    } on Object {
+      // No page context (navigating); scrolling is only a convenience.
+    }
   }
 
   @override

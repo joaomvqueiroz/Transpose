@@ -29,6 +29,49 @@
       // Without the hook the bridge simply finds no SoundCloud player.
     }
   }
+  // Mini player: on m.youtube.com the watch-page player is a fixed
+  // "sticky-player" under the top bar, so the video list scrolls under it.
+  // Once the list is scrolled, shrink it to a small video in the corner (like
+  // the YouTube app); tapping it scrolls back up to the full player. The
+  // element keeps its size and is only scaled, so YouTube's own layout and
+  // the audio graph are untouched.
+  if (!soundCloud() && !window.__transponoMini) {
+    window.__transponoMini = true;
+    const style = document.createElement('style');
+    style.id = 'transpono-mini-style';
+    style.textContent = `
+      html.transpono-mini #player-container-id.sticky-player {
+        top: auto !important; bottom: 140px !important;
+        left: auto !important; right: 10px !important;
+        width: 100vw !important;
+        transform: scale(.46); transform-origin: right bottom;
+        border-radius: 22px; overflow: hidden;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+        z-index: 9999 !important;
+        transition: transform .18s ease;
+      }`;
+    (document.head || document.documentElement).appendChild(style);
+    const root = document.documentElement;
+    const update = () => {
+      const player = document.querySelector('#player-container-id.sticky-player');
+      const mini = !!player && window.location.pathname === '/watch' && window.scrollY > 40;
+      if (root.classList.contains('transpono-mini') !== mini) {
+        root.classList.toggle('transpono-mini', mini);
+      }
+    };
+    window.addEventListener('scroll', update, {passive: true});
+    // Tapping the small video brings the full player back instead of
+    // pausing it.
+    document.addEventListener('click', event => {
+      if (!root.classList.contains('transpono-mini')) return;
+      const player = document.querySelector('#player-container-id.sticky-player');
+      if (!player || !player.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }, true);
+    setInterval(update, 500);
+  }
   // WebView can reinject after an SPA navigation. Reuse MediaElementAudioSource
   // ownership: creating a second source for the same element is not supported.
   if (window.TransponoMedia && window.TransponoMedia._activate) {
