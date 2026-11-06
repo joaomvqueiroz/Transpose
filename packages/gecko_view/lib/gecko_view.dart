@@ -12,6 +12,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
@@ -305,6 +306,16 @@ class GeckoWebViewWidget extends PlatformWebViewWidget {
         return UiKitView(
           key: params.key,
           viewType: _viewType,
+          // Gecko reads touches through its own UIKit gesture handling; let
+          // the page have every pointer at once (as a browser view should)
+          // instead of only those no Flutter recognizer claimed.
+          gestureRecognizers: params.gestureRecognizers.isNotEmpty
+              ? params.gestureRecognizers
+              : <Factory<OneSequenceGestureRecognizer>>{
+                  Factory<OneSequenceGestureRecognizer>(
+                    EagerGestureRecognizer.new,
+                  ),
+                },
           creationParams: <String, Object?>{'id': id},
           creationParamsCodec: const StandardMessageCodec(),
         );

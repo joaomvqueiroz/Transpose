@@ -63,7 +63,9 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   static let nativeApp = "transpono"
 
   @MainActor private static var extensionTask: Task<Void, Never>?
-  @MainActor private static var extensionReady = false
+  // Written on the main actor; read from the main thread (method channel).
+  private static var extensionReady = false
+  private static var extensionError: String?
 
   @objc(isRunning) public static var isRunning: Bool { geckoRunning }
 
@@ -83,6 +85,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   private var url: String?
   private var back = false
   private var closed = false
+  private var rejectedPorts = 0
 
   private init(eventSink: @escaping EventSink) {
     sink = eventSink
@@ -112,6 +115,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
             location: extensionLocation, id: extensionID)
         } catch {
           NSLog("Transpono: Gecko bridge extension failed: %@", "\(error)")
+          extensionError = String("\(error)".prefix(120))
         }
         extensionReady = true
       }
@@ -155,7 +159,17 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   @objc(evaluate:completion:)
   public func evaluate(_ code: String, completion: @escaping (Any?, String?) -> Void) {
     guard let port, !closed else {
-      completion(nil, "NO_CONTEXT: a página ainda não tem contexto JavaScript.")
+      // Say why, so the app can show it: the relay extension's install state
+      // and whether its content script ever tried to connect.
+      let install: String
+      if let failure = Self.extensionError {
+        install = "extensão falhou: \(failure)"
+      } else {
+        install = Self.extensionReady ? "extensão instalada" : "extensão a instalar"
+      }
+      completion(
+        nil,
+        "NO_CONTEXT: sem ligação à página (\(install); ligações recusadas: \(rejectedPorts)).")
       return
     }
     let id = nextEval
@@ -198,6 +212,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     guard port.sender.extensionID == Self.extensionID, port.sender.isTopLevel,
       port.sender.session === session
     else {
+      rejectedPorts += 1
       port.disconnect()
       return
     }

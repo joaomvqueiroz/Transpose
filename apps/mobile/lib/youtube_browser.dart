@@ -668,28 +668,59 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
 
   Future<void> _installBridge() async {
     final int generation = _document;
-    try {
-      final String? current = await controller.currentUrl();
-      final Uri? uri = Uri.tryParse(current ?? '');
-      if (_disposed || generation != _document || uri == null) return;
-      // Never inject an audio bridge into account/consent pages.
-      if (uri.host != 'youtube.com' && !uri.host.endsWith('.youtube.com')) {
+    // Gecko's script relay can connect a moment after the page reports it
+    // finished; give it a few seconds before treating the bridge as failed.
+    final int attempts = usesGecko ? 8 : 1;
+    String step = 'url';
+    for (int attempt = 1; ; attempt++) {
+      try {
+        step = 'url';
+        final String? current = await controller.currentUrl();
+        final Uri? uri = Uri.tryParse(current ?? '');
+        if (_disposed || generation != _document || uri == null) return;
+        // Never inject an audio bridge into account/consent pages.
+        if (uri.host != 'youtube.com' && !uri.host.endsWith('.youtube.com')) {
+          return;
+        }
+        step = 'dsp';
+        await controller.runJavaScript(_dsp!);
+        if (_disposed || generation != _document) return;
+        step = 'stretch';
+        await controller.runJavaScript(_dspAdapter!);
+        if (_disposed || generation != _document) return;
+        step = 'key';
+        await controller.runJavaScript(_keyDetector!);
+        if (_disposed || generation != _document) return;
+        step = 'media';
+        await controller.runJavaScript(_bridge!);
+        await refresh();
+        return;
+      } on GeckoJavaScriptException catch (failure) {
+        final bool noContext = failure.message.startsWith('NO_CONTEXT') ||
+            failure.message == 'JS timeout';
+        if (noContext && attempt < attempts) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (_disposed || generation != _document) return;
+          continue;
+        }
+        _bridgeFailed(generation, '$step: ${failure.message}');
+        return;
+      } on Object catch (failure) {
+        _bridgeFailed(generation, '$step: $failure');
         return;
       }
-      await controller.runJavaScript(_dsp!);
-      if (_disposed || generation != _document) return;
-      await controller.runJavaScript(_dspAdapter!);
-      if (_disposed || generation != _document) return;
-      await controller.runJavaScript(_keyDetector!);
-      if (_disposed || generation != _document) return;
-      await controller.runJavaScript(_bridge!);
-      await refresh();
-    } on Object {
-      if (!_disposed && generation == _document) {
-        _error = 'O vídeo pode ser reproduzido, mas os controlos de áudio não carregaram. Tente atualizar.';
-        _notify();
-      }
     }
+  }
+
+  void _bridgeFailed(int generation, String reason) {
+    if (_disposed || generation != _document) return;
+    final String detail = reason.length > 160
+        ? '${reason.substring(0, 160)}…'
+        : reason;
+    _error =
+        'O vídeo pode ser reproduzido, mas os controlos de áudio não carregaram. '
+        'Tente atualizar. ($detail)';
+    _notify();
   }
 
   /// Public for the on-device integration probe; no media is copied out.
