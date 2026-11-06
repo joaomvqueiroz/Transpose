@@ -338,6 +338,15 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     }());
   }
 
+  ButtonStyle get _compactButton => IconButton.styleFrom(
+    backgroundColor: _controlColor,
+    minimumSize: const Size(30, 30),
+    fixedSize: const Size(30, 30),
+    padding: EdgeInsets.zero,
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    visualDensity: VisualDensity.compact,
+  );
+
   int get _displayPitch =>
       _sheet.transpose + (_sheet.followAudio ? widget.model.pitch.round() : 0);
 
@@ -711,15 +720,21 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       : widget.model.title,
                   style: TextStyle(color: _mutedColor, fontSize: 12),
                 ),
-              Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 6,
+              // One line: chord key and text size, small enough to fit; on a
+              // very narrow screen the whole row scales down.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Tom da cifra'),
+                  const Text('Tom da cifra', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 4),
                   IconButton(
                     key: const Key('playerChordPitchDown'),
                     tooltip: 'Diminuir tonalidade da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    style: _compactButton,
+                    iconSize: 16,
                     onPressed:
                         canChange &&
                             (_sheet.followAudio
@@ -729,6 +744,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         : null,
                     icon: const Icon(Icons.remove),
                   ),
+                  const SizedBox(width: 4),
                   Text(
                     pitch == 0
                         ? 'Original'
@@ -737,12 +753,15 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     style: TextStyle(
                       color: _accentColor,
                       fontWeight: FontWeight.w700,
+                      fontSize: 12,
                     ),
                   ),
+                  const SizedBox(width: 4),
                   IconButton(
                     key: const Key('playerChordPitchUp'),
                     tooltip: 'Aumentar tonalidade da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    style: _compactButton,
+                    iconSize: 16,
                     onPressed:
                         canChange &&
                             (_sheet.followAudio
@@ -753,34 +772,41 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     icon: const Icon(Icons.add),
                   ),
                   const SizedBox(width: 10),
-                  const Text('Letra'),
+                  const Text('Letra', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 4),
                   IconButton(
                     key: const Key('playerChordTextSmaller'),
                     tooltip: 'Diminuir letra da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    style: _compactButton,
+                    iconSize: 16,
                     onPressed: _textScale > _textScaleMin + 0.01
                         ? () => _changeTextScale(-0.1)
                         : null,
                     icon: const Icon(Icons.text_decrease),
                   ),
+                  const SizedBox(width: 4),
                   Text(
                     '${(_textScale * 100).round()}%',
                     key: const Key('playerChordTextScale'),
                     style: TextStyle(
                       color: _accentColor,
                       fontWeight: FontWeight.w700,
+                      fontSize: 12,
                     ),
                   ),
+                  const SizedBox(width: 4),
                   IconButton(
                     key: const Key('playerChordTextLarger'),
                     tooltip: 'Aumentar letra da cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
+                    style: _compactButton,
+                    iconSize: 16,
                     onPressed: _textScale < _textScaleMax - 0.01
                         ? () => _changeTextScale(0.1)
                         : null,
                     icon: const Icon(Icons.text_increase),
                   ),
                 ],
+                ),
               ),
               Text(
                 _sheet.followAudio
