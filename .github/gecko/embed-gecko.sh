@@ -20,6 +20,7 @@ xcrun --sdk iphoneos swiftc \
   -Xlinker -install_name -Xlinker @rpath/TransponoGecko.framework/TransponoGecko \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks \
   -Xlinker -rpath -Xlinker @loader_path/.. \
+  -Xlinker "$KIT/Frameworks/XUL" \
   "$SRC/TransponoGeckoBridge.swift" -o "$FW/TransponoGecko"
 cat > "$FW/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
