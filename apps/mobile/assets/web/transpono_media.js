@@ -83,6 +83,8 @@
   let loopEventHandlers = null;
   let observedSource = '';
   let isAd = false;
+  // The current element's source was judged unusable for pitch (see refresh).
+  let sourceBlocked = false;
   let revision = 0;
   let timer = null;
   let disposed = false;
@@ -580,6 +582,7 @@
     }
     pitchStatus = 'idle';
     pitchMessage = '';
+    sourceBlocked = false;
     loopA = null;
     loopB = null;
     loopWanted = false;
@@ -656,8 +659,24 @@
       }
     }
     const graph = video && graphs.get(video);
-    if (graph && !safeSource(video)) {
-      unavailable('Este vídeo não permite alterar o tom. Reabra o vídeo se o áudio não voltar.');
+    // While YouTube swaps the next video into the same element its source is
+    // briefly empty or not yet the page's own media stream. Treating that
+    // moment as "this video cannot be pitched" left pitchStatus stuck at
+    // 'unavailable' for every later video once pitch had been used ("Tom
+    // indisponível nesta fonte" until the app was reopened). Judge only a
+    // settled source, and clear the block when a usable source returns.
+    if (graph && sourceOf(video) && video.readyState >= 1 && !safeSource(video)) {
+      if (!sourceBlocked) {
+        sourceBlocked = true;
+        unavailable('Este vídeo não permite alterar o tom. Reabra o vídeo se o áudio não voltar.');
+      }
+    } else if (sourceBlocked && video && safeSource(video)) {
+      sourceBlocked = false;
+      if (pitchStatus === 'unavailable') {
+        pitchStatus = 'idle';
+        pitchMessage = '';
+        revision += 1;
+      }
     }
     restoreEffects();
     const duration = durationOf(video);
