@@ -3,9 +3,32 @@
   'use strict';
 
   const allowedPage = () => window.top === window &&
-    /(^|\.)youtube\.com$/i.test(window.location.hostname) &&
+    /(^|\.)(youtube|soundcloud)\.com$/i.test(window.location.hostname) &&
     window.location.protocol === 'https:';
   if (!allowedPage()) return;
+  // SoundCloud plays through an Audio element that is never put in the page,
+  // so it cannot be found with querySelector: remember the one that last
+  // started playing. (In Gecko this runs in the relay's content-script
+  // sandbox, where the page's own prototype is reached through
+  // wrappedJSObject and the hook is handed back with exportFunction.)
+  const soundCloud = () => /(^|\.)soundcloud\.com$/i.test(window.location.hostname);
+  if (soundCloud() && !window.__transponoPlayHook) {
+    window.__transponoPlayHook = true;
+    try {
+      const pageWindow = window.wrappedJSObject || window;
+      const proto = pageWindow.HTMLMediaElement.prototype;
+      const originalPlay = proto.play;
+      const remember = function () {
+        window.__transponoPlaying = this;
+        return originalPlay.apply(this, arguments);
+      };
+      proto.play = typeof exportFunction === 'function'
+        ? exportFunction(remember, pageWindow)
+        : remember;
+    } catch (_) {
+      // Without the hook the bridge simply finds no SoundCloud player.
+    }
+  }
   // WebView can reinject after an SPA navigation. Reuse MediaElementAudioSource
   // ownership: creating a second source for the same element is not supported.
   if (window.TransponoMedia && window.TransponoMedia._activate) {
@@ -87,11 +110,26 @@
   const durationOf = (element) => Math.max(0, finite(element && element.duration));
   const positionOf = (element) => Math.max(0, finite(element && element.currentTime));
   const sourceOf = (element) => element ? element.currentSrc || element.src || '' : '';
+  // A YouTube video element that left the page is gone; SoundCloud's player
+  // element is never in the page, so it is gone only once replaced.
+  const gone = (element) => soundCloud()
+    ? element !== window.__transponoPlaying
+    : element.isConnected === false;
   const playbackReady = () => !!video && !disposed && !isAd && !video.ended &&
     video.readyState >= 3 && !video.seeking;
   const nearLoopStart = () => loopA !== null && loopB !== null &&
     Math.abs(positionOf(video) - loopA) <= Math.min(0.1, (loopB - loopA) / 4);
   const selectedId = () => {
+    if (soundCloud()) {
+      // The player keeps going across pages: identify the track itself.
+      const playing = window.__transponoPlaying;
+      const meta = navigator.mediaSession && navigator.mediaSession.metadata;
+      if (!playing || !meta || !meta.title) return null;
+      const name = `${meta.title}|${meta.artist || ''}`;
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+      return `soundcloud-${(hash >>> 0).toString(36)}`;
+    }
     const url = new URL(window.location.href);
     if (url.pathname === '/watch') return url.searchParams.get('v');
     const match = url.pathname.match(/^\/(?:shorts|live|embed)\/([^/?]+)/);
@@ -105,7 +143,8 @@
       ? (session.artist ? `${session.title} - ${session.artist}` : session.title)
       : '';
     const candidates = [
-      /(^|\.)music\.youtube\.com$/i.test(window.location.hostname) ? sessionTitle : '',
+      /(^|\.)(music\.youtube|soundcloud)\.com$/i.test(window.location.hostname)
+        ? sessionTitle : '',
       document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title')?.textContent,
       document.querySelector('meta[property="og:title"]')?.getAttribute('content'),
       document.querySelector('meta[name="title"]')?.getAttribute('content'),
@@ -549,9 +588,11 @@
   function refresh() {
     if (disposed || !allowedPage()) return;
     const id = selectedId();
-    const next = id
-      ? document.querySelector('video.html5-main-video') || document.querySelector('video')
-      : null;
+    const next = !id
+      ? null
+      : soundCloud()
+      ? window.__transponoPlaying || null
+      : document.querySelector('video.html5-main-video') || document.querySelector('video');
     if (id !== videoId) {
       timelineSourceEpoch += 1;
       resetPractice(video);
@@ -563,7 +604,7 @@
       resetKeyDetection();
       invalidatePlaybackIntent();
       dry(video && graphs.get(video), true);
-      if (video && video.isConnected === false) retire(graphs.get(video));
+      if (video && gone(video)) retire(graphs.get(video));
       video = next;
       invalidateLoopObservation();
       bindLoopEvents(video);
@@ -583,7 +624,7 @@
       invalidateLoopObservation();
     }
     for (const graph of allGraphs) {
-      if (graph.element !== video && graph.element.isConnected === false) retire(graph);
+      if (graph.element !== video && gone(graph.element)) retire(graph);
     }
     const nextAd = !!document.querySelector('.ad-showing, .ad-interrupting');
     if (nextAd !== isAd) {

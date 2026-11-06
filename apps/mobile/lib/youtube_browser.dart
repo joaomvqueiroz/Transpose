@@ -483,6 +483,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   late final WebViewController controller;
   GeckoWebViewController? _gecko;
 
+  /// Started on SoundCloud (the SoundCloud choice) rather than YouTube.
+  bool _soundCloud = false;
+
   /// Whether this session renders with Gecko instead of the platform WebView.
   bool get usesGecko => _gecko != null;
   late final WebMediaCommandRunner _commands = WebMediaCommandRunner(
@@ -571,7 +574,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
 
   @override
   Future<void> start(Uri uri) async {
-    if (!isYouTubeBrowserUri(uri)) throw ArgumentError.value(uri);
+    if (!isYouTubeBrowserUri(uri) && !isSoundCloudBrowserUri(uri)) {
+      throw ArgumentError.value(uri);
+    }
+    _soundCloud = isSoundCloudBrowserUri(uri);
     _bridge = await rootBundle.loadString('assets/web/transpono_media.js');
     _keyDetector = await rootBundle.loadString(
       'assets/web/transpono_key_detector.js',
@@ -679,9 +685,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         final Uri? uri = Uri.tryParse(current ?? '');
         if (_disposed || generation != _document || uri == null) return;
         // Never inject an audio bridge into account/consent pages.
-        if (uri.host != 'youtube.com' && !uri.host.endsWith('.youtube.com')) {
-          return;
-        }
+        final bool youtubePage =
+            uri.host == 'youtube.com' || uri.host.endsWith('.youtube.com');
+        if (!youtubePage && !isSoundCloudBrowserUri(uri)) return;
         step = 'dsp';
         await controller.runJavaScript(_dsp!);
         if (_disposed || generation != _document) return;
@@ -903,7 +909,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _pauseOnReadyVideoId = null;
     _focusOnReadyVideoId = null;
     _error = null;
-    await controller.loadRequest(youtubeSearchUri(query));
+    await controller.loadRequest(
+      _soundCloud ? soundCloudSearchUri(query) : youtubeSearchUri(query),
+    );
   }
 
   @override

@@ -7,7 +7,7 @@ import 'spotify_browser.dart';
 import 'youtube_browser.dart';
 
 /// Where the user listens from, chosen on the first screen.
-enum ListeningSource { youtube, youtubeMusic, spotify }
+enum ListeningSource { youtube, youtubeMusic, soundCloud, spotify }
 
 /// Builds the studio for a source. [sessionFactory] replaces the YouTube
 /// browser (Spotify); [query] is a YouTube search to open first; [home] is
@@ -71,6 +71,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
       return _PickerScreen(
         onYouTube: () => _choose(ListeningSource.youtube),
         onYouTubeMusic: () => _choose(ListeningSource.youtubeMusic),
+        onSoundCloud: () => _choose(ListeningSource.soundCloud),
         onSpotify: () => _choose(ListeningSource.spotify),
       );
     }
@@ -80,9 +81,13 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
       ValueKey<String>('studio-${source.name}-$_generation'),
       _query,
       source == ListeningSource.spotify ? _spotifySession : null,
-      source == ListeningSource.youtubeMusic
-          ? Uri.https('music.youtube.com', '/')
-          : null,
+      switch (source) {
+        ListeningSource.youtubeMusic => Uri.https('music.youtube.com', '/'),
+        // Same studio and page bridge; covers and user uploads stream
+        // without DRM (official label tracks are protected).
+        ListeningSource.soundCloud => Uri.https('m.soundcloud.com', '/'),
+        _ => null,
+      },
     );
     return Stack(
       children: [
@@ -205,11 +210,13 @@ class _PickerScreen extends StatelessWidget {
   const _PickerScreen({
     required this.onYouTube,
     required this.onYouTubeMusic,
+    required this.onSoundCloud,
     required this.onSpotify,
   });
 
   final VoidCallback onYouTube;
   final VoidCallback onYouTubeMusic;
+  final VoidCallback onSoundCloud;
   final VoidCallback onSpotify;
 
   @override
@@ -275,6 +282,15 @@ class _PickerScreen extends StatelessWidget {
                             logo: const _YouTubeMusicLogo(),
                             accent: const Color(0xFFFF0033),
                             onPressed: onYouTubeMusic,
+                          ),
+                          _SourceTile(
+                            key: const Key('pickSoundCloud'),
+                            size: tile,
+                            label: 'SoundCloud',
+                            caption: 'Covers com tom e EQ',
+                            logo: const _SoundCloudLogo(),
+                            accent: const Color(0xFFFF5500),
+                            onPressed: onSoundCloud,
                           ),
                           _SourceTile(
                             key: const Key('pickSpotify'),
@@ -463,6 +479,53 @@ class _YouTubeMusicLogoPainter extends CustomPainter {
       ..lineTo(c.dx - t * .36, c.dy + t * .45)
       ..close();
     canvas.drawPath(play, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _SoundCloudLogo extends StatelessWidget {
+  const _SoundCloudLogo();
+
+  @override
+  Widget build(BuildContext context) =>
+      const CustomPaint(painter: _SoundCloudLogoPainter());
+}
+
+/// Orange disc with a white cloud and its row of bars, drawn as vectors.
+class _SoundCloudLogoPainter extends CustomPainter {
+  const _SoundCloudLogoPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final d = math.min(size.width, size.height);
+    final c = Offset(size.width / 2, size.height / 2);
+    canvas.drawCircle(c, d / 2, Paint()..color = const Color(0xFFFF5500));
+    final white = Paint()..color = Colors.white;
+    final base = c.dy + d * .12;
+    // Cloud: two overlapping circles on a rounded base, on the right.
+    canvas.drawCircle(Offset(c.dx + d * .06, c.dy - d * .02), d * .14, white);
+    canvas.drawCircle(Offset(c.dx + d * .2, c.dy + d * .03), d * .09, white);
+    canvas.drawRRect(
+      RRect.fromLTRBR(
+        c.dx - d * .06,
+        c.dy + d * .02,
+        c.dx + d * .29,
+        base,
+        Radius.circular(d * .05),
+      ),
+      white,
+    );
+    // Bars rising towards the cloud, on the left.
+    for (var i = 0; i < 4; i++) {
+      final x = c.dx - d * .3 + i * d * .062;
+      final top = base - d * (.1 + i * .045);
+      canvas.drawRRect(
+        RRect.fromLTRBR(x, top, x + d * .03, base, Radius.circular(d * .015)),
+        white,
+      );
+    }
   }
 
   @override

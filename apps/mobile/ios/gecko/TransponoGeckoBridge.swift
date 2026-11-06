@@ -289,13 +289,28 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   }
 
   public func onLoadRequest(session: GeckoSession, request: LoadRequest) async -> AllowOrDeny {
-    guard let decide else { return .allow }
-    let allowed: Bool = await withCheckedContinuation { continuation in
-      DispatchQueue.main.async {
-        decide(request.uri, true) { continuation.resume(returning: $0) }
+    let allowed: Bool
+    if let decide {
+      allowed = await withCheckedContinuation { continuation in
+        DispatchQueue.main.async {
+          decide(request.uri, true) { continuation.resume(returning: $0) }
+        }
       }
+    } else {
+      allowed = true
     }
-    return allowed ? .allow : .deny
+    guard allowed else { return .deny }
+    // There is only one page in Transpono: links and sign-in steps that ask
+    // for a new window or tab open here instead of going nowhere.
+    if request.target != .current {
+      let target = request.uri
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.closed else { return }
+        self.session.load(target)
+      }
+      return .deny
+    }
+    return .allow
   }
 
   public func onLoadError(session: GeckoSession, error: WebRequestError) -> String? {
