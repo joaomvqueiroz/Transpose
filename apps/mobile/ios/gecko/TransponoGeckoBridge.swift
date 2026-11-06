@@ -22,7 +22,33 @@ public func transpono_gecko_main(
   _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
 ) {
   geckoRunning = true
+  JITLessReporter.start()
   GeckoRuntime.main(argc: argc, argv: argv)
+}
+
+/// Gecko content processes wait (up to 5 s each) for the parent to say
+/// whether a debugger enabled JIT for them. Transpono never enables JIT
+/// (Reynard's pairing flow is not included), so answer "no JIT" at once.
+private enum JITLessReporter {
+  static var observer: NSObjectProtocol?
+
+  static func start() {
+    observer = NotificationCenter.default.addObserver(
+      forName: Notification.Name("GeckoRuntime.ChildProcessDidStart"),
+      object: nil, queue: nil
+    ) { note in
+      guard let pid = (note.userInfo?["pid"] as? NSNumber)?.int32Value, pid > 0 else { return }
+      let version = ProcessInfo.processInfo.operatingSystemVersion
+      ReportJITStatusForChild(
+        pid, false,
+        JITRuntimeInfo(
+          hasTXMSupport: 0,
+          deviceOSVersion: DeviceOSVersion(
+            majorVersion: Int32(version.majorVersion),
+            minorVersion: Int32(version.minorVersion),
+            patchVersion: Int32(version.patchVersion))))
+    }
+  }
 }
 
 @objc(TransponoGeckoBridge)
@@ -59,7 +85,11 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
 
   private init(eventSink: @escaping EventSink) {
     sink = eventSink
-    session = GeckoSession(settings: .default)
+    session = GeckoSession(
+      settings: GeckoSessionSettings(
+        websiteMode: .mobile,
+        pageZoom: .default,
+        language: LanguageSetting(codes: ["pt-PT", "pt", "en"])))
     super.init()
     geckoView.backgroundColor = .black
     session.navigationDelegate = self

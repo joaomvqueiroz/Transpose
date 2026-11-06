@@ -111,3 +111,56 @@ test('real WASM handles downshift and reset at 44.1 kHz with mono duplicated to 
   assert.ok(restarted.every(channel => channel.every(sample => sample === 0)),
     'restarting must clear the previous audio tail');
 });
+
+// Gecko on iPhone runs without JIT, so WebAssembly is unavailable there. The
+// adapter must then build the native-node shifter instead of failing.
+function fakeAudioContext() {
+  const connections = [];
+  const param = name => ({
+    name, value: 0, targets: [],
+    setTargetAtTime(value) { this.targets.push(value); this.value = value; },
+  });
+  const node = kind => {
+    const result = {kind, connect(target) { connections.push([result, target]); return target; }, disconnect() {}};
+    return result;
+  };
+  return {
+    connections,
+    sampleRate: 48000,
+    currentTime: 0,
+    createGain() { const gain = node('gain'); gain.gain = param('gain'); return gain; },
+    createDelay() { const delay = node('delay'); delay.delayTime = param('delayTime'); return delay; },
+    createBuffer(channels, length) {
+      const data = new Float32Array(length);
+      return {length, getChannelData: () => data};
+    },
+    createBufferSource() { const source = node('source'); source.start = () => {}; return source; },
+  };
+}
+
+test('without WebAssembly the native delay shifter is used', async () => {
+  const window = {SignalsmithStretch};
+  vm.runInNewContext(adapter, {window, performance, Float32Array, Event, WebAssembly: undefined});
+  const context = fakeAudioContext();
+  const node = await window.TransponoCreateStretch(context);
+  assert.equal(node.transponoBackend, 'native-delay');
+
+  // Its own connections leave from the shifter output, not its input.
+  const destination = {kind: 'destination'};
+  assert.equal(node.connect(destination), destination);
+  const [from] = context.connections.at(-1);
+  assert.notEqual(from, node);
+
+  await node.schedule({active: true, semitones: 12});
+  const depths = context.connections
+    .filter(([, target]) => target.name === 'delayTime')
+    .map(([gain]) => gain.gain.value);
+  // Up taps sweep the full 0.1 s period for an octave; down taps stay at 0.
+  assert.deepEqual(depths.map(value => Math.round(value * 1000) / 1000).sort(), [0, 0, 0.1, 0.1]);
+  await node.schedule({semitones: -12});
+  const lowered = context.connections
+    .filter(([, target]) => target.name === 'delayTime')
+    .map(([gain]) => Math.round(gain.gain.value * 1000) / 1000).sort();
+  assert.deepEqual(lowered, [0, 0, 0.05, 0.05]);
+  await assert.rejects(node.schedule({semitones: 13}), {name: 'RangeError'});
+});

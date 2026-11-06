@@ -16,6 +16,7 @@ xcrun --sdk iphoneos swiftc \
   -module-name TransponoGecko -emit-library \
   -F "$KIT/Frameworks" -framework GeckoView \
   -Xcc -I"$KIT/headers" -Xcc -I"$KIT/include" -Xcc -I"$KIT/include/GeckoView" \
+  -import-objc-header "$SRC/TransponoGecko-Bridging.h" \
   -Xlinker -install_name -Xlinker @rpath/TransponoGecko.framework/TransponoGecko \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks \
   -Xlinker -rpath -Xlinker @loader_path/.. \
