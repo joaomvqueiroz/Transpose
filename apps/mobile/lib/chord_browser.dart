@@ -57,6 +57,11 @@ Uri chordSearchUri(String query) {
 String chordQueryFromVideoTitle(String title) {
   final value = title
       .replaceFirst(RegExp(r'\s*[-–]\s*YouTube\s*$', caseSensitive: false), '')
+      // "(Ao Vivo …)", "[Clipe Oficial]", "| Playlist": noise for the chord
+      // site's search, which then finds nothing.
+      .replaceAll(RegExp(r'\s*[(\[][^)\]]*[)\]]?'), ' ')
+      .replaceFirst(RegExp(r'\s*[|｜].*$'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
   if (RegExp(
     r'^(?:YouTube|Vídeo do YouTube)$',
@@ -103,8 +108,10 @@ class ImportedChord {
       );
     }
     if (value['error'] != null) {
-      throw const FormatException(
-        'Abra a página de uma música com a cifra visível. Não é possível importar pesquisa, bloqueios ou conteúdo protegido.',
+      final detail = '${value['error']}';
+      throw FormatException(
+        'Abra a página de uma música com a cifra visível. Não é possível importar pesquisa, bloqueios ou conteúdo protegido.'
+        '${detail.length > 3 && detail.length < 200 ? ' [$detail]' : ''}',
       );
     }
     final uri = Uri.tryParse(value['url']);
@@ -144,7 +151,9 @@ const chordExtractionScript = r'''(() => {
   const visible = el => {
     for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
       const css = getComputedStyle(node);
-      if (node.hidden || node.getAttribute('aria-hidden') === 'true' || css.display === 'none' || css.visibility === 'hidden') return false;
+      // aria-hidden is not used: a site dialog or ad marks the whole page
+      // with it while the chord is still on screen.
+      if (node.hidden || css.display === 'none' || css.visibility === 'hidden') return false;
     }
     return el.getClientRects().length > 0;
   };
@@ -153,7 +162,11 @@ const chordExtractionScript = r'''(() => {
   const score = text => text.split('\n').filter(line => /(^|\s)[A-G](?:#|b)?(?:m|maj|sus|dim|add)?\d*(?:\/[A-G][#b]?)?(?=\s|$)/.test(line)).length;
   candidates.sort((a, b) => score(b) - score(a));
   const chosen = candidates[0] || '';
-  if (!chosen || score(chosen) === 0) result.error = 'no-visible-chord';
+  if (!chosen || score(chosen) === 0) {
+    // Say what the page had, so a failure on the phone can be understood.
+    const all = document.querySelectorAll('pre, .cifra_cnt, .cifra-content, #cifra').length;
+    result.error = `sem acordes visíveis: ${all} bloco(s) de cifra, ${candidates.length} visível(eis), página «${(document.title || '').slice(0, 60)}», ${innerWidth}x${innerHeight}`;
+  }
   else if (chosen.length > 10000) result.error = 'too-long';
   else result.text = chosen;
   return JSON.stringify(result);

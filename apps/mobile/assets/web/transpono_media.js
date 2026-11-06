@@ -234,7 +234,9 @@
     const candidates = [
       /(^|\.)(music\.youtube|soundcloud)\.com$/i.test(window.location.hostname)
         ? sessionTitle : '',
-      document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title')?.textContent,
+      // m.youtube.com now shows the title in an h2 "ytVideoMetadataViewModelTitle";
+      // after a page change document.title stays "YouTube" and og:title is gone.
+      document.querySelector('.ytVideoMetadataViewModelTitle, h1.ytd-watch-metadata, .slim-video-information-title, .slim-video-metadata-title, h1.title')?.textContent,
       document.querySelector('meta[property="og:title"]')?.getAttribute('content'),
       document.querySelector('meta[name="title"]')?.getAttribute('content'),
       document.title,

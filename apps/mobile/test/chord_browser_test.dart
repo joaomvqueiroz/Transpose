@@ -65,6 +65,12 @@ void main() {
     expect(chordQueryFromVideoTitle('YouTube'), isEmpty);
     expect(chordQueryFromVideoTitle('Vídeo do YouTube'), isEmpty);
     expect(chordQueryFromVideoTitle('Outra canção'), 'Outra canção');
+    expect(
+      chordQueryFromVideoTitle(
+        'Eli Soares - Me Ajude A Melhorar (Ao Vivo Na Penha) [Clipe Oficial] | Live',
+      ),
+      'Eli Soares - Me Ajude A Melhorar',
+    );
   });
 
   test(
