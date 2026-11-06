@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -92,15 +93,12 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     return Stack(
       children: [
         Positioned.fill(child: studio),
-        // Bottom left, beside "Abrir ajustes": at the top left it covered
-        // the YouTube search bar's back arrow, so after opening the search
-        // the page could not leave it (no typing, no video taps). On Spotify
-        // the wider pill row sits just above the adjustments bar.
+        // Top left, just under the page's top bar (YouTube's is 48 px): any
+        // higher and it covers the search bar's back arrow, and then the
+        // page cannot leave the search.
         Positioned(
           left: 12,
-          bottom:
-              MediaQuery.viewPaddingOf(context).bottom +
-              (source == ListeningSource.spotify ? 72 : 16),
+          top: MediaQuery.viewPaddingOf(context).top + 56,
           child: _SourceSwitch(
             spotify: source == ListeningSource.spotify,
             session: _spotify,
@@ -130,11 +128,9 @@ class _SourceSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final home = _Pill(
+    final home = _HomeButton(
       key: const Key('sourceHome'),
-      tooltip: 'Escolher YouTube ou Spotify',
       onPressed: onHome,
-      child: const Icon(Icons.apps_rounded, size: 18, color: Colors.white),
     );
     final current = session;
     if (!spotify || current == null) return home;
@@ -176,6 +172,62 @@ class _SourceSwitch extends StatelessWidget {
       },
     );
   }
+}
+
+/// Back to the choice screen: one and a half times the size of the other
+/// pills, and every 10 seconds it changes between see-through and
+/// see-through black, so it stands out without covering the video for long.
+class _HomeButton extends StatefulWidget {
+  const _HomeButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_HomeButton> createState() => _HomeButtonState();
+}
+
+class _HomeButtonState extends State<_HomeButton> {
+  static const _period = Duration(seconds: 10);
+  late final Timer _timer;
+  bool _dark = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(_period, (_) {
+      if (mounted) setState(() => _dark = !_dark);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: 'Voltar ao ecrã inicial',
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 800),
+      curve: Curves.easeInOut,
+      decoration: ShapeDecoration(
+        color: _dark ? const Color(0x99000000) : Colors.transparent,
+        shape: const StadiumBorder(side: BorderSide(color: Color(0x44FFFFFF))),
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: widget.onPressed,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 15, vertical: 10.5),
+            child: Icon(Icons.apps_rounded, size: 27, color: Colors.white),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _Pill extends StatelessWidget {
