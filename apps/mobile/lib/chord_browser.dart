@@ -156,8 +156,10 @@ class ImportedChord {
 const chordExtractionScript = r'''(() => {
   const result = {title: (document.querySelector('h1')?.innerText || document.title || '').trim().slice(0, 240),
     url: location.href, text: '', error: null};
-  if (/just a moment|um momento|attention required|verif/i.test(document.title || '') ||
-      document.querySelector('#challenge-form, #challenge-running, script[src*="challenge-platform"]')) {
+  // Only the check page itself: every normal page of the site also loads a
+  // small Cloudflare "challenge-platform" script, so that is no sign.
+  if (/^(just a moment|um momento|attention required)/i.test((document.title || '').trim()) ||
+      document.querySelector('#challenge-form, #challenge-running, #challenge-stage')) {
     result.error = 'challenge';
     return JSON.stringify(result);
   }
