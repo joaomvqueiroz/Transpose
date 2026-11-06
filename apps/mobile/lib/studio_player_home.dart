@@ -379,6 +379,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   @override
   void dispose() {
+    adjustmentsCoverScreen.value = false;
     _adjustmentChoicesOverlay?.remove();
     _adjustmentChoicesOverlay?.dispose();
     if (_immersiveLandscape) {
@@ -2405,6 +2406,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Widget build(BuildContext context) {
     final media = _mediaSurface();
     final landscapePlayer = _isLandscapePlayer;
+    // The floating start-screen button hides while the adjustments cover the
+    // whole screen.
+    final cover = _mainControlsExpanded && _adjustmentsCoverVideo;
+    if (adjustmentsCoverScreen.value != cover) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        adjustmentsCoverScreen.value =
+            mounted && _mainControlsExpanded && _adjustmentsCoverVideo;
+      });
+    }
     return Listener(
       // A touch outside the page (an app button, the adjustments) takes the
       // focus away from the page's search field, as tapping elsewhere does
@@ -2525,13 +2535,16 @@ class _CompactCloseAdjustments extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: 46,
     height: 46,
-    child: IconButton.filled(
+    // Hollow: transparent with a white outline, so it hides little of the
+    // adjustments underneath.
+    child: IconButton.outlined(
       key: const Key('visualCloseAdjustmentsCompact'),
       tooltip: 'Fechar ajustes',
       onPressed: onPressed,
       style: IconButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF161618),
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        side: const BorderSide(color: Colors.white, width: 1.6),
         padding: EdgeInsets.zero,
       ),
       icon: const Icon(Icons.keyboard_arrow_down, size: 30),

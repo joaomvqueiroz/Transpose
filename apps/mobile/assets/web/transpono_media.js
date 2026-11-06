@@ -846,6 +846,13 @@
       timelineSourceEpoch,
       videoId,
       title: video ? title() : '',
+      // A text field (the search bar) has the focus: the app hides its
+      // floating start-screen button meanwhile.
+      inputFocused: (() => {
+        const field = document.activeElement;
+        return !!field && !!field.matches &&
+          field.matches('input, textarea, [contenteditable="true"]');
+      })(),
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
       seeking: !!video && video.seeking,
@@ -877,6 +884,19 @@
       isAd,
       ...(probeEnabled ? {probe: probeSnapshot()} : {}),
     };
+  }
+
+  // Report focus changes at once (the start-screen button hides while the
+  // search bar has the focus). The page script can be injected again, so
+  // the listeners always call the latest post().
+  window.__transponoPostFocus = () => post();
+  if (!window.__transponoFocusListen) {
+    window.__transponoFocusListen = true;
+    const report = () => setTimeout(() => {
+      if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+    }, 0);
+    document.addEventListener('focusin', report, true);
+    document.addEventListener('focusout', report, true);
   }
 
   function post() {

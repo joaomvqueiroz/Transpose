@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import 'home_button_visibility.dart';
 import 'package:flutter/services.dart';
 import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -819,6 +821,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       return;
     }
     _snapshotRevision = revision.toInt();
+    pageInputFocused.value = state['inputFocused'] == true;
     final pausedVideoId = _pauseOnReadyVideoId;
     final selectedAnotherVideo =
         pausedVideoId != null &&
@@ -1018,6 +1021,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
 
   @override
   void dispose() {
+    pageInputFocused.value = false;
     _disposed = true;
     _timer?.cancel();
     if (_native case final native?) native.dispose();

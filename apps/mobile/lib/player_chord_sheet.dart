@@ -10,6 +10,12 @@ import 'studio_native_pages.dart';
 import 'study_tools.dart';
 import 'studio_appearance.dart';
 
+/// Chord sheet text: smaller than before (it looked too big on the iPhone)
+/// and always monospaced, so chords stay above their syllables. iOS has no
+/// "monospace" family; Menlo/Courier are its fixed-width fonts.
+const double _chordFontMax = 13;
+const List<String> _chordMonoFallback = ['Menlo', 'Courier New', 'Courier'];
+
 const int playerChordTextLimit = 10000;
 const int _fileByteLimit = 40000;
 const LinearGradient playerChordDarkGradient = LinearGradient(
@@ -297,7 +303,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   String? _measuredText;
   double? _measuredWidth;
   TextScaler? _measuredScaler;
-  double _fittedFontSize = 15;
+  double _fittedFontSize = _chordFontMax;
   bool _needsHorizontalScroll = false;
 
   int get _displayPitch =>
@@ -318,7 +324,11 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     for (final line in text.split('\n')) {
       painter.text = TextSpan(
         text: line.isEmpty ? ' ' : line,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 15),
+        style: const TextStyle(
+          fontFamily: 'monospace',
+          fontFamilyFallback: _chordMonoFallback,
+          fontSize: _chordFontMax,
+        ),
       );
       painter.layout();
       if (painter.width > widest) widest = painter.width;
@@ -326,8 +336,8 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     painter.dispose();
     final available = width.isFinite ? width.clamp(1.0, double.infinity) : 1.0;
     _fittedFontSize = widest > available
-        ? (15 * available / widest).clamp(11.0, 15.0)
-        : 15.0;
+        ? (_chordFontMax * available / widest).clamp(9.0, _chordFontMax)
+        : _chordFontMax;
     _needsHorizontalScroll = widest * _fittedFontSize / 15 > available + 1;
     _measuredText = text;
     _measuredWidth = width;
@@ -555,6 +565,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                           ),
                           style: TextStyle(
                             fontFamily: 'monospace',
+                            fontFamilyFallback: _chordMonoFallback,
                             fontSize: fontSize,
                             height: 1.8,
                             color:
@@ -757,6 +768,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                       ),
                       style: TextStyle(
                         fontFamily: 'monospace',
+                        fontFamilyFallback: _chordMonoFallback,
                         fontSize: fontSize,
                         height: 1.8,
                         color:

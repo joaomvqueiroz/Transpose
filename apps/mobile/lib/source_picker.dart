@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'home_button_visibility.dart';
 import 'premium_branding.dart';
 import 'spotify_browser.dart';
 import 'youtube_browser.dart';
@@ -99,11 +100,27 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
         Positioned(
           left: 12,
           top: MediaQuery.viewPaddingOf(context).top + 56,
-          child: _SourceSwitch(
-            spotify: source == ListeningSource.spotify,
-            session: _spotify,
-            onHome: () => _choose(null),
-            onPlayOnYouTube: _playOnYouTube,
+          // Hidden while the search bar has the focus or the adjustments
+          // cover the whole screen.
+          child: ListenableBuilder(
+            listenable: Listenable.merge([
+              pageInputFocused,
+              adjustmentsCoverScreen,
+            ]),
+            builder: (context, child) => IgnorePointer(
+              ignoring: hideHomeButton,
+              child: AnimatedOpacity(
+                opacity: hideHomeButton ? 0 : 1,
+                duration: const Duration(milliseconds: 200),
+                child: child,
+              ),
+            ),
+            child: _SourceSwitch(
+              spotify: source == ListeningSource.spotify,
+              session: _spotify,
+              onHome: () => _choose(null),
+              onPlayOnYouTube: _playOnYouTube,
+            ),
           ),
         ),
       ],
