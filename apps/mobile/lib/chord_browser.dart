@@ -24,6 +24,20 @@ bool isChordSourceUri(Uri uri) =>
     uri.port == 443 &&
     const {'www.cifras.com.br', 'cifras.com.br'}.contains(uri.host);
 
+/// The same chord page, whatever the host spelling (www or not), a trailing
+/// slash, a query or a fragment. Gecko can report the address before and
+/// after the site's own redirects/updates differently, which made every
+/// import fail as "a página mudou".
+bool sameChordPage(Uri? a, Uri? b) {
+  if (a == null || b == null) return false;
+  String host(Uri uri) =>
+      uri.host.startsWith('www.') ? uri.host.substring(4) : uri.host;
+  String path(Uri uri) => uri.path.endsWith('/') && uri.path.length > 1
+      ? uri.path.substring(0, uri.path.length - 1)
+      : uri.path;
+  return a.scheme == b.scheme && host(a) == host(b) && path(a) == path(b);
+}
+
 bool isChordPageUri(Uri uri) =>
     isChordSourceUri(uri) &&
     uri.pathSegments.length >= 3 &&
@@ -94,7 +108,7 @@ class ImportedChord {
       );
     }
     final uri = Uri.tryParse(value['url']);
-    if (uri == null || !isChordPageUri(uri) || uri != expectedUrl) {
+    if (uri == null || !isChordPageUri(uri) || !sameChordPage(uri, expectedUrl)) {
       throw const FormatException('A página mudou. Volte a tocar em importar.');
     }
     final text = validatePlayerChordText(value['text']);
@@ -271,11 +285,12 @@ class WebViewChordBrowser extends ChordBrowserSession {
 
     void onUrlChange(UrlChange change) {
       final uri = Uri.tryParse(change.url ?? '');
-      if (uri != _uri) {
-        _revision++;
-        _uri = uri;
-        _notify();
-      }
+      if (uri == _uri) return;
+      // A different spelling of the same page (Gecko reports its location
+      // updates separately) must not cancel an import in progress.
+      if (!sameChordPage(uri, _uri)) _revision++;
+      _uri = uri;
+      _notify();
     }
 
     void onProgress(int value) {
@@ -371,7 +386,7 @@ class WebViewChordBrowser extends ChordBrowserSession {
         .runJavaScriptReturningResult(chordExtractionScript)
         .timeout(const Duration(seconds: 8));
     final after = Uri.tryParse(await controller.currentUrl() ?? '');
-    if (_disposed || revision != _revision || current != after) {
+    if (_disposed || revision != _revision || !sameChordPage(current, after)) {
       throw const FormatException(
         'A página mudou durante a importação. Tente novamente.',
       );
@@ -555,11 +570,16 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
   }
 
   Future<void> _readChord(int generation, Uri uri) async {
-    for (var attempt = 0; attempt < 5; attempt++) {
+    // Gecko on iPhone has no JIT, so the site can take a few seconds longer
+    // to show the chord; keep trying for about 5 s and say why it failed.
+    var lastReason = '';
+    for (var attempt = 0; attempt < 12; attempt++) {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 450));
       }
-      if (!mounted || generation != _generation || _session.currentUri != uri) {
+      if (!mounted ||
+          generation != _generation ||
+          !sameChordPage(_session.currentUri, uri)) {
         return;
       }
       try {
@@ -567,14 +587,22 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
         if (!mounted || generation != _generation) return;
         await widget.onSelected(chord);
         return;
-      } on Object {
+      } on FormatException catch (failure) {
         // A visible chord can be inserted shortly after page load.
+        lastReason = failure.message;
+      } on Object catch (failure) {
+        lastReason = '$failure';
       }
     }
     if (mounted && generation == _generation) {
+      final reason = lastReason.length > 140
+          ? '${lastReason.substring(0, 140)}…'
+          : lastReason;
       setState(() {
         _loading = false;
-        _error = 'Não foi possível ler esta cifra. Escolha outro resultado.';
+        _error =
+            'Não foi possível ler esta cifra. Escolha outro resultado.'
+            '${reason.isEmpty ? '' : ' ($reason)'}';
       });
     }
   }
@@ -774,14 +802,14 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 450));
       }
-      if (!mounted || generation != _generation || _session.currentUri != uri) {
+      if (!mounted || generation != _generation || !sameChordPage(_session.currentUri, uri)) {
         return;
       }
       try {
         final chord = await _session.extract();
         if (!mounted ||
             generation != _generation ||
-            _session.currentUri != uri) {
+            !sameChordPage(_session.currentUri, uri)) {
           return;
         }
         setState(() {
@@ -794,7 +822,7 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
         // The visible chord block may appear shortly after page load.
       }
     }
-    if (mounted && generation == _generation && _session.currentUri == uri) {
+    if (mounted && generation == _generation && sameChordPage(_session.currentUri, uri)) {
       setState(() {
         _preparing = false;
         _error = 'Não foi possível ler esta cifra. Abra uma página de música com os acordes visíveis ou tente novamente.';

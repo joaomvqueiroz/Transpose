@@ -66,7 +66,9 @@
     let dragStartY = null;
     document.addEventListener('touchstart', event => {
       const player = playerOf();
+      // Never while the studio's adjustments are open over the page.
       dragStartY = player && !root.classList.contains('transpono-mini') &&
+        !window.__transponoAdjustmentsOpen &&
         window.location.pathname === '/watch' && player.contains(event.target)
         ? event.touches[0].clientY : null;
     }, {passive: true, capture: true});

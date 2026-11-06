@@ -902,10 +902,14 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       await controller.runJavaScript(
         shown
             ? '''(() => {
+                // The mini player stays off while the adjustments are open.
+                window.__transponoAdjustmentsOpen = true;
+                document.documentElement.classList.remove('transpono-mini');
                 window.__transponoScrollBefore = window.scrollY;
                 window.scrollTo({top: 0, left: 0, behavior: 'instant'});
               })()'''
             : '''(() => {
+                window.__transponoAdjustmentsOpen = false;
                 const y = window.__transponoScrollBefore;
                 window.__transponoScrollBefore = undefined;
                 if (typeof y === 'number' && y > 0) {
