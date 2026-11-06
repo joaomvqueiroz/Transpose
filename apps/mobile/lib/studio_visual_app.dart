@@ -134,7 +134,7 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
           : null,
       child: widget.chooseSourceAtStart
           ? TransponoSourcePicker(studioBuilder: _studio)
-          : _studio(null, null, null),
+          : _studio(null, null, null, null),
     ),
   );
 
@@ -142,10 +142,12 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     Key? key,
     String? query,
     YouTubeBrowserSession Function()? sessionFactory,
+    Uri? home,
   ) => StudioVisualHome(
     key: key,
     functionalPlayer: widget.functionalPlayer,
     youtubeSessionFactory: sessionFactory ?? widget.youtubeSessionFactory,
+    youtubeHome: home,
     playerController: widget.playerController,
     presetStore: widget.presetStore,
     recoveryRepository: widget.recoveryRepository,
@@ -182,6 +184,7 @@ class StudioVisualHome extends StatefulWidget {
     this.chordBrowserFactory,
     this.openSearchWhenEmpty = false,
     this.initialYouTubeQuery,
+    this.youtubeHome,
     this.appearance = const StudioAppearance(),
     this.onAppearanceChanged,
     this.onInitialBrowserReady,
@@ -195,6 +198,10 @@ class StudioVisualHome extends StatefulWidget {
   final SessionSnapshotRepository? recoveryRepository;
   final ChordBrowserSession Function()? chordBrowserFactory;
   final bool openSearchWhenEmpty;
+
+  /// First browser page; null means m.youtube.com (music.youtube.com for
+  /// the YouTube Music choice).
+  final Uri? youtubeHome;
 
   /// YouTube search to open first, e.g. a song handed over from Spotify.
   final String? initialYouTubeQuery;

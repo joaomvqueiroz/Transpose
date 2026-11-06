@@ -7,15 +7,17 @@ import 'spotify_browser.dart';
 import 'youtube_browser.dart';
 
 /// Where the user listens from, chosen on the first screen.
-enum ListeningSource { youtube, spotify }
+enum ListeningSource { youtube, youtubeMusic, spotify }
 
 /// Builds the studio for a source. [sessionFactory] replaces the YouTube
-/// browser (Spotify); [query] is a YouTube search to open first.
+/// browser (Spotify); [query] is a YouTube search to open first; [home] is
+/// the first browser page (music.youtube.com for YouTube Music).
 typedef StudioBuilder =
     Widget Function(
       Key key,
       String? query,
       YouTubeBrowserSession Function()? sessionFactory,
+      Uri? home,
     );
 
 /// First screen: black, the Transpono symbol and two large choices.
@@ -68,13 +70,19 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     if (source == null) {
       return _PickerScreen(
         onYouTube: () => _choose(ListeningSource.youtube),
+        onYouTubeMusic: () => _choose(ListeningSource.youtubeMusic),
         onSpotify: () => _choose(ListeningSource.spotify),
       );
     }
+    // YouTube Music is the same YouTube player and page bridge (pitch, EQ,
+    // effects work); only the first page differs.
     final studio = widget.studioBuilder(
       ValueKey<String>('studio-${source.name}-$_generation'),
       _query,
       source == ListeningSource.spotify ? _spotifySession : null,
+      source == ListeningSource.youtubeMusic
+          ? Uri.https('music.youtube.com', '/')
+          : null,
     );
     return Stack(
       children: [
@@ -194,9 +202,14 @@ class _Pill extends StatelessWidget {
 }
 
 class _PickerScreen extends StatelessWidget {
-  const _PickerScreen({required this.onYouTube, required this.onSpotify});
+  const _PickerScreen({
+    required this.onYouTube,
+    required this.onYouTubeMusic,
+    required this.onSpotify,
+  });
 
   final VoidCallback onYouTube;
+  final VoidCallback onYouTubeMusic;
   final VoidCallback onSpotify;
 
   @override
@@ -238,8 +251,12 @@ class _PickerScreen extends StatelessWidget {
                         ),
                       ),
                       SizedBox(height: wide ? 24 : 44),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                      // Two per row on a phone held upright (the third is
+                      // centred below), all three in one row when wide.
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: tile * .14,
+                        runSpacing: tile * .14,
                         children: [
                           _SourceTile(
                             key: const Key('pickYouTube'),
@@ -250,7 +267,15 @@ class _PickerScreen extends StatelessWidget {
                             accent: const Color(0xFFFF0033),
                             onPressed: onYouTube,
                           ),
-                          SizedBox(width: tile * .14),
+                          _SourceTile(
+                            key: const Key('pickYouTubeMusic'),
+                            size: tile,
+                            label: 'YouTube Music',
+                            caption: 'Músicas com tom e EQ',
+                            logo: const _YouTubeMusicLogo(),
+                            accent: const Color(0xFFFF0033),
+                            onPressed: onYouTubeMusic,
+                          ),
                           _SourceTile(
                             key: const Key('pickSpotify'),
                             size: tile,
@@ -336,13 +361,21 @@ class _SourceTileState extends State<_SourceTile> {
               children: [
                 SizedBox(width: s * .52, height: s * .52, child: widget.logo),
                 SizedBox(height: s * .1),
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: s * .12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.3,
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: s * .08),
+                  // "YouTube Music" shrinks to fit instead of wrapping.
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: s * .12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.3,
+                      ),
+                    ),
                   ),
                 ),
                 SizedBox(height: s * .03),
@@ -390,6 +423,44 @@ class _YouTubeLogoPainter extends CustomPainter {
       ..moveTo(cx - t * .42, cy - t * .5)
       ..lineTo(cx + t * .58, cy)
       ..lineTo(cx - t * .42, cy + t * .5)
+      ..close();
+    canvas.drawPath(play, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _YouTubeMusicLogo extends StatelessWidget {
+  const _YouTubeMusicLogo();
+
+  @override
+  Widget build(BuildContext context) =>
+      const CustomPaint(painter: _YouTubeMusicLogoPainter());
+}
+
+/// Red disc, white ring and white play triangle, drawn as vectors.
+class _YouTubeMusicLogoPainter extends CustomPainter {
+  const _YouTubeMusicLogoPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final d = math.min(size.width, size.height);
+    final c = Offset(size.width / 2, size.height / 2);
+    canvas.drawCircle(c, d / 2, Paint()..color = const Color(0xFFFF0033));
+    canvas.drawCircle(
+      c,
+      d * .29,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = d * .045,
+    );
+    final t = d * .26;
+    final play = Path()
+      ..moveTo(c.dx - t * .36, c.dy - t * .45)
+      ..lineTo(c.dx + t * .5, c.dy)
+      ..lineTo(c.dx - t * .36, c.dy + t * .45)
       ..close();
     canvas.drawPath(play, Paint()..color = Colors.white);
   }

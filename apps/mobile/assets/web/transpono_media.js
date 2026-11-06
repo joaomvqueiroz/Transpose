@@ -98,15 +98,22 @@
     return match ? match[1] : null;
   };
   const title = () => {
+    // YouTube Music sets Media Session metadata ("Song" + "Artist"); the
+    // chord search wants both, like a YouTube "Song - Artist" title.
+    const session = navigator.mediaSession && navigator.mediaSession.metadata;
+    const sessionTitle = session && session.title
+      ? (session.artist ? `${session.title} - ${session.artist}` : session.title)
+      : '';
     const candidates = [
+      /(^|\.)music\.youtube\.com$/i.test(window.location.hostname) ? sessionTitle : '',
       document.querySelector('h1.ytd-watch-metadata, .slim-video-metadata-title, h1.title')?.textContent,
       document.querySelector('meta[property="og:title"]')?.getAttribute('content'),
       document.querySelector('meta[name="title"]')?.getAttribute('content'),
       document.title,
     ];
     for (const candidate of candidates) {
-      const value = (candidate || '').replace(/\s*[-–]\s*YouTube\s*$/i, '').trim();
-      if (value && !/^(?:youtube|vídeo do youtube)$/i.test(value)) return value;
+      const value = (candidate || '').replace(/\s*[-–]\s*YouTube(?: Music)?\s*$/i, '').trim();
+      if (value && !/^(?:youtube(?: music)?|vídeo do youtube)$/i.test(value)) return value;
     }
     return '';
   };

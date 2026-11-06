@@ -14,12 +14,17 @@ class MainPlayerController extends PlayerPanelModel {
   MainPlayerController({
     LocalPlayerController? local,
     YouTubeBrowserSession Function()? youtubeFactory,
+    Uri? youtubeHome,
   }) : local = local ?? LocalPlayerController(),
+       _youtubeHome = youtubeHome ?? Uri.https('m.youtube.com', '/'),
        _youtubeFactory = youtubeFactory ?? WebViewYouTubeSession.new {
     this.local.addListener(_changed);
   }
   final LocalPlayerController local;
   final YouTubeBrowserSession Function() _youtubeFactory;
+
+  /// First page of the browser: m.youtube.com, or music.youtube.com.
+  final Uri _youtubeHome;
   YouTubeBrowserSession? _youtube;
   YouTubeBrowserSession? get youtube => _youtube;
   bool _online = false, _disposed = false;
@@ -145,7 +150,7 @@ class MainPlayerController extends PlayerPanelModel {
     session.addListener(_changed);
     _changed(); // Mount the platform view before loading the document.
     try {
-      await session.start(Uri.https('m.youtube.com', '/'));
+      await session.start(_youtubeHome);
     } on Object {
       if (identical(_youtube, session)) {
         session.removeListener(_changed);

@@ -9,7 +9,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       : studioBg;
   late final MainPlayerController _player =
       widget.playerController ??
-      MainPlayerController(youtubeFactory: widget.youtubeSessionFactory);
+      MainPlayerController(
+        youtubeFactory: widget.youtubeSessionFactory,
+        youtubeHome: widget.youtubeHome,
+      );
   late final PlayerPresetStore _presets =
       widget.presetStore ?? PlayerPresetStore();
   late final PracticeController _practice = PracticeController(_player);
