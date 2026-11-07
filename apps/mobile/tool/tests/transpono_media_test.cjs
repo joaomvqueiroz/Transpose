@@ -152,7 +152,7 @@ function fixture(options = {}) {
       if (selector === 'video.html5-main-video') return options.mainVideo === false ? null : selected;
       if (selector === 'video') return options.genericVideo || selected;
       if (selector === '.ad-showing, .ad-interrupting') return ad ? {} : null;
-      if (selector.startsWith('h1.ytd-watch-metadata'))
+      if (selector.includes('h1.ytd-watch-metadata'))
         return options.heading ? {textContent: options.heading} : null;
       if (selector === 'meta[property="og:title"]')
         return options.ogTitle ? {getAttribute: () => options.ogTitle} : null;
@@ -160,8 +160,13 @@ function fixture(options = {}) {
         return options.metaTitle ? {getAttribute: () => options.metaTitle} : null;
       return null;
     },
+    // The mini player and the focus report attach page listeners and a style.
+    documentElement: {classList: {contains: () => false, toggle() {}}, appendChild() {}},
+    head: {appendChild() {}},
+    createElement: () => ({}),
+    addEventListener() {},
   };
-  const sandbox = {window, document, URL, performance: {now: () => clock},
+  const sandbox = {window, document, navigator: {}, URL, performance: {now: () => clock},
     setInterval(fn) { tick = fn; return 1; }, clearInterval() { tick = null; },
     setTimeout, clearTimeout, Float32Array};
   vm.createContext(sandbox);

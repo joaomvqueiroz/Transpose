@@ -28,7 +28,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedYouTubeSearch')), findsNothing);
     expect(find.byKey(const Key('unifiedFullscreen')), findsNothing);
-    expect(find.text('Fechar ajustes'), findsNothing);
+    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
     expect(find.byKey(const Key('unifiedMore')), findsNothing);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);

@@ -35,7 +35,7 @@ void main() {
       find.byKey(const Key('visualMainAdjustmentsBackdrop')),
       findsNothing,
     );
-    expect(find.text('Fechar ajustes'), findsNothing);
+    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
     expect(
       tester
           .widget<IconButton>(find.byKey(const Key('visualMainAdjustments')))

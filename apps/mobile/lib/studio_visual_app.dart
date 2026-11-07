@@ -239,7 +239,11 @@ class _MainAdjustmentsBar extends StatelessWidget {
                 width: buttonWidth,
                 height: 52,
                 child: OutlinedButton.icon(
-                  key: const Key('visualMainAdjustments'),
+                  key: Key(
+                    expanded
+                        ? 'visualCloseAdjustments'
+                        : 'visualMainAdjustments',
+                  ),
                   onPressed: onPressed,
                   style: OutlinedButton.styleFrom(
                     backgroundColor: expanded

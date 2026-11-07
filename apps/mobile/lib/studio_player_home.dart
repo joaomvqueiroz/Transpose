@@ -2379,6 +2379,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     return SingleChildScrollView(
       key: const Key('unifiedChordScroll'),
       controller: _scroll,
+      // Room under the last control so it scrolls clear of the floating
+      // "Fechar ajustes", as in the other sections.
+      padding: const EdgeInsets.only(bottom: 88),
       child: Column(
         children: [
           if (topGap > 0) SizedBox(height: topGap),
@@ -2423,93 +2426,96 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       behavior: HitTestBehavior.translucent,
       onPointerDown: _releasePageFocusOutside,
       child: PopScope(
-      canPop: !_browsing,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        unawaited(_player.pause());
-        setState(() => _browsing = false);
-      },
-      child: Scaffold(
-        body: _browsing
-            ? SafeArea(child: _browserPage(media))
-            : SafeArea(
-                bottom: false,
-                child: Stack(
-                  children: <Widget>[
-                    // Scrolling down in the open adjustments shrinks the close
-                    // control to a small arrow; scrolling up brings back the
-                    // full "Fechar ajustes" button.
-                    NotificationListener<UserScrollNotification>(
-                      onNotification: (notification) {
-                        if (!_mainControlsExpanded || landscapePlayer) {
+        canPop: !_browsing,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          unawaited(_player.pause());
+          setState(() => _browsing = false);
+        },
+        child: Scaffold(
+          body: _browsing
+              ? SafeArea(child: _browserPage(media))
+              : SafeArea(
+                  bottom: false,
+                  child: Stack(
+                    children: <Widget>[
+                      // Scrolling down in the open adjustments shrinks the close
+                      // control to a small arrow; scrolling up brings back the
+                      // full "Fechar ajustes" button.
+                      NotificationListener<UserScrollNotification>(
+                        onNotification: (notification) {
+                          if (!_mainControlsExpanded || landscapePlayer) {
+                            return false;
+                          }
+                          final compact =
+                              notification.direction == ScrollDirection.reverse
+                              ? true
+                              : notification.direction ==
+                                    ScrollDirection.forward
+                              ? false
+                              : null;
+                          if (compact != null && compact != _closeCompact) {
+                            setState(() => _closeCompact = compact);
+                          }
                           return false;
-                        }
-                        final compact =
-                            notification.direction == ScrollDirection.reverse
-                            ? true
-                            : notification.direction == ScrollDirection.forward
-                            ? false
-                            : null;
-                        if (compact != null && compact != _closeCompact) {
-                          setState(() => _closeCompact = compact);
-                        }
-                        return false;
-                      },
-                      child: Column(
-                        children: <Widget>[Expanded(child: _mainPanel(media))],
-                      ),
-                    ),
-                    if (!landscapePlayer &&
-                        _mainControlsExpanded &&
-                        !_adjustmentsCoverVideo)
-                      Positioned(
-                        bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 180),
-                            transitionBuilder: (child, animation) =>
-                                FadeTransition(
-                                  opacity: animation,
-                                  child: ScaleTransition(
-                                    scale: animation,
-                                    child: child,
-                                  ),
-                                ),
-                            child: _closeCompact
-                                ? _CompactCloseAdjustments(
-                                    key: const ValueKey('compactClose'),
-                                    onPressed: _toggleMainAdjustments,
-                                  )
-                                : _MainAdjustmentsBar(
-                                    key: const ValueKey('fullClose'),
-                                    expanded: true,
-                                    onPressed: _toggleMainAdjustments,
-                                  ),
-                          ),
+                        },
+                        child: Column(
+                          children: <Widget>[
+                            Expanded(child: _mainPanel(media)),
+                          ],
                         ),
                       ),
-                    if ((landscapePlayer && !_landscapeColumnsVisible) ||
-                        (!landscapePlayer && !_mainControlsExpanded))
-                      Positioned(
-                        bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: _MainAdjustmentsBar(
-                            expanded: false,
-                            onPressed: landscapePlayer
-                                ? _openLandscapeAdjustments
-                                : _toggleMainAdjustments,
+                      if (!landscapePlayer &&
+                          _mainControlsExpanded &&
+                          !_adjustmentsCoverVideo)
+                        Positioned(
+                          bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: animation,
+                                      child: child,
+                                    ),
+                                  ),
+                              child: _closeCompact
+                                  ? _CompactCloseAdjustments(
+                                      key: const ValueKey('compactClose'),
+                                      onPressed: _toggleMainAdjustments,
+                                    )
+                                  : _MainAdjustmentsBar(
+                                      key: const ValueKey('fullClose'),
+                                      expanded: true,
+                                      onPressed: _toggleMainAdjustments,
+                                    ),
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                      if ((landscapePlayer && !_landscapeColumnsVisible) ||
+                          (!landscapePlayer && !_mainControlsExpanded))
+                        Positioned(
+                          bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: _MainAdjustmentsBar(
+                              expanded: false,
+                              onPressed: landscapePlayer
+                                  ? _openLandscapeAdjustments
+                                  : _toggleMainAdjustments,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
+        ),
       ),
-    ),
     );
   }
 

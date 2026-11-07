@@ -2,12 +2,15 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:transpose_mobile/chord_browser.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
+
+import 'floating_close_helper.dart';
 
 import 'fake_youtube_session.dart';
 
@@ -25,6 +28,8 @@ void main() {
     }
     final target = find.byKey(Key(key));
     await tester.ensureVisible(target);
+    await tester.pumpAndSettle();
+    await liftAboveFloatingClose(tester, target);
     await tester.tap(target);
     await tester.pumpAndSettle();
   }

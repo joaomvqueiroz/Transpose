@@ -395,7 +395,7 @@ void main() {
       _app(GlobalKey<PlayerChordSheetState>(), _Model(), store, 'long'),
     );
     await tester.pumpAndSettle();
-    expect(tester.widget<SelectableText>(text).style!.fontSize, 11);
+    expect(tester.widget<SelectableText>(text).style!.fontSize, 9);
     expect(find.byKey(const Key('playerChordHorizontalScroll')), findsNothing);
     expect(find.byKey(const Key('playerChordScrollHint')), findsNothing);
     expect(tester.getSize(text).width, lessThan(320));

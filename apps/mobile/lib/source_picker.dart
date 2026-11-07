@@ -14,13 +14,12 @@ enum ListeningSource { youtube, youtubeMusic, soundCloud, spotify }
 /// Builds the studio for a source. [sessionFactory] replaces the YouTube
 /// browser (Spotify); [query] is a YouTube search to open first; [home] is
 /// the first browser page (music.youtube.com for YouTube Music).
-typedef StudioBuilder =
-    Widget Function(
-      Key key,
-      String? query,
-      YouTubeBrowserSession Function()? sessionFactory,
-      Uri? home,
-    );
+typedef StudioBuilder = Widget Function(
+  Key key,
+  String? query,
+  YouTubeBrowserSession Function()? sessionFactory,
+  Uri? home,
+);
 
 /// First screen: black, the Transpono symbol and two large choices.
 ///
@@ -145,10 +144,7 @@ class _SourceSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final home = _HomeButton(
-      key: const Key('sourceHome'),
-      onPressed: onHome,
-    );
+    final home = _HomeButton(key: const Key('sourceHome'), onPressed: onHome);
     final current = session;
     if (!spotify || current == null) return home;
     return ListenableBuilder(
@@ -164,7 +160,7 @@ class _SourceSwitch extends StatelessWidget {
             _Pill(
               key: const Key('spotifyPlayOnYouTube'),
               tooltip: ready
-                  ? 'Tocar «${track?.title}» no YouTube com tom'
+                  ? 'Tocar «${track.title}» no YouTube com tom'
                   : 'Toque uma música no Spotify primeiro',
               color: ready ? const Color(0xFFFF0033) : const Color(0xCC2A2A2E),
               onPressed: ready ? onPlayOnYouTube : null,

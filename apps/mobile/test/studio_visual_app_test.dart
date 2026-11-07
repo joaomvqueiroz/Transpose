@@ -10,6 +10,7 @@ import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
 import 'fake_youtube_session.dart';
+import 'floating_close_helper.dart';
 
 void main() {
   setUp(() {
@@ -141,7 +142,17 @@ void main() {
     expect((chooseCard.decoration as BoxDecoration).gradient, isNotNull);
     await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('appearanceModeglass')));
+    final glass = find.byKey(const Key('appearanceModeglass'));
+    await tester.ensureVisible(glass);
+    await tester.pumpAndSettle();
+    await liftAboveFloatingClose(tester, glass);
+    await tester.tap(glass);
+    await tester.pumpAndSettle();
+    // Back to the top, where the section tabs are.
+    await tester.drag(
+      find.byKey(const Key('unifiedAppearanceSettingsScroll')),
+      const Offset(0, 600),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
     await tester.pumpAndSettle();
