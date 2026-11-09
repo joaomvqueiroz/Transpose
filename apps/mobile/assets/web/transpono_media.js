@@ -87,6 +87,15 @@
       html.transpono-mini.transpono-mini-dragging #player-container-id.sticky-player {
         transition: none;
       }
+      /* The related-videos filter chips stay in the page flow while mini
+         (sticky, they hung mid-screen under where the full player was). */
+      html.transpono-mini ytm-related-chip-cloud-renderer,
+      html.transpono-mini ytm-chip-cloud-renderer,
+      html.transpono-mini *:has(> ytm-related-chip-cloud-renderer),
+      html.transpono-mini *:has(> ytm-chip-cloud-renderer) {
+        position: static !important; top: auto !important;
+        transform: none !important;
+      }
       html.transpono-mini .player-placeholder-wrapper,
       html.transpono-mini .player-placeholder {
         height: 0 !important; min-height: 0 !important;
@@ -95,9 +104,10 @@
     (document.head || document.documentElement).appendChild(style);
     const root = document.documentElement;
     const playerOf = () => document.querySelector('#player-container-id.sticky-player');
-    // m.youtube.com keeps some bars (the filter chips) "sticky" just under
-    // the full-size player; once it shrinks they stayed stuck mid-screen.
-    // While mini, they stick under the top bar instead; restored after.
+    // m.youtube.com keeps some bars (the filter chips) sticky/fixed just under
+    // the full-size player; once it shrinks they hung mid-screen over the
+    // list. While mini they go back into the page flow (scrolling away with
+    // it); restored after. Also re-checked while mini: YouTube adds them late.
     const lifted = [];
     const liftStickyBars = () => {
       if (typeof window.getComputedStyle !== 'function' || !document.body) return;
@@ -108,9 +118,12 @@
       while (node && seen++ < 6000) {
         if (!(player && player.contains(node))) {
           const css = window.getComputedStyle(node);
-          if (css.position === 'sticky' && parseFloat(css.top) > 80) {
-            lifted.push([node, node.style.getPropertyValue('top'), node.style.getPropertyPriority('top')]);
-            node.style.setProperty('top', '48px', 'important');
+          if ((css.position === 'sticky' || css.position === 'fixed') &&
+              parseFloat(css.top) > 80 && !node.__transponoLifted) {
+            node.__transponoLifted = true;
+            lifted.push([node, node.getAttribute('style')]);
+            node.style.setProperty('position', 'static', 'important');
+            node.style.setProperty('top', 'auto', 'important');
           }
         }
         node = walker.nextNode();
@@ -118,9 +131,10 @@
     };
     const restoreStickyBars = () => {
       while (lifted.length) {
-        const [node, top, priority] = lifted.pop();
-        if (top) node.style.setProperty('top', top, priority);
-        else node.style.removeProperty('top');
+        const [node, styleText] = lifted.pop();
+        node.__transponoLifted = false;
+        if (styleText === null) node.removeAttribute('style');
+        else node.setAttribute('style', styleText);
       }
     };
     const setOffset = (x, y) => {
@@ -207,9 +221,12 @@
     }, true);
     // Leaving the watch page (search, home) drops the mini state.
     setInterval(() => {
-      if (root.classList.contains('transpono-mini') &&
-          (!playerOf() || window.location.pathname !== '/watch')) {
+      if (!root.classList.contains('transpono-mini')) return;
+      if (!playerOf() || window.location.pathname !== '/watch') {
         setMini(false);
+      } else if (!lifted.length) {
+        // Only until the bar is found: walking the page is not free.
+        liftStickyBars();
       }
     }, 500);
   }
