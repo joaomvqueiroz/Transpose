@@ -12,25 +12,31 @@ import 'fullscreen_player.dart';
 import 'media/native_audio_media_loader.dart';
 import 'media/video_player_media_loader.dart';
 import 'studio_visual_app.dart';
+import 'youtube_browser.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // iOS builds with the Gecko engine kit render YouTube with Gecko.
   await GeckoEngine.ensureInitialized();
   unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarIconBrightness: Brightness.light,
-    systemNavigationBarContrastEnforced: false,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarContrastEnforced: false,
+    ),
+  );
   runApp(
     const StudioVisualApp(
       openSearchWhenEmpty: true,
       waitForStartupBrowser: true,
       // First screen: choose YouTube (full studio) or Spotify (listening).
       chooseSourceAtStart: true,
+      // YouTube and YouTube Music: browse and search on one page while the
+      // chosen video plays on another, in the app's own mini player.
+      browseSessionFactory: WebViewYouTubeSession.new,
     ),
   );
 }

@@ -48,6 +48,23 @@
       window.__transponoScrollDir = top > before && top > 40 ? 'down' : 'up';
     }, {passive: true, capture: true});
   }
+  // Two-page mode, browse page: a tap on a video (a /watch link) is handed to
+  // the app, which plays it in its player page; this page stays where it is
+  // (the search results stay behind the mini player).
+  if (!window.__transponoOpenWatch && typeof document.addEventListener === 'function') {
+    window.__transponoOpenWatch = true;
+    document.addEventListener('click', event => {
+      if (!window.__transponoBrowseOnly || !event.target || !event.target.closest) return;
+      const link = event.target.closest('a[href*="/watch?"]');
+      if (!link) return;
+      let url;
+      try { url = new URL(link.getAttribute('href'), window.location.href); } catch (_) { return; }
+      if (url.pathname !== '/watch' || !url.searchParams.get('v')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      window.__transponoOpenRequest = url.href;
+    }, true);
+  }
   // Mini player, as in the YouTube app: drag the watch-page video DOWN and it
   // shrinks to a small video in a corner, the space it used is released so
   // the video list moves up; tapping the small video restores the full
@@ -189,7 +206,8 @@
       if (dragStartY === null) return;
       if (touch.clientY - dragStartY > 60) {
         dragStartY = null;
-        setMini(true);
+        if (window.__transponoAppMini) window.__transponoMinimizeRequest = true;
+        else setMini(true);
       }
     }, {passive: false, capture: true});
     document.addEventListener('touchend', event => {
@@ -996,6 +1014,17 @@
           field.matches('input, textarea, [contenteditable="true"]');
       })(),
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
+      minimizeRequest: (() => {
+        const asked = window.__transponoMinimizeRequest === true;
+        window.__transponoMinimizeRequest = false;
+        return asked;
+      })(),
+      openRequest: (() => {
+        const asked = typeof window.__transponoOpenRequest === 'string'
+          ? window.__transponoOpenRequest : '';
+        window.__transponoOpenRequest = '';
+        return asked;
+      })(),
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
       seeking: !!video && video.seeking,

@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'studio_native_pages.dart';
 import 'studio_column_theme.dart';
 import 'youtube_browser.dart';
+import 'youtube_search.dart' show isYouTubeBrowserUri;
 import 'main_player_controller.dart';
 import 'main_player_panel.dart';
 import 'player_chord_sheet.dart';
@@ -28,6 +29,7 @@ import 'microphone_tuner.dart';
 import 'home_widget_bridge.dart';
 import 'studio_appearance.dart';
 import 'home_button_visibility.dart';
+import 'picture_in_picture.dart';
 import 'stem_panel.dart';
 import 'ambient_rhythm_trial.dart';
 
@@ -48,10 +50,15 @@ class StudioVisualApp extends StatefulWidget {
     this.deferHomeUntilLaunch = false,
     this.waitForStartupBrowser = false,
     this.chooseSourceAtStart = false,
+    this.browseSessionFactory,
   });
 
   final Widget? functionalPlayer;
   final YouTubeBrowserSession Function()? youtubeSessionFactory;
+
+  /// Two-page mode for YouTube and YouTube Music: a second page to browse
+  /// and search while the video plays in the app's own mini player.
+  final YouTubeBrowserSession Function()? browseSessionFactory;
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
   @Deprecated('A recuperação automática de sessões foi removida.')
@@ -149,6 +156,11 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     key: key,
     functionalPlayer: widget.functionalPlayer,
     youtubeSessionFactory: sessionFactory ?? widget.youtubeSessionFactory,
+    // Only YouTube and YouTube Music (not Spotify, not SoundCloud).
+    browseSessionFactory:
+        sessionFactory == null && (home == null || isYouTubeBrowserUri(home))
+        ? widget.browseSessionFactory
+        : null,
     youtubeHome: home,
     playerController: widget.playerController,
     presetStore: widget.presetStore,
@@ -190,10 +202,14 @@ class StudioVisualHome extends StatefulWidget {
     this.appearance = const StudioAppearance(),
     this.onAppearanceChanged,
     this.onInitialBrowserReady,
+    this.browseSessionFactory,
   });
 
   final Widget? functionalPlayer;
   final YouTubeBrowserSession Function()? youtubeSessionFactory;
+
+  /// See [StudioVisualApp.browseSessionFactory].
+  final YouTubeBrowserSession Function()? browseSessionFactory;
   final MainPlayerController? playerController;
   final PlayerPresetStore? presetStore;
   @Deprecated('A recuperação automática de sessões foi removida.')

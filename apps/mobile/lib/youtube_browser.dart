@@ -444,6 +444,10 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   bool get canGoBack;
   Future<void> start(Uri uri);
   Future<void> openVideo(String videoId) => start(_youtubeVideoUri(videoId));
+
+  /// Plays a watch page (YouTube or YouTube Music) chosen in the browse
+  /// page of the two-page mode.
+  Future<void> playWatch(Uri watch) => start(watch);
   Future<void> focusVideo() async {}
 
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
@@ -459,6 +463,30 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   Future<void> goBack();
   Future<void> command(String action, [num? value]);
   Widget buildView();
+
+  // Two-page mode (the app's own mini player): one session plays (it keeps
+  // the audio bridge), another one browses and searches.
+
+  /// This session only browses: a video chosen here goes to [onOpenRequest]
+  /// and does not play here.
+  bool browseOnly = false;
+
+  /// The page's drag-down on the video asks the app (via
+  /// [onMinimizeRequest]) to shrink it, instead of its own CSS mini player.
+  bool appMini = false;
+
+  /// This session's page state (search field focus, scroll direction)
+  /// drives the app's floating controls.
+  bool publishesPageState = true;
+
+  /// A video chosen in a [browseOnly] page.
+  void Function(Uri watch)? onOpenRequest;
+
+  /// The video was dragged down in an [appMini] page.
+  VoidCallback? onMinimizeRequest;
+
+  /// Applies [browseOnly] and [appMini] to the current page.
+  Future<void> applyPageRoles() async {}
 }
 
 Uri _youtubeVideoUri(String videoId) {
@@ -700,17 +728,22 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         final bool youtubePage =
             uri.host == 'youtube.com' || uri.host.endsWith('.youtube.com');
         if (!youtubePage && !isSoundCloudBrowserUri(uri)) return;
-        step = 'dsp';
-        await controller.runJavaScript(_dsp!);
-        if (_disposed || generation != _document) return;
-        step = 'stretch';
-        await controller.runJavaScript(_dspAdapter!);
-        if (_disposed || generation != _document) return;
-        step = 'key';
-        await controller.runJavaScript(_keyDetector!);
-        if (_disposed || generation != _document) return;
+        // The browse page of the two-page mode never processes audio: only
+        // the page bridge (page state, video hand-over), no pitch engine.
+        if (!browseOnly) {
+          step = 'dsp';
+          await controller.runJavaScript(_dsp!);
+          if (_disposed || generation != _document) return;
+          step = 'stretch';
+          await controller.runJavaScript(_dspAdapter!);
+          if (_disposed || generation != _document) return;
+          step = 'key';
+          await controller.runJavaScript(_keyDetector!);
+          if (_disposed || generation != _document) return;
+        }
         step = 'media';
         await controller.runJavaScript(_bridge!);
+        await applyPageRoles();
         await refresh();
         return;
       } on GeckoJavaScriptException catch (failure) {
@@ -823,8 +856,34 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       return;
     }
     _snapshotRevision = revision.toInt();
-    pageInputFocused.value = state['inputFocused'] == true;
-    pageScrolledDown.value = state['pageScroll'] == 'down';
+    if (publishesPageState) {
+      pageInputFocused.value = state['inputFocused'] == true;
+      pageScrolledDown.value = state['pageScroll'] == 'down';
+    }
+    if (state['minimizeRequest'] == true) onMinimizeRequest?.call();
+    final Object? asked = state['openRequest'];
+    if (browseOnly && asked is String && asked.isNotEmpty) {
+      final Uri? watch = Uri.tryParse(asked);
+      if (watch != null && isYouTubeBrowserUri(watch)) {
+        onOpenRequest?.call(watch);
+      }
+    }
+    if (browseOnly) {
+      // A video started here anyway (YouTube Music plays in its own bar, a
+      // link the tap interception missed): hand it to the player page and
+      // stop it here; leave a watch page so the list stays behind.
+      final Object? id = state['videoId'];
+      // Back on a page without a video: the same one may be chosen again.
+      if (id is! String || id.isEmpty) _handedOffVideoId = null;
+      if (id is String &&
+          id.isNotEmpty &&
+          state['hasVideo'] == true &&
+          state['isAd'] != true &&
+          id != _handedOffVideoId) {
+        _handedOffVideoId = id;
+        unawaited(_handOffVideo(id));
+      }
+    }
     final pausedVideoId = _pauseOnReadyVideoId;
     final selectedAnotherVideo =
         pausedVideoId != null &&
@@ -844,6 +903,35 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final native = _native;
       if (native != null) unawaited(native.sync(_media));
       if (state['restoreReady'] == true) _pauseOnReadyVideoId = null;
+    }
+  }
+
+  String? _handedOffVideoId;
+
+  Future<void> _handOffVideo(String id) async {
+    final Uri? page = Uri.tryParse(await controller.currentUrl() ?? '');
+    final String host = page != null && page.host.endsWith('youtube.com')
+        ? page.host
+        : 'm.youtube.com';
+    if (RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id)) {
+      onOpenRequest?.call(Uri.https(host, '/watch', <String, String>{'v': id}));
+    }
+    await command('pause');
+    if (!_disposed && page != null && page.path == '/watch') {
+      await goBack();
+    }
+  }
+
+  @override
+  Future<void> applyPageRoles() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(
+        'window.__transponoBrowseOnly = $browseOnly;'
+        'window.__transponoAppMini = $appMini;',
+      );
+    } on Object {
+      // No page yet: applied again when the bridge installs.
     }
   }
 
@@ -903,6 +991,21 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _progress = 0;
     _notify();
     await controller.loadRequest(uri);
+  }
+
+  @override
+  Future<void> playWatch(Uri watch) async {
+    if (!isYouTubeBrowserUri(watch)) throw ArgumentError.value(watch);
+    await command('pause');
+    if (_disposed) return;
+    _timeline.reset();
+    _pauseOnReadyVideoId = null;
+    _focusOnReadyVideoId = watch.queryParameters['v'];
+    _media = const YouTubeMediaState();
+    _error = null;
+    _progress = 0;
+    _notify();
+    await controller.loadRequest(watch);
   }
 
   @override

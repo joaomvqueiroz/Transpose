@@ -1,3 +1,4 @@
+import AVFoundation
 import Flutter
 import UIKit
 
@@ -15,6 +16,11 @@ enum TransponoMain {
   ) -> Void
 
   static func main() {
+    // The video's sound keeps playing with the app in the background
+    // (Info.plist UIBackgroundModes: audio). Category only: the session
+    // becomes active when something plays, so opening the app does not
+    // stop another app's music.
+    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
     if let frameworks = Bundle.main.privateFrameworksPath,
       let handle = dlopen(
         frameworks + "/TransponoGecko.framework/TransponoGecko", RTLD_NOW | RTLD_GLOBAL),

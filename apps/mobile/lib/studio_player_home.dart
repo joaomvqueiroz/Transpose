@@ -59,6 +59,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   int _audioSourceRevision = 0;
   YouTubeBrowserSession? _browserOwner;
   Widget? _browser;
+
+  // Two-page mode: [_browse] browses and searches; the player session plays
+  // the chosen video, full screen or in the app's mini player over it.
+  YouTubeBrowserSession? _browse;
+  Widget? _browseView;
+  final GlobalKey _browseKey = GlobalKey(debugLabel: 'browse-surface');
+  Offset? _miniOffset;
+  bool _miniDragging = false;
+  bool get _twoPages => _browse != null;
+
+  // Screen size outside picture-in-picture: the page keeps that layout and
+  // the small window shows its video area, scaled.
+  Size _lastScreen = const Size(400, 800);
   late final HomeWidgetBridge _homeWidgets;
   String? _pendingWidgetAction;
   List<ChordCue> _widgetCues = const [];
@@ -74,6 +87,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     unawaited(_homeWidgets.initialize());
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
+    inPictureInPicture.addListener(_pipChanged);
+    final browseFactory = widget.browseSessionFactory;
+    if (browseFactory != null && widget.playerController == null) {
+      final browse = browseFactory()
+        ..browseOnly = true
+        ..onOpenRequest = _playChosen;
+      browse.addListener(_browseChanged);
+      _browse = browse;
+      _browseView = browse.buildView();
+    }
     unawaited(_initializeStartPage());
     _lastForegroundWidgetState = _widgetSnapshot();
     _homeWidgets.schedule(_lastForegroundWidgetState!);
@@ -133,6 +156,22 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Future<void> _initializeStartPage() async {
+    final browse = _browse;
+    if (browse != null) {
+      if (!mounted) return;
+      setState(() => _browsing = true);
+      _syncPageRoles();
+      try {
+        await browse.start(
+          widget.youtubeHome ?? Uri.https('m.youtube.com', '/'),
+        );
+        final String query = widget.initialYouTubeQuery?.trim() ?? '';
+        if (query.isNotEmpty && mounted) await browse.search(query);
+      } on Object {
+        // The page shows its own error; the studio stays usable.
+      }
+      return;
+    }
     if (!mounted ||
         !widget.openSearchWhenEmpty ||
         _player.loaded ||
@@ -171,7 +210,72 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     });
   }
 
+  /// Which page drives the floating controls, and the player page's
+  /// drag-down (it asks the app for the mini player).
+  void _syncPageRoles() {
+    final browse = _browse;
+    if (browse == null) return;
+    browse.publishesPageState = _browsing;
+    final player = _player.youtube;
+    if (player == null) return;
+    player.publishesPageState = !_browsing;
+    if (!player.appMini) {
+      player
+        ..appMini = true
+        ..onMinimizeRequest = _minimize;
+      unawaited(player.applyPageRoles());
+    }
+  }
+
+  void _browseChanged() {
+    final browse = _browse;
+    if (browse != null && browse.contentReady) _reportInitialBrowserReady();
+    if (mounted) setState(() {});
+  }
+
+  /// A video chosen in the browse page: play it full screen in the player.
+  void _playChosen(Uri watch) {
+    if (!mounted) return;
+    setState(() {
+      _browsing = false;
+      _mainControlsExpanded = false;
+      _adjustmentsCoverVideo = false;
+    });
+    _syncPageRoles();
+    unawaited(_player.playWatch(watch));
+  }
+
+  /// The video shrinks to the app's mini player and the browse page (with
+  /// the search the video came from) comes back behind it; it keeps playing.
+  void _minimize() {
+    if (!mounted || !_twoPages || _browsing) return;
+    _hideAdjustmentChoices();
+    setState(() {
+      _browsing = true;
+      _mainControlsExpanded = false;
+      _adjustmentsCoverVideo = false;
+      _landscapeColumnsVisible = false;
+    });
+    _syncPageRoles();
+  }
+
+  void _expandMini() {
+    if (!mounted) return;
+    setState(() => _browsing = false);
+    _syncPageRoles();
+  }
+
+  void _pipChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _changed() {
+    _syncPageRoles();
+    unawaited(
+      PictureInPicture.setVideoPlaying(
+        _player.isYouTube && _player.loaded && _player.playing,
+      ),
+    );
     final startupSession = _player.youtube;
     if (startupSession is WebViewYouTubeSession) {
       unawaited(startupSession.setAppearanceMode(widget.appearance.mode));
@@ -209,7 +313,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _syncSystemUi();
       setState(() {});
     }
-    if (!_browsing ||
+    if (_twoPages ||
+        !_browsing ||
         !_player.isYouTube ||
         _autoSelectingVideo ||
         _browserOpening) {
@@ -361,7 +466,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       unawaited(_practice.pause());
-      unawaited(_player.pause());
+      // A YouTube video keeps playing with the app in the background (iPhone:
+      // background audio; Android: the system's picture-in-picture window).
+      if (!_player.isYouTube) unawaited(_player.pause());
       _homeWidgets.schedule({
         ...?_lastForegroundWidgetState,
         'playing': false,
@@ -387,6 +494,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
     WidgetsBinding.instance.removeObserver(this);
     _player.removeListener(_changed);
+    inPictureInPicture.removeListener(_pipChanged);
+    unawaited(PictureInPicture.setVideoPlaying(false));
+    _browse?.removeListener(_browseChanged);
+    _browse?.dispose();
     _practice.removeListener(_practiceChanged);
     _practice.dispose();
     _bandSession.dispose();
@@ -1424,8 +1535,149 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
+  /// Two-page mode while browsing: the browse page fills the screen and,
+  /// once a video was chosen, it plays on in the mini player over it.
+  Widget _twoPageBrowse(Widget media) => LayoutBuilder(
+    builder: (context, box) {
+      final screen = Size(box.maxWidth, box.maxHeight);
+      final padding = MediaQuery.paddingOf(context);
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: SafeArea(
+              child: _browserPage(
+                KeyedSubtree(
+                  key: _browseKey,
+                  child: _browseView ?? const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ),
+          if (_player.loaded && _player.isYouTube)
+            _miniPlayer(media, screen, padding),
+        ],
+      );
+    },
+  );
+
+  // The watch page's video starts under YouTube's 48 px top bar.
+  static const double _miniVideoTop = 48;
+
+  Rect _miniRect(Size screen, EdgeInsets padding) {
+    final double width = (screen.width * .46).clamp(140.0, 280.0);
+    final double height = width * 9 / 16;
+    final Offset fallback = Offset(
+      screen.width - width - 12,
+      screen.height - padding.bottom - 76 - height,
+    );
+    final Offset at = _miniOffset ?? fallback;
+    return Rect.fromLTWH(at.dx, at.dy, width, height);
+  }
+
+  /// Settles the mini player against the nearest side, inside the screen.
+  void _settleMini(Size screen, EdgeInsets padding) {
+    final Rect now = _miniRect(screen, padding);
+    final double left = now.center.dx < screen.width / 2
+        ? 12
+        : screen.width - now.width - 12;
+    final double top = now.top.clamp(
+      padding.top + 56,
+      screen.height - padding.bottom - 76 - now.height,
+    );
+    setState(() {
+      _miniDragging = false;
+      _miniOffset = Offset(left, top);
+    });
+  }
+
+  /// Android picture-in-picture: only the video, filling the small window.
+  Widget _pipView(Widget media) => ColoredBox(
+    color: Colors.black,
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final Size page = _lastScreen;
+        final double scale = box.maxWidth / page.width;
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            minWidth: page.width,
+            maxWidth: page.width,
+            minHeight: page.height,
+            maxHeight: page.height,
+            child: Transform(
+              alignment: Alignment.topLeft,
+              transform: Matrix4.diagonal3Values(scale, scale, 1)
+                ..translateByDouble(0, -_miniVideoTop, 0, 1),
+              child: SizedBox.fromSize(size: page, child: media),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+
+  Widget _miniPlayer(Widget media, Size screen, EdgeInsets padding) {
+    final Rect rect = _miniRect(screen, padding);
+    final double scale = rect.width / screen.width;
+    return AnimatedPositioned(
+      key: const Key('appMiniPlayer'),
+      duration: _miniDragging
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      child: GestureDetector(
+        key: const Key('appMiniPlayerTouch'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _expandMini,
+        onPanStart: (_) => setState(() {
+          _miniDragging = true;
+          _miniOffset = rect.topLeft;
+        }),
+        onPanUpdate: (details) => setState(
+          () => _miniOffset = (_miniOffset ?? rect.topLeft) + details.delta,
+        ),
+        onPanEnd: (_) => _settleMini(screen, padding),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x99000000),
+                blurRadius: 24,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: IgnorePointer(
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: screen.width,
+                maxWidth: screen.width,
+                minHeight: screen.height,
+                maxHeight: screen.height,
+                child: Transform(
+                  alignment: Alignment.topLeft,
+                  transform: Matrix4.diagonal3Values(scale, scale, 1)
+                    ..translateByDouble(0, -_miniVideoTop, 0, 1),
+                  child: SizedBox.fromSize(size: screen, child: media),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _browserPage(Widget media) {
-    final session = _player.youtube;
+    // Back and reload act on the page being browsed (two-page mode: _browse).
+    final session = _browse ?? _player.youtube;
     return Column(
       children: <Widget>[
         if (_browserOpenedFromPlayer)
@@ -2434,6 +2686,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   @override
   Widget build(BuildContext context) {
     final media = _mediaSurface();
+    if (inPictureInPicture.value && _player.loaded && _player.isYouTube) {
+      return _pipView(media);
+    }
+    _lastScreen = MediaQuery.sizeOf(context);
     final landscapePlayer = _isLandscapePlayer;
     // The floating start-screen button hides while the adjustments cover the
     // whole screen.
@@ -2452,15 +2708,28 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       behavior: HitTestBehavior.translucent,
       onPointerDown: _releasePageFocusOutside,
       child: PopScope(
-        canPop: !_browsing,
+        canPop: !_browsing && !(_twoPages && _player.loaded),
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
+          final browse = _browse;
+          if (browse != null) {
+            // Two pages: back shrinks the video (it keeps playing); while
+            // browsing it goes back in the browse page.
+            if (!_browsing) {
+              _minimize();
+            } else if (browse.canGoBack) {
+              unawaited(browse.goBack());
+            }
+            return;
+          }
           unawaited(_player.pause());
           setState(() => _browsing = false);
         },
         child: Scaffold(
           body: _browsing
-              ? SafeArea(child: _browserPage(media))
+              ? _twoPages
+                    ? _twoPageBrowse(media)
+                    : SafeArea(child: _browserPage(media))
               : SafeArea(
                   bottom: false,
                   child: Stack(

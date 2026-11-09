@@ -143,14 +143,14 @@ class MainPlayerController extends PlayerPanelModel {
   @override
   bool get loopEnabled => _online ? _media.loopEnabled : local.loopEnabled;
 
-  Future<void> _ensureYouTube() async {
+  Future<void> _ensureYouTube({Uri? first}) async {
     if (_disposed || _youtube != null) return;
     final session = _youtubeFactory();
     _youtube = session;
     session.addListener(_changed);
     _changed(); // Mount the platform view before loading the document.
     try {
-      await session.start(_youtubeHome);
+      await session.start(first ?? _youtubeHome);
     } on Object {
       if (identical(_youtube, session)) {
         session.removeListener(_changed);
@@ -185,6 +185,25 @@ class MainPlayerController extends PlayerPanelModel {
     return _run(() async {
       if (!await _releaseLocal() || _disposed) return;
       await _ensureYouTube();
+      if (_disposed) return;
+      _online = true;
+    });
+  }
+
+  /// Two-page mode: plays the video chosen in the browse page here, in the
+  /// player page (the one with the audio bridge).
+  Future<void> playWatch(Uri watch) {
+    ++_sourceIntentRevision;
+    _cancelRestore();
+    _youtubePauseRequested = false;
+    _lastNativeVideoTouch = null;
+    return _run(() async {
+      if (!await _releaseLocal() || _disposed) return;
+      if (_youtube == null) {
+        await _ensureYouTube(first: watch);
+      } else {
+        await _youtube!.playWatch(watch);
+      }
       if (_disposed) return;
       _online = true;
     });

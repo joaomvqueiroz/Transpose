@@ -5,8 +5,12 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
 import android.os.Build
+import android.util.Rational
 import android.view.WindowManager
+import androidx.annotation.RequiresApi
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -29,6 +33,11 @@ class MainActivity : FlutterActivity() {
     }
     private var bandNoisyRegistered = false
 
+    // Picture-in-picture: while a YouTube video plays, leaving the app shows
+    // it in the system's small window (the Dart side draws only the video).
+    private var pipChannel: MethodChannel? = null
+    private var videoPlaying = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         if (packageName == "com.example.transpose_mobile.qa") {
@@ -46,6 +55,19 @@ class MainActivity : FlutterActivity() {
         qaPhoneRhythm = PhoneRhythmFeatureCapture.attach(
             applicationContext, flutterEngine.dartExecutor.binaryMessenger,
         )
+        pipChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "transpono/pip").also {
+            it.setMethodCallHandler { call, result ->
+                if (call.method == "setVideoPlaying") {
+                    videoPlaying = call.arguments == true
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        setPictureInPictureParams(pipParams())
+                    }
+                    result.success(null)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
         stemMessenger = flutterEngine.dartExecutor.binaryMessenger
         stems = StemEngine.attach(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
@@ -114,5 +136,29 @@ class MainActivity : FlutterActivity() {
         qaPhoneRhythm?.cancel()
         stems?.cancelForLifecycle(stemMessenger)
         super.onPause()
+    }
+
+    @RequiresApi(26)
+    private fun pipParams(): PictureInPictureParams {
+        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(videoPlaying)
+        return builder.build()
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12+ enters by itself (setAutoEnterEnabled); older versions here.
+        if (videoPlaying && Build.VERSION.SDK_INT in 26..30) {
+            try {
+                enterPictureInPictureMode(pipParams())
+            } catch (_: IllegalStateException) {
+                // Not allowed right now: leave normally.
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(inPip, newConfig)
+        pipChannel?.invokeMethod("pipChanged", inPip)
     }
 }
