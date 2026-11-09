@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
@@ -11,6 +12,17 @@ import 'fake_youtube_session.dart';
 class _BrowseSession extends FakeYouTubeSession {
   @override
   Widget buildView() => const Center(child: Text('Página de pesquisa'));
+}
+
+class _InteractivePlayerSession extends FakeYouTubeSession {
+  int videoTaps = 0;
+
+  @override
+  Widget buildView() => GestureDetector(
+    key: const Key('playerPageTapTarget'),
+    onTap: () => videoTaps++,
+    child: const ColoredBox(color: Colors.black),
+  );
 }
 
 void main() {
@@ -26,7 +38,7 @@ void main() {
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
       final browse = _BrowseSession();
-      final player = FakeYouTubeSession();
+      final player = _InteractivePlayerSession();
       await tester.pumpWidget(
         StudioVisualApp(
           openSearchWhenEmpty: true,
@@ -68,6 +80,16 @@ void main() {
       expect(browse.publishesPageState, isTrue);
       expect(player.publishesPageState, isFalse);
 
+      // Touches on the video in the mini player go to YouTube's WebView. A
+      // separate, small control is used to restore the full player.
+      final miniTopLeft = tester.getTopLeft(
+        find.byKey(const Key('appMiniPlayerTouch')),
+      );
+      await tester.tapAt(miniTopLeft + const Offset(40, 40));
+      await tester.pumpAndSettle();
+      expect(player.videoTaps, 1);
+      expect(find.byKey(const Key('appMiniPlayer')), findsOneWidget);
+
       // It can be dragged and settles against a side.
       final mini = find.byKey(const Key('appMiniPlayerTouch'));
       final before = tester.getTopLeft(mini);
@@ -77,14 +99,44 @@ void main() {
       expect(after.dx, closeTo(12, 0.5));
       expect(after.dy, lessThan(before.dy));
 
-      // A tap brings the video back to full size.
-      await tester.tap(mini);
+      // The dedicated expand button brings the video back to full size.
+      await tester.tap(find.byKey(const Key('appMiniPlayerExpand')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('appMiniPlayer')), findsNothing);
       expect(find.text('Página de pesquisa'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('tema escuro/claro é propagado às duas páginas YouTube', (
+    tester,
+  ) async {
+    final browse = _BrowseSession();
+    final player = FakeYouTubeSession();
+    Widget home(StudioAppearanceMode mode) => MaterialApp(
+      home: StudioVisualHome(
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: () => player,
+        browseSessionFactory: () => browse,
+        appearance: StudioAppearance(mode: mode),
+      ),
+    );
+
+    await tester.pumpWidget(home(StudioAppearanceMode.dark));
+    await tester.pumpAndSettle();
+    expect(browse.appearanceModes, contains(StudioAppearanceMode.dark));
+
+    browse.onOpenRequest!(
+      Uri.https('m.youtube.com', '/watch', {'v': 'abcdefghijk'}),
+    );
+    await tester.pumpAndSettle();
+    expect(player.appearanceModes, contains(StudioAppearanceMode.dark));
+
+    await tester.pumpWidget(home(StudioAppearanceMode.light));
+    await tester.pumpAndSettle();
+    expect(browse.appearanceModes.last, StudioAppearanceMode.light);
+    expect(player.appearanceModes.last, StudioAppearanceMode.light);
+  });
 
   testWidgets('sem a fábrica da segunda página fica tudo numa só', (
     tester,

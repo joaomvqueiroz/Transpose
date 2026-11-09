@@ -458,6 +458,7 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// The user touched the app outside the page: the page's text field gives
   /// up its focus, so touching it again opens the keyboard.
   Future<void> releaseFocus() async {}
+  Future<void> setAppearanceMode(StudioAppearanceMode mode) async {}
   Future<void> search(String query);
   Future<void> reload();
   Future<void> goBack();
@@ -570,6 +571,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (video) video.muted = $muted;
   })()''');
 
+  @override
   Future<void> setAppearanceMode(StudioAppearanceMode mode) async {
     if (_disposed || _appearanceMode == mode) return;
     _appearanceMode = mode;

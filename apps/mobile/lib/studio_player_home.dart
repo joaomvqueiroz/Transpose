@@ -93,6 +93,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       final browse = browseFactory()
         ..browseOnly = true
         ..onOpenRequest = _playChosen;
+      // Same light or dark look as the player page.
+      unawaited(browse.setAppearanceMode(widget.appearance.mode));
       browse.addListener(_browseChanged);
       _browse = browse;
       _browseView = browse.buildView();
@@ -119,8 +121,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         ),
       );
       final session = _player.youtube;
-      if (session is WebViewYouTubeSession) {
+      if (session != null) {
         unawaited(session.setAppearanceMode(widget.appearance.mode));
+      }
+      final browse = _browse;
+      if (browse != null) {
+        unawaited(browse.setAppearanceMode(widget.appearance.mode));
       }
     }
   }
@@ -227,10 +233,22 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
   }
 
+  bool? _browseCanGoBack;
+  bool? _browsePlayerLoaded;
+  bool? _browsePlayerIsYouTube;
+  String? _browsePlayerMessage;
+
+  /// The browse page changed: only what the studio shows of it (first page
+  /// ready, the back arrow). Rebuilding the whole studio on every page
+  /// snapshot made scrolling stutter.
   void _browseChanged() {
     final browse = _browse;
-    if (browse != null && browse.contentReady) _reportInitialBrowserReady();
-    if (mounted) setState(() {});
+    if (browse == null) return;
+    if (browse.contentReady) _reportInitialBrowserReady();
+    if (browse.canGoBack != _browseCanGoBack) {
+      _browseCanGoBack = browse.canGoBack;
+      if (mounted) setState(() {});
+    }
   }
 
   /// A video chosen in the browse page: play it full screen in the player.
@@ -277,7 +295,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
     );
     final startupSession = _player.youtube;
-    if (startupSession is WebViewYouTubeSession) {
+    if (startupSession != null) {
       unawaited(startupSession.setAppearanceMode(widget.appearance.mode));
     }
     if (startupSession != null && startupSession.contentReady) {
@@ -305,13 +323,26 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _audioSourceRevision++;
     }
     _syncAudioValues();
+    final browsePresentationChanged =
+        _browsePlayerLoaded != _player.loaded ||
+        _browsePlayerIsYouTube != _player.isYouTube ||
+        _browsePlayerMessage != _player.message;
+    _browsePlayerLoaded = _player.loaded;
+    _browsePlayerIsYouTube = _player.isYouTube;
+    _browsePlayerMessage = _player.message;
     if (mounted) {
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         _lastForegroundWidgetState = _widgetSnapshot();
         _homeWidgets.schedule(_lastForegroundWidgetState!);
       }
       _syncSystemUi();
-      setState(() {});
+      // The player reports its timeline several times per second. While the
+      // browse page is visible, rebuilding the whole two-page stack for those
+      // snapshots makes the second WebView's scrolling stutter. Only rebuild
+      // when something actually displayed by that page changes.
+      if (!_twoPages || !_browsing || browsePresentationChanged) {
+        setState(() {});
+      }
     }
     if (_twoPages ||
         !_browsing ||
@@ -1637,8 +1668,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       height: rect.height,
       child: GestureDetector(
         key: const Key('appMiniPlayerTouch'),
-        behavior: HitTestBehavior.opaque,
-        onTap: _expandMini,
+        behavior: HitTestBehavior.translucent,
         onPanStart: (_) => setState(() {
           _miniDragging = true;
           _miniOffset = rect.topLeft;
@@ -1660,20 +1690,43 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: IgnorePointer(
-              child: OverflowBox(
-                alignment: Alignment.topLeft,
-                minWidth: screen.width,
-                maxWidth: screen.width,
-                minHeight: screen.height,
-                maxHeight: screen.height,
-                child: Transform(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                OverflowBox(
                   alignment: Alignment.topLeft,
-                  transform: Matrix4.diagonal3Values(scale, scale, 1)
-                    ..translateByDouble(0, -_miniVideoTop, 0, 1),
-                  child: SizedBox.fromSize(size: screen, child: media),
+                  minWidth: screen.width,
+                  maxWidth: screen.width,
+                  minHeight: screen.height,
+                  maxHeight: screen.height,
+                  child: Transform(
+                    alignment: Alignment.topLeft,
+                    transform: Matrix4.diagonal3Values(scale, scale, 1)
+                      ..translateByDouble(0, -_miniVideoTop, 0, 1),
+                    child: SizedBox.fromSize(size: screen, child: media),
+                  ),
                 ),
-              ),
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Material(
+                    color: const Color(0x99000000),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      key: const Key('appMiniPlayerExpand'),
+                      tooltip: 'Expandir vídeo',
+                      onPressed: _expandMini,
+                      icon: const Icon(Icons.open_in_full, size: 16),
+                      color: Colors.white,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

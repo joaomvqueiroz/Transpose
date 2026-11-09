@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:transpose_mobile/studio_appearance.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
 class FakeYouTubeSession extends YouTubeBrowserSession {
@@ -8,6 +9,7 @@ class FakeYouTubeSession extends YouTubeBrowserSession {
   bool disposed = false;
   bool back = false;
   String? failure;
+  final List<StudioAppearanceMode> appearanceModes = <StudioAppearanceMode>[];
   YouTubeMediaState state = const YouTubeMediaState();
 
   @override
@@ -20,6 +22,10 @@ class FakeYouTubeSession extends YouTubeBrowserSession {
   bool get canGoBack => back;
   @override
   Future<void> start(Uri uri) async => startedUri = uri;
+  @override
+  Future<void> setAppearanceMode(StudioAppearanceMode mode) async {
+    appearanceModes.add(mode);
+  }
   @override
   Future<void> search(String query) async => lastQuery = query;
   @override
