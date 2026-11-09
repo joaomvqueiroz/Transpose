@@ -649,6 +649,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           _timeline.reset();
           _contentReady = false;
           _snapshotRevision = -1;
+          // A new document counts its requests from zero.
+          _minimizeSeq = null;
+          _openSeq = null;
           _error = null;
           _media = const YouTubeMediaState();
           _notify();
@@ -816,6 +819,19 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       }
       if (decoded is Map<String, dynamic>) {
         _acceptSnapshot(decoded, startUs: startUs, endUs: endUs);
+        // A video chosen in the browse page starts without a tap here, so
+        // YouTube starts it muted: give it its sound once it is playing.
+        final String? unmute = _unmuteOnReadyVideoId;
+        if (unmute != null &&
+            decoded['videoId'] == unmute &&
+            decoded['hasVideo'] == true &&
+            decoded['isAd'] != true) {
+          if (decoded['muted'] == true) {
+            unawaited(command('unmute'));
+          } else if (decoded['playing'] == true) {
+            _unmuteOnReadyVideoId = null;
+          }
+        }
       }
       if (_focusOnReadyVideoId != null &&
           decoded is Map<String, dynamic> &&
@@ -860,12 +876,26 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
     }
-    if (state['minimizeRequest'] == true) onMinimizeRequest?.call();
+    // Each request carries a counter (per page); act on a new one once.
+    final Object? minimizeSeq = state['minimizeSeq'];
+    if (minimizeSeq is num && minimizeSeq.toInt() != _minimizeSeq) {
+      final bool first = _minimizeSeq == null;
+      _minimizeSeq = minimizeSeq.toInt();
+      if (!first || _minimizeSeq! > 0) onMinimizeRequest?.call();
+    }
+    final Object? openSeq = state['openSeq'];
     final Object? asked = state['openRequest'];
-    if (browseOnly && asked is String && asked.isNotEmpty) {
-      final Uri? watch = Uri.tryParse(asked);
-      if (watch != null && isYouTubeBrowserUri(watch)) {
-        onOpenRequest?.call(watch);
+    if (openSeq is num && openSeq.toInt() != _openSeq) {
+      final bool first = _openSeq == null;
+      _openSeq = openSeq.toInt();
+      if (browseOnly &&
+          (!first || _openSeq! > 0) &&
+          asked is String &&
+          asked.isNotEmpty) {
+        final Uri? watch = Uri.tryParse(asked);
+        if (watch != null && isYouTubeBrowserUri(watch)) {
+          onOpenRequest?.call(watch);
+        }
       }
     }
     if (browseOnly) {
@@ -907,6 +937,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   String? _handedOffVideoId;
+  String? _unmuteOnReadyVideoId;
+  // Last request counters seen (null: none yet on this page).
+  int? _minimizeSeq;
+  int? _openSeq;
 
   Future<void> _handOffVideo(String id) async {
     final Uri? page = Uri.tryParse(await controller.currentUrl() ?? '');
@@ -917,7 +951,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       onOpenRequest?.call(Uri.https(host, '/watch', <String, String>{'v': id}));
     }
     await command('pause');
-    if (!_disposed && page != null && page.path == '/watch') {
+    if (!_disposed &&
+        page != null &&
+        (page.path == '/watch' || page.path.startsWith('/shorts/'))) {
       await goBack();
     }
   }
@@ -1001,6 +1037,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _timeline.reset();
     _pauseOnReadyVideoId = null;
     _focusOnReadyVideoId = watch.queryParameters['v'];
+    _unmuteOnReadyVideoId = watch.queryParameters['v'];
     _media = const YouTubeMediaState();
     _error = null;
     _progress = 0;

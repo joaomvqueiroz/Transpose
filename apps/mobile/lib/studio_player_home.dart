@@ -465,10 +465,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      unawaited(_practice.pause());
       // A YouTube video keeps playing with the app in the background (iPhone:
       // background audio; Android: the system's picture-in-picture window).
-      if (!_player.isYouTube) unawaited(_player.pause());
+      // The practice pause also pauses the player, so only when practising
+      // or on another source.
+      if (!_player.isYouTube) {
+        unawaited(_practice.pause());
+        unawaited(_player.pause());
+      } else if (_practice.running) {
+        unawaited(_practice.pause());
+      }
       _homeWidgets.schedule({
         ...?_lastForegroundWidgetState,
         'playing': false,

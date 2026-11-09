@@ -10,6 +10,12 @@ final ValueNotifier<bool> adjustmentsCoverScreen = ValueNotifier<bool>(false);
 /// ajustes" shrinks to a small arrow; scrolling up brings it back in full.
 final ValueNotifier<bool> pageScrolledDown = ValueNotifier<bool>(false);
 
-/// The floating "back to the start screen" button hides in both cases.
+/// Android's picture-in-picture window is open (the studio shows only the
+/// video). Mirrors `inPictureInPicture` (picture_in_picture.dart).
+final ValueNotifier<bool> pictureInPictureShown = ValueNotifier<bool>(false);
+
+/// The floating "back to the start screen" button hides in these cases.
 bool get hideHomeButton =>
-    pageInputFocused.value || adjustmentsCoverScreen.value;
+    pageInputFocused.value ||
+    adjustmentsCoverScreen.value ||
+    pictureInPictureShown.value;

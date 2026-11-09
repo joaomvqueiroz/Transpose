@@ -114,6 +114,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
             listenable: Listenable.merge([
               pageInputFocused,
               adjustmentsCoverScreen,
+              pictureInPictureShown,
             ]),
             builder: (context, child) => IgnorePointer(
               ignoring: hideHomeButton,

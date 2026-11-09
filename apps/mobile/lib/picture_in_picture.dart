@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'home_button_visibility.dart';
+
 /// The app is shown in Android's picture-in-picture window: the studio then
 /// draws only the video.
 final ValueNotifier<bool> inPictureInPicture = ValueNotifier<bool>(false);
@@ -22,6 +24,7 @@ abstract final class PictureInPicture {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'pipChanged') {
         inPictureInPicture.value = call.arguments == true;
+        pictureInPictureShown.value = inPictureInPicture.value;
       }
       return null;
     });

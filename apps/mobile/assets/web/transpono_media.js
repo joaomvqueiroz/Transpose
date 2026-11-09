@@ -55,14 +55,18 @@
     window.__transponoOpenWatch = true;
     document.addEventListener('click', event => {
       if (!window.__transponoBrowseOnly || !event.target || !event.target.closest) return;
-      const link = event.target.closest('a[href*="/watch?"]');
+      const link = event.target.closest('a[href*="/watch?"], a[href*="/shorts/"]');
       if (!link) return;
       let url;
       try { url = new URL(link.getAttribute('href'), window.location.href); } catch (_) { return; }
+      // A Short plays in the player page as a normal watch page.
+      const short = url.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
+      if (short) url = new URL(`/watch?v=${short[1]}`, url);
       if (url.pathname !== '/watch' || !url.searchParams.get('v')) return;
       event.preventDefault();
       event.stopPropagation();
       window.__transponoOpenRequest = url.href;
+      window.__transponoOpenSeq = (window.__transponoOpenSeq || 0) + 1;
     }, true);
   }
   // Mini player, as in the YouTube app: drag the watch-page video DOWN and it
@@ -206,7 +210,9 @@
       if (dragStartY === null) return;
       if (touch.clientY - dragStartY > 60) {
         dragStartY = null;
-        if (window.__transponoAppMini) window.__transponoMinimizeRequest = true;
+        if (window.__transponoAppMini) {
+          window.__transponoMinimizeSeq = (window.__transponoMinimizeSeq || 0) + 1;
+        }
         else setMini(true);
       }
     }, {passive: false, capture: true});
@@ -1014,17 +1020,12 @@
           field.matches('input, textarea, [contenteditable="true"]');
       })(),
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
-      minimizeRequest: (() => {
-        const asked = window.__transponoMinimizeRequest === true;
-        window.__transponoMinimizeRequest = false;
-        return asked;
-      })(),
-      openRequest: (() => {
-        const asked = typeof window.__transponoOpenRequest === 'string'
-          ? window.__transponoOpenRequest : '';
-        window.__transponoOpenRequest = '';
-        return asked;
-      })(),
+      // Counters, not one-shot flags: any snapshot (there are several
+      // callers) may read them; the app acts on each new number once.
+      minimizeSeq: window.__transponoMinimizeSeq || 0,
+      openSeq: window.__transponoOpenSeq || 0,
+      openRequest: typeof window.__transponoOpenRequest === 'string'
+        ? window.__transponoOpenRequest : '',
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
       seeking: !!video && video.seeking,
@@ -1483,6 +1484,29 @@
         requireVideo();
         video.muted = false;
         if (video.volume === 0) video.volume = 1;
+        // YouTube's muted autoplay keeps its own mute state ("Toque para
+        // ativar o som"): press its unmute control too, as a person would.
+        // YouTube's own player API first: it clears its muted state and the
+        // "Toque para ativar o som" overlay.
+        // (On iPhone the script runs in Gecko's extension sandbox: the page's
+        // own methods are reached through wrappedJSObject.)
+        const ytElement = typeof document.getElementById === 'function'
+          ? document.getElementById('movie_player') : null;
+        const ytPlayer = ytElement && (ytElement.wrappedJSObject || ytElement);
+        if (ytPlayer && typeof ytPlayer.unMute === 'function') {
+          try {
+            ytPlayer.unMute();
+            if (typeof ytPlayer.getVolume === 'function' && ytPlayer.getVolume() === 0 &&
+                typeof ytPlayer.setVolume === 'function') ytPlayer.setVolume(100);
+          } catch (_) {}
+        }
+        const controls = typeof document.querySelectorAll === 'function'
+          ? document.querySelectorAll(
+            '.ytp-unmute, [class*="unmute" i], [aria-label*="ativar o som" i], [aria-label*="unmute" i]')
+          : [];
+        for (const control of controls) {
+          if (typeof control.click === 'function') { control.click(); break; }
+        }
         await playCurrentVideo();
         pitchMessage = '';
         break;
