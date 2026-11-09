@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:gecko_view/gecko_view.dart';
 
+import 'google_sign_in_probe.dart';
 import 'home_button_visibility.dart';
 import 'premium_branding.dart';
 import 'spotify_browser.dart';
@@ -372,6 +374,24 @@ class _PickerScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                      // iPhone (Gecko) only, for now a test: does Google
+                      // sign in in Safari's engine? See GoogleSignInProbePage.
+                      if (GeckoEngine.isAvailable) ...[
+                        const SizedBox(height: 18),
+                        TextButton.icon(
+                          key: const Key('pickGoogleSignInProbe'),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const GoogleSignInProbePage(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.account_circle_outlined),
+                          label: const Text('Entrar na conta Google (teste)'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFB8B8BC),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
