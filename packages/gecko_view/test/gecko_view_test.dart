@@ -26,6 +26,17 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
+  test('copies the Safari sign-in only when Gecko runs', () async {
+    GeckoEngine.debugSetAvailable(false);
+    expect(await GeckoEngine.importWebKitSession(), 0);
+    expect(calls, isEmpty);
+    GeckoEngine.debugSetAvailable(true);
+    reply = (call) => call.method == 'importWebKitSession' ? 12 : null;
+    expect(await GeckoEngine.importWebKitSession(), 12);
+    expect(calls.single.method, 'importWebKitSession');
+    GeckoEngine.debugSetAvailable(false);
+  });
+
   test('routes calls to the native session id', () async {
     final GeckoWebViewController controller = GeckoWebViewController();
     expect(await controller.sessionId, 7);
@@ -80,7 +91,9 @@ void main() {
     );
 
     await controller.handleEvent(
-      const MethodCall('pageStart', <String, Object?>{'url': 'https://m.youtube.com/'}),
+      const MethodCall('pageStart', <String, Object?>{
+        'url': 'https://m.youtube.com/',
+      }),
     );
     await controller.handleEvent(
       const MethodCall('progress', <String, Object?>{'value': 60}),

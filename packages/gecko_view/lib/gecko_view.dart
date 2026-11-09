@@ -39,6 +39,18 @@ abstract final class GeckoEngine {
 
   static bool get isAvailable => _available;
 
+  /// Copies the Google/YouTube sign-in that Safari's engine (WKWebView) holds
+  /// into Gecko, where Google refuses to sign in without JIT. The cookies are
+  /// set as soon as a Gecko page is open (now, or the next one) and that page
+  /// reloads signed in. Returns how many cookies were handed over.
+  static Future<int> importWebKitSession({MethodChannel? channel}) async {
+    if (!_available) return 0;
+    return await (channel ?? _channel).invokeMethod<int>(
+          'importWebKitSession',
+        ) ??
+        0;
+  }
+
   /// For tests only.
   @visibleForTesting
   static void debugSetAvailable(bool value) {
@@ -130,7 +142,8 @@ class GeckoWebViewController extends PlatformWebViewController {
           ),
         );
       case 'loadRequest':
-        final NavigationRequestCallback? decide = delegate?._onNavigationRequest;
+        final NavigationRequestCallback? decide =
+            delegate?._onNavigationRequest;
         if (decide == null) return true;
         final NavigationDecision decision = await decide(
           NavigationRequest(
@@ -158,7 +171,8 @@ class GeckoWebViewController extends PlatformWebViewController {
       await _call<String>('currentUrl') ?? _url;
 
   @override
-  Future<bool> canGoBack() async => await _call<bool>('canGoBack') ?? _canGoBack;
+  Future<bool> canGoBack() async =>
+      await _call<bool>('canGoBack') ?? _canGoBack;
 
   @override
   Future<bool> canGoForward() async => false;

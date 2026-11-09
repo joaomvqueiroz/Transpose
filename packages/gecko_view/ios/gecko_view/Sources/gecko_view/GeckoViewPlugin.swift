@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import WebKit
 
 /// Selectors implemented by `TransponoGeckoBridge` (apps/mobile/ios/gecko),
 /// which lives in TransponoGecko.framework. The ObjC names are pinned on both
@@ -33,6 +34,25 @@ private enum GeckoBridge {
     let selector = NSSelectorFromString("isRunning")
     guard cls.responds(to: selector), let imp = cls.method(for: selector) else { return false }
     return unsafeBitCast(imp, to: Flag.self)(cls, selector)
+  }
+
+  typealias Stage = @convention(c) (AnyObject, Selector, NSArray) -> Int
+
+  /// Hands cookies to `TransponoGeckoBridge.stageCookies:`; they are set in
+  /// Gecko through the relay extension. Returns how many were staged.
+  static func stage(_ cookies: [[String: Any]]) -> Int {
+    guard isRunning, let cls = bridgeClass as AnyObject? else { return 0 }
+    let selector = NSSelectorFromString("stageCookies:")
+    guard cls.responds(to: selector), let imp = cls.method(for: selector) else { return 0 }
+    return unsafeBitCast(imp, to: Stage.self)(cls, selector, cookies as NSArray)
+  }
+
+  /// google.com, google.pt, … and youtube.com, with or without subdomains.
+  static func isGoogleSession(_ domain: String) -> Bool {
+    let host = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+    if host == "youtube.com" || host.hasSuffix(".youtube.com") { return true }
+    return host.range(
+      of: #"(^|\.)google\.(com|[a-z]{2}|com?\.[a-z]{2})$"#, options: .regularExpression) != nil
   }
 
   static func make(_ sink: @escaping EventSink) -> TransponoGeckoHost? {
@@ -73,6 +93,10 @@ public class GeckoViewPlugin: NSObject, FlutterPlugin {
     }
     if call.method == "create" {
       create(result)
+      return
+    }
+    if call.method == "importWebKitSession" {
+      importWebKitSession(result)
       return
     }
     guard let id = (args["id"] as? NSNumber)?.intValue, let host = hosts[id] else {
@@ -143,6 +167,34 @@ public class GeckoViewPlugin: NSObject, FlutterPlugin {
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  /// Google sign-in works in Safari's engine but not in Gecko without JIT:
+  /// copy the Google/YouTube cookies of the default WebKit store (where the
+  /// app's WKWebViews keep them) into Gecko. Result: how many were staged.
+  private func importWebKitSession(_ result: @escaping FlutterResult) {
+    WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+      let list: [[String: Any]] = cookies
+        .filter { GeckoBridge.isGoogleSession($0.domain) }
+        .map { cookie in
+          var item: [String: Any] = [
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path.isEmpty ? "/" : cookie.path,
+            "secure": cookie.isSecure,
+            "httpOnly": cookie.isHTTPOnly,
+          ]
+          if let expires = cookie.expiresDate { item["expirationDate"] = expires.timeIntervalSince1970 }
+          switch cookie.sameSitePolicy {
+          case .some(.sameSiteStrict): item["sameSite"] = "strict"
+          case .some(.sameSiteLax): item["sameSite"] = "lax"
+          default: item["sameSite"] = cookie.isSecure ? "no_restriction" : "unspecified"
+          }
+          return item
+        }
+      DispatchQueue.main.async { result(GeckoBridge.stage(list)) }
     }
   }
 

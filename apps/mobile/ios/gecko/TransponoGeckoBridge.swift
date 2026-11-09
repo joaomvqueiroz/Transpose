@@ -71,6 +71,30 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
 
   @objc(isRunning) public static var isRunning: Bool { geckoRunning }
 
+  // Google cookies copied from Safari's engine (main thread only), waiting
+  // for a page whose relay extension can set them; and the open sessions.
+  private static var stagedCookies: [[String: Any]] = []
+  private static let openHosts = NSHashTable<TransponoGeckoBridge>.weakObjects()
+
+  /// Google refuses to sign in on Gecko without JIT, but signs in in Safari's
+  /// engine: the plugin hands over that session's cookies here. They are set
+  /// through the relay extension (background `cookies` API) as soon as a page
+  /// is connected, then the page reloads signed in.
+  @objc(stageCookies:)
+  public static func stageCookies(_ cookies: NSArray) -> Int {
+    stagedCookies = cookies.compactMap { $0 as? [String: Any] }
+    let count = stagedCookies.count
+    openHosts.allObjects.forEach { $0.applyStagedCookies() }
+    return count
+  }
+
+  private func applyStagedCookies() {
+    guard !Self.stagedCookies.isEmpty, let port, !closed else { return }
+    let cookies = Self.stagedCookies
+    Self.stagedCookies = []
+    port.postMessage(["type": "setCookies", "cookies": cookies])
+  }
+
   /// Present as Firefox for Android, exactly as Reynard does by default
   /// (UserAgentPolicy.defaultConfiguration, "useAndroidUserAgent" on).
   /// Without it Gecko reports its own iOS identity, which YouTube does not
@@ -123,6 +147,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     session.setAddonMessageDelegate(
       self, extensionID: Self.extensionID, nativeApp: Self.nativeApp)
     session.open()
+    Self.openHosts.add(self)
     geckoView.session = session
     session.setActive(true)
     session.setFocused(true)
@@ -244,6 +269,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     }
     port.delegate = self
     self.port = port
+    applyStagedCookies()
   }
 
   public func addonPort(_ port: AddonPort, didReceive message: Any) {
@@ -260,6 +286,13 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
       } else {
         done(nil, (field("error") as? String) ?? "Erro de JavaScript.")
       }
+    case "cookiesSet":
+      // The session is now in Gecko's cookie store: reload to use it.
+      emit("cookiesImported", [
+        "ok": (field("ok") as? NSNumber)?.intValue ?? 0,
+        "failed": (field("failed") as? NSNumber)?.intValue ?? 0,
+      ])
+      session.reload()
     case "channel":
       emit("channel", [
         "name": (field("name") as? String) ?? "",

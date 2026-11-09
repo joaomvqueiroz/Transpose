@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'youtube_search.dart';
@@ -6,8 +7,8 @@ import 'youtube_search.dart';
 /// First step of "two engines, one browser" on iPhone: Google refuses to sign
 /// in on Gecko without JIT ("Algo correu mal"), so try the sign-in in Safari's
 /// engine (WKWebView). This page only shows whether it works: once YouTube
-/// opens with a session cookie it says so. Copying the session into Gecko is
-/// the next step and only happens if this one passes.
+/// opens with a session cookie it says so, and "Usar esta sessão no Transpono"
+/// copies that session into Gecko (see [GeckoEngine.importWebKitSession]).
 ///
 /// The engine keeps its own identity (no user-agent changes): Google decides
 /// with the truth.
@@ -38,6 +39,27 @@ class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
   String _host = '';
   int _progress = 0;
   bool? _signedIn;
+  bool _copying = false;
+  String? _copied;
+
+  Future<void> _useSession() async {
+    setState(() => _copying = true);
+    String message;
+    try {
+      final count = await GeckoEngine.importWebKitSession();
+      message = count > 0
+          ? 'Sessão passada para o Transpono ($count cookies). Abra o YouTube: '
+                'entra com a conta iniciada.'
+          : 'Não encontrei a sessão da Google para passar.';
+    } catch (error) {
+      message = 'Não foi possível passar a sessão: $error';
+    }
+    if (!mounted) return;
+    setState(() {
+      _copying = false;
+      _copied = message;
+    });
+  }
 
   @override
   void initState() {
@@ -122,7 +144,43 @@ class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
           ),
         ),
       ),
-      body: WebViewWidget(controller: _controller),
+      body: Column(
+        children: [
+          if (_signedIn == true)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton.icon(
+                    key: const Key('googleProbeUseSession'),
+                    onPressed: _copying ? null : _useSession,
+                    icon: _copying
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.login),
+                    label: const Text('Usar esta sessão no Transpono'),
+                  ),
+                  if (_copied != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _copied!,
+                        key: const Key('googleProbeCopied'),
+                        style: const TextStyle(
+                          color: Color(0xFFB8B8BC),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          Expanded(child: WebViewWidget(controller: _controller)),
+        ],
+      ),
     );
   }
 }

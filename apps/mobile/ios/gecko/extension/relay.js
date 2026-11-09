@@ -60,6 +60,14 @@
   }
   port.onDisconnect.addListener(() => { port = null; });
   port.onMessage.addListener(message => {
+    // Google session copied from Safari's engine: only the background
+    // script may set cookies (cookies API), so hand it over.
+    if (message && message.type === 'setCookies') {
+      browser.runtime.sendMessage({type: 'setCookies', cookies: message.cookies}).then(
+        done => send({type: 'cookiesSet', ok: (done && done.ok) || 0, failed: (done && done.failed) || 0}),
+        error => send({type: 'cookiesSet', ok: 0, failed: -1, error: String(error).slice(0, 200)}));
+      return;
+    }
     if (!message || message.type !== 'eval') return;
     let reply;
     try {

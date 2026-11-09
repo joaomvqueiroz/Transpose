@@ -1,11 +1,13 @@
 {
   "manifest_version": 2,
   "browser_specific_settings": {
-    "gecko": { "id": "transpono-gecko@transpono.app" }
+    "gecko": {
+      "id": "transpono-gecko@transpono.app"
+    }
   },
   "name": "Transpono Gecko bridge",
-  "version": "1.3",
-  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube and SoundCloud, read the song title on Spotify and read chord sheets on Cifras.com.br. No media is captured, fetched or exported.",
+  "version": "1.4",
+  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube and SoundCloud, read the song title on Spotify and read chord sheets on Cifras.com.br. Can also copy the user’s own Google sign-in from Safari’s engine into this engine (cookies API, Google and YouTube only). No media is captured, fetched or exported.",
   "content_scripts": [
     {
       "matches": [
@@ -16,7 +18,9 @@
         "https://cifras.com.br/*",
         "https://www.cifras.com.br/*"
       ],
-      "js": ["relay.js"],
+      "js": [
+        "relay.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
@@ -30,7 +34,15 @@
     "https://soundcloud.com/*",
     "https://*.soundcloud.com/*",
     "https://cifras.com.br/*",
-    "https://www.cifras.com.br/*"
+    "https://www.cifras.com.br/*",
+    "cookies",
+    "https://*.google.com/*",
+    "https://*.google.pt/*"
   ],
-  "content_security_policy": "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self'"
+  "content_security_policy": "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self'",
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  }
 }
