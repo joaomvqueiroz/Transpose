@@ -1,17 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:gecko_view/gecko_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'youtube_search.dart';
 
-/// First step of "two engines, one browser" on iPhone: Google refuses to sign
-/// in on Gecko without JIT ("Algo correu mal"), so try the sign-in in Safari's
-/// engine (WKWebView). This page only shows whether it works: once YouTube
-/// opens with a session cookie it says so, and "Usar esta sessão no Transpono"
-/// copies that session into Gecko (see [GeckoEngine.importWebKitSession]).
+/// Google sign-in on iPhone ("two engines, one browser").
 ///
-/// The engine keeps its own identity (no user-agent changes): Google decides
-/// with the truth.
+/// Google refuses to sign in on Gecko without JIT ("Algo correu mal"), but
+/// signs in in Safari's engine (WKWebView). So the sign-in happens here, in
+/// WKWebView, with the engine's own identity; as soon as YouTube opens with a
+/// session it is copied into Gecko ([GeckoEngine.importWebKitSession]) and
+/// the page closes by itself: the studio then opens signed in.
 class GoogleSignInProbePage extends StatefulWidget {
   const GoogleSignInProbePage({super.key});
 
@@ -22,6 +24,23 @@ class GoogleSignInProbePage extends StatefulWidget {
 
   @override
   State<GoogleSignInProbePage> createState() => _GoogleSignInProbePageState();
+}
+
+/// Whether Transpono already carries the user's Google session into Gecko.
+abstract final class GoogleSession {
+  static const String _key = 'transpono.googleSessionImported';
+
+  static Future<bool> imported({SharedPreferencesAsync? preferences}) async {
+    try {
+      return await (preferences ?? SharedPreferencesAsync()).getBool(_key) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> markImported({SharedPreferencesAsync? preferences}) =>
+      (preferences ?? SharedPreferencesAsync()).setBool(_key, true);
 }
 
 /// Hosts the sign-in may visit in the main frame.
@@ -36,30 +55,9 @@ bool isGoogleSignInProbeUri(Uri uri) {
 
 class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
   late final WebViewController _controller;
-  String _host = '';
   int _progress = 0;
-  bool? _signedIn;
-  bool _copying = false;
-  String? _copied;
-
-  Future<void> _useSession() async {
-    setState(() => _copying = true);
-    String message;
-    try {
-      final count = await GeckoEngine.importWebKitSession();
-      message = count > 0
-          ? 'Sessão passada para o Transpono ($count cookies). Abra o YouTube: '
-                'entra com a conta iniciada.'
-          : 'Não encontrei a sessão da Google para passar.';
-    } catch (error) {
-      message = 'Não foi possível passar a sessão: $error';
-    }
-    if (!mounted) return;
-    setState(() {
-      _copying = false;
-      _copied = message;
-    });
-  }
+  bool _handingOver = false;
+  String? _error;
 
   @override
   void initState() {
@@ -69,8 +67,10 @@ class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
       ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (value) => setState(() => _progress = value),
-          onPageFinished: (url) => _check(url),
+          onProgress: (value) {
+            if (mounted) setState(() => _progress = value);
+          },
+          onPageFinished: _check,
           onNavigationRequest: (request) {
             if (!request.isMainFrame) return NavigationDecision.navigate;
             final uri = Uri.tryParse(request.url);
@@ -85,102 +85,119 @@ class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
 
   Future<void> _check(String url) async {
     final uri = Uri.tryParse(url);
-    if (!mounted || uri == null) return;
-    setState(() => _host = uri.host);
+    if (!mounted || _handingOver || uri == null) return;
     if (!isYouTubeBrowserUri(uri)) return;
     // SAPISID is the readable half of a signed-in Google session.
+    bool signedIn;
     try {
       final result = await _controller.runJavaScriptReturningResult(
         "document.cookie.indexOf('SAPISID=') >= 0",
       );
-      if (!mounted) return;
-      setState(() => _signedIn = result == true || '$result' == '1');
+      signedIn = result == true || '$result' == '1';
     } catch (_) {
-      if (mounted) setState(() => _signedIn = false);
+      signedIn = false;
+    }
+    if (!mounted || !signedIn) return;
+    await _handOver();
+  }
+
+  /// Signed in: copy the session into Gecko and go back to the studio.
+  Future<void> _handOver() async {
+    setState(() {
+      _handingOver = true;
+      _error = null;
+    });
+    try {
+      final count = await GeckoEngine.importWebKitSession();
+      if (count <= 0) throw StateError('sem cookies da Google');
+      await GoogleSession.markImported();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _handingOver = false;
+        _error = 'Não foi possível usar a sessão no Transpono ($error).';
+      });
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final String status = switch (_signedIn) {
-      true => 'Sessão iniciada no motor do Safari. O teste passou.',
-      false => 'O YouTube abriu, mas sem sessão iniciada.',
-      null => 'Inicie sessão na conta Google. ($_host)',
-    };
-    return Scaffold(
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.black,
+    appBar: AppBar(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Conta Google (teste)'),
-        leading: IconButton(
-          key: const Key('googleProbeClose'),
-          tooltip: 'Fechar',
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(34),
-          child: Column(
-            children: [
-              if (_progress < 100)
-                LinearProgressIndicator(value: _progress / 100, minHeight: 2),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-                child: Text(
-                  status,
-                  key: const Key('googleProbeStatus'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _signedIn == true
-                        ? const Color(0xFF34D399)
-                        : const Color(0xFFB8B8BC),
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+      foregroundColor: Colors.white,
+      title: const Text('Iniciar sessão'),
+      leading: IconButton(
+        key: const Key('googleProbeClose'),
+        tooltip: 'Continuar sem sessão',
+        icon: const Icon(Icons.close),
+        onPressed: () => Navigator.of(context).maybePop(false),
       ),
-      body: Column(
-        children: [
-          if (_signedIn == true)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton.icon(
-                    key: const Key('googleProbeUseSession'),
-                    onPressed: _copying ? null : _useSession,
-                    icon: _copying
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.login),
-                    label: const Text('Usar esta sessão no Transpono'),
-                  ),
-                  if (_copied != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        _copied!,
-                        key: const Key('googleProbeCopied'),
-                        style: const TextStyle(
-                          color: Color(0xFFB8B8BC),
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(2),
+        child: _progress < 100 || _handingOver
+            ? LinearProgressIndicator(
+                value: _handingOver ? null : _progress / 100,
+                minHeight: 2,
+              )
+            : const SizedBox(height: 2),
+      ),
+    ),
+    body: Column(
+      children: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              _error!,
+              key: const Key('googleProbeError'),
+              style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 13),
             ),
-          Expanded(child: WebViewWidget(controller: _controller)),
+          ),
+        Expanded(child: WebViewWidget(controller: _controller)),
+      ],
+    ),
+  );
+}
+
+/// Asks once per app run, before YouTube or YouTube Music opens, whether to
+/// sign in; then opens [GoogleSignInProbePage]. Only where Gecko runs (on
+/// Android the page signs in by itself) and only until the session is in.
+class GoogleSignInGate {
+  bool _askedThisRun = false;
+
+  Future<void> beforeOpening(BuildContext context) async {
+    if (!GeckoEngine.isAvailable || _askedThisRun) return;
+    if (await GoogleSession.imported()) return;
+    if (!context.mounted) return;
+    _askedThisRun = true;
+    final bool? signIn = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('googleSignInAsk'),
+        title: const Text('Iniciar sessão na Google?'),
+        content: const Text(
+          'Para ver as suas listas, músicas guardadas e recomendações do '
+          'YouTube e do YouTube Music.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('googleSignInLater'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Agora não'),
+          ),
+          FilledButton(
+            key: const Key('googleSignInYes'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Iniciar sessão'),
+          ),
         ],
       ),
+    );
+    if (signIn != true || !context.mounted) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (_) => const GoogleSignInProbePage()),
     );
   }
 }

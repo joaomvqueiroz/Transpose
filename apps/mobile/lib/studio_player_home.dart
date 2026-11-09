@@ -2503,11 +2503,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           left: 0,
                           right: 0,
                           child: Center(
-                            child: _MainAdjustmentsBar(
-                              expanded: false,
-                              onPressed: landscapePlayer
-                                  ? _openLandscapeAdjustments
-                                  : _toggleMainAdjustments,
+                            // Like "Fechar ajustes": scrolling the page down
+                            // shrinks it to a small arrow, scrolling up
+                            // brings back the full button.
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: pageScrolledDown,
+                              builder: (context, scrolledDown, _) {
+                                final open = landscapePlayer
+                                    ? _openLandscapeAdjustments
+                                    : _toggleMainAdjustments;
+                                return AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 180),
+                                  transitionBuilder: (child, animation) =>
+                                      FadeTransition(
+                                        opacity: animation,
+                                        child: ScaleTransition(
+                                          scale: animation,
+                                          child: child,
+                                        ),
+                                      ),
+                                  child: scrolledDown && !landscapePlayer
+                                      ? _CompactCloseAdjustments(
+                                          key: const ValueKey('compactOpen'),
+                                          open: true,
+                                          onPressed: open,
+                                        )
+                                      : _MainAdjustmentsBar(
+                                          key: const ValueKey('fullOpen'),
+                                          expanded: false,
+                                          onPressed: open,
+                                        ),
+                                );
+                              },
                             ),
                           ),
                         ),
@@ -2533,9 +2560,17 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
 /// Small round "close adjustments" arrow shown while scrolling down.
 class _CompactCloseAdjustments extends StatelessWidget {
-  const _CompactCloseAdjustments({super.key, required this.onPressed});
+  const _CompactCloseAdjustments({
+    super.key,
+    required this.onPressed,
+    this.open = false,
+  });
 
   final VoidCallback onPressed;
+
+  /// The same small arrow for "Abrir ajustes" (pointing up) while the page
+  /// is scrolled down.
+  final bool open;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -2544,8 +2579,10 @@ class _CompactCloseAdjustments extends StatelessWidget {
     // Hollow: transparent with a white outline, so it hides little of the
     // adjustments underneath.
     child: IconButton.outlined(
-      key: const Key('visualCloseAdjustmentsCompact'),
-      tooltip: 'Fechar ajustes',
+      key: Key(
+        open ? 'visualOpenAdjustmentsCompact' : 'visualCloseAdjustmentsCompact',
+      ),
+      tooltip: open ? 'Abrir ajustes' : 'Fechar ajustes',
       onPressed: onPressed,
       style: IconButton.styleFrom(
         backgroundColor: Colors.transparent,
@@ -2553,7 +2590,10 @@ class _CompactCloseAdjustments extends StatelessWidget {
         side: const BorderSide(color: Colors.white, width: 1.6),
         padding: EdgeInsets.zero,
       ),
-      icon: const Icon(Icons.keyboard_arrow_down, size: 30),
+      icon: Icon(
+        open ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+        size: 30,
+      ),
     ),
   );
 }

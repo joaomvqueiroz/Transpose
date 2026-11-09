@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:gecko_view/gecko_view.dart';
 
 import 'google_sign_in_probe.dart';
 import 'home_button_visibility.dart';
@@ -44,6 +43,14 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   String? _query;
   int _generation = 0;
   SpotifyStudioSession? _spotify;
+  final GoogleSignInGate _google = GoogleSignInGate();
+
+  /// YouTube and YouTube Music: on iPhone, offer the Google sign-in first
+  /// (it happens in Safari's engine and passes to Gecko by itself).
+  Future<void> _chooseGoogle(ListeningSource source) async {
+    await _google.beforeOpening(context);
+    if (mounted) _choose(source);
+  }
 
   void _choose(ListeningSource? source, [String? query]) {
     setState(() {
@@ -72,8 +79,8 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     final source = _source;
     if (source == null) {
       return _PickerScreen(
-        onYouTube: () => _choose(ListeningSource.youtube),
-        onYouTubeMusic: () => _choose(ListeningSource.youtubeMusic),
+        onYouTube: () => _chooseGoogle(ListeningSource.youtube),
+        onYouTubeMusic: () => _chooseGoogle(ListeningSource.youtubeMusic),
         onSoundCloud: () => _choose(ListeningSource.soundCloud),
         onSpotify: () => _choose(ListeningSource.spotify),
       );
@@ -374,24 +381,6 @@ class _PickerScreen extends StatelessWidget {
                           ),
                         ],
                       ),
-                      // iPhone (Gecko) only, for now a test: does Google
-                      // sign in in Safari's engine? See GoogleSignInProbePage.
-                      if (GeckoEngine.isAvailable) ...[
-                        const SizedBox(height: 18),
-                        TextButton.icon(
-                          key: const Key('pickGoogleSignInProbe'),
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const GoogleSignInProbePage(),
-                            ),
-                          ),
-                          icon: const Icon(Icons.account_circle_outlined),
-                          label: const Text('Entrar na conta Google (teste)'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFFB8B8BC),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),

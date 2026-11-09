@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'home_button_visibility.dart';
+
 import 'package:flutter/services.dart';
 import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -713,7 +714,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         await refresh();
         return;
       } on GeckoJavaScriptException catch (failure) {
-        final bool noContext = failure.message.startsWith('NO_CONTEXT') ||
+        final bool noContext =
+            failure.message.startsWith('NO_CONTEXT') ||
             failure.message == 'JS timeout';
         if (noContext && attempt < attempts) {
           await Future<void>.delayed(const Duration(seconds: 1));
@@ -822,6 +824,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     }
     _snapshotRevision = revision.toInt();
     pageInputFocused.value = state['inputFocused'] == true;
+    pageScrolledDown.value = state['pageScroll'] == 'down';
     final pausedVideoId = _pauseOnReadyVideoId;
     final selectedAnotherVideo =
         pausedVideoId != null &&
@@ -1022,6 +1025,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   void dispose() {
     pageInputFocused.value = false;
+    pageScrolledDown.value = false;
     _disposed = true;
     _timer?.cancel();
     if (_native case final native?) native.dispose();

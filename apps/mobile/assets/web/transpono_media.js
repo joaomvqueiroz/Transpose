@@ -29,6 +29,25 @@
       // Without the hook the bridge simply finds no SoundCloud player.
     }
   }
+  // Which way the user last scrolled the page (any scroller: the document or
+  // an inner list): down shrinks the app's floating "Abrir ajustes" to an
+  // arrow, up shows it in full, like YouTube's own top bar.
+  if (!window.__transponoScrollWatch && typeof document.addEventListener === 'function') {
+    window.__transponoScrollWatch = true;
+    window.__transponoScrollDir = 'up';
+    const lastTop = new WeakMap();
+    document.addEventListener('scroll', event => {
+      const target = event.target === document || !event.target ? document.documentElement : event.target;
+      const top = target === document.documentElement
+        ? (window.scrollY || document.documentElement.scrollTop || 0)
+        : (target.scrollTop || 0);
+      if (!lastTop.has(target)) { lastTop.set(target, top); return; }
+      const before = lastTop.get(target);
+      if (Math.abs(top - before) < 12) return;
+      lastTop.set(target, top);
+      window.__transponoScrollDir = top > before && top > 40 ? 'down' : 'up';
+    }, {passive: true, capture: true});
+  }
   // Mini player, as in the YouTube app: drag the watch-page video DOWN and it
   // shrinks to a small video in the corner, the space it used is released so
   // the video list moves up; tapping the small video restores the full
@@ -864,6 +883,7 @@
         return !!field && !!field.matches &&
           field.matches('input, textarea, [contenteditable="true"]');
       })(),
+      pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
       seeking: !!video && video.seeking,
