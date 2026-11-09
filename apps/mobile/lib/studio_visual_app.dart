@@ -246,9 +246,12 @@ class _MainAdjustmentsBar extends StatelessWidget {
                   ),
                   onPressed: onPressed,
                   style: OutlinedButton.styleFrom(
+                    // Opaque: over the page (YouTube's own playlist bar,
+                    // footer links) a see-through fill left the label
+                    // unreadable.
                     backgroundColor: expanded
                         ? Colors.white
-                        : const Color(0xEA18181B),
+                        : const Color(0xFF18181B),
                     foregroundColor: expanded
                         ? const Color(0xFF161618)
                         : const Color(0xFFF4F4F5),

@@ -1482,14 +1482,40 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   left: 0,
                   right: 0,
                   bottom: 8,
-                  child: _MainAdjustmentsBar(
-                    expanded: false,
-                    onPressed: () {
-                      setState(() {
+                  // Browsing without a video (home, search, YouTube Music,
+                  // SoundCloud…): the same arrow on scrolling down as with a
+                  // video open.
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: pageScrolledDown,
+                    builder: (context, scrolledDown, _) {
+                      void open() => setState(() {
                         _browsing = false;
                         _mainControlsExpanded = true;
                         _adjustmentsCoverVideo = false;
                       });
+                      return AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: animation,
+                            child: child,
+                          ),
+                        ),
+                        child: scrolledDown
+                            ? Center(
+                                key: const ValueKey('browseCompactOpen'),
+                                child: _CompactCloseAdjustments(
+                                  open: true,
+                                  onPressed: open,
+                                ),
+                              )
+                            : _MainAdjustmentsBar(
+                                key: const ValueKey('browseFullOpen'),
+                                expanded: false,
+                                onPressed: open,
+                              ),
+                      );
                     },
                   ),
                 ),
@@ -2379,9 +2405,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     return SingleChildScrollView(
       key: const Key('unifiedChordScroll'),
       controller: _scroll,
-      // Room under the last control so it scrolls clear of the floating
-      // "Fechar ajustes", as in the other sections.
-      padding: const EdgeInsets.only(bottom: 88),
       child: Column(
         children: [
           if (topGap > 0) SizedBox(height: topGap),
@@ -2397,7 +2420,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   top: Radius.circular(26),
                 ),
               ),
-              child: controls,
+              // Room under the last control so it scrolls clear of the
+              // floating "Fechar ajustes". Inside the backdrop: as padding of
+              // the scroll view it stayed transparent and showed the page.
+              child: Column(children: [controls, const SizedBox(height: 88)]),
             ),
           ),
         ],

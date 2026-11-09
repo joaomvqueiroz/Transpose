@@ -49,11 +49,12 @@
     }, {passive: true, capture: true});
   }
   // Mini player, as in the YouTube app: drag the watch-page video DOWN and it
-  // shrinks to a small video in the corner, the space it used is released so
+  // shrinks to a small video in a corner, the space it used is released so
   // the video list moves up; tapping the small video restores the full
-  // player. On m.youtube.com the player is a fixed "sticky-player" under the
-  // top bar; it keeps its size and is only scaled, so YouTube's own layout
-  // and the audio graph are untouched.
+  // player, dragging it moves it and it settles in the nearest corner. On
+  // m.youtube.com the player is a fixed "sticky-player" under the top bar; it
+  // keeps its size and is only scaled, so YouTube's own layout and the audio
+  // graph are untouched.
   if (!soundCloud() && !window.__transponoMini) {
     window.__transponoMini = true;
     const style = document.createElement('style');
@@ -63,11 +64,28 @@
         top: auto !important; bottom: 140px !important;
         left: auto !important; right: 10px !important;
         width: 100vw !important;
-        transform: scale(.46); transform-origin: right bottom;
-        border-radius: 22px; overflow: hidden;
+        transform: translate(var(--transpono-mini-x, 0px), var(--transpono-mini-y, 0px)) scale(.46);
+        transform-origin: right bottom;
+        /* Rounded corners that also clip the video layer: ~13 pt once scaled. */
+        border-radius: 28px; overflow: hidden; clip-path: inset(0 round 28px);
         box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
         z-index: 9999 !important;
         transition: transform .18s ease;
+      }
+      html.transpono-mini.transpono-mini-left #player-container-id.sticky-player {
+        right: auto !important; left: 10px !important; transform-origin: left bottom;
+      }
+      html.transpono-mini.transpono-mini-top #player-container-id.sticky-player {
+        bottom: auto !important; top: 64px !important;
+      }
+      html.transpono-mini.transpono-mini-top.transpono-mini-left #player-container-id.sticky-player {
+        transform-origin: left top;
+      }
+      html.transpono-mini.transpono-mini-top:not(.transpono-mini-left) #player-container-id.sticky-player {
+        transform-origin: right top;
+      }
+      html.transpono-mini.transpono-mini-dragging #player-container-id.sticky-player {
+        transition: none;
       }
       html.transpono-mini .player-placeholder-wrapper,
       html.transpono-mini .player-placeholder {
@@ -77,44 +95,121 @@
     (document.head || document.documentElement).appendChild(style);
     const root = document.documentElement;
     const playerOf = () => document.querySelector('#player-container-id.sticky-player');
+    // m.youtube.com keeps some bars (the filter chips) "sticky" just under
+    // the full-size player; once it shrinks they stayed stuck mid-screen.
+    // While mini, they stick under the top bar instead; restored after.
+    const lifted = [];
+    const liftStickyBars = () => {
+      if (typeof window.getComputedStyle !== 'function' || !document.body) return;
+      const player = playerOf();
+      const walker = document.createTreeWalker(document.body, 1);
+      let node = walker.nextNode();
+      let seen = 0;
+      while (node && seen++ < 6000) {
+        if (!(player && player.contains(node))) {
+          const css = window.getComputedStyle(node);
+          if (css.position === 'sticky' && parseFloat(css.top) > 80) {
+            lifted.push([node, node.style.getPropertyValue('top'), node.style.getPropertyPriority('top')]);
+            node.style.setProperty('top', '48px', 'important');
+          }
+        }
+        node = walker.nextNode();
+      }
+    };
+    const restoreStickyBars = () => {
+      while (lifted.length) {
+        const [node, top, priority] = lifted.pop();
+        if (top) node.style.setProperty('top', top, priority);
+        else node.style.removeProperty('top');
+      }
+    };
+    const setOffset = (x, y) => {
+      root.style.setProperty('--transpono-mini-x', `${x}px`);
+      root.style.setProperty('--transpono-mini-y', `${y}px`);
+    };
     const setMini = mini => {
       if (root.classList.contains('transpono-mini') === mini) return;
       root.classList.toggle('transpono-mini', mini);
+      if (mini) {
+        liftStickyBars();
+      } else {
+        restoreStickyBars();
+        setOffset(0, 0);
+        root.classList.remove('transpono-mini-left', 'transpono-mini-top', 'transpono-mini-dragging');
+      }
       window.scrollTo({top: 0, left: 0, behavior: 'instant'});
     };
     let dragStartY = null;
+    // Moving the small video: where the finger started, and whether it moved
+    // enough to be a drag rather than a tap.
+    let move = null;
+    let moved = false;
     document.addEventListener('touchstart', event => {
       const player = playerOf();
+      const touch = event.touches[0];
+      if (root.classList.contains('transpono-mini')) {
+        move = player && player.contains(event.target)
+          ? {x: touch.clientX, y: touch.clientY} : null;
+        moved = false;
+        dragStartY = null;
+        return;
+      }
       // Never while the studio's adjustments are open over the page.
-      dragStartY = player && !root.classList.contains('transpono-mini') &&
-        !window.__transponoAdjustmentsOpen &&
+      dragStartY = player && !window.__transponoAdjustmentsOpen &&
         window.location.pathname === '/watch' && player.contains(event.target)
-        ? event.touches[0].clientY : null;
+        ? touch.clientY : null;
     }, {passive: true, capture: true});
     document.addEventListener('touchmove', event => {
+      const touch = event.touches[0];
+      if (move) {
+        const dx = touch.clientX - move.x;
+        const dy = touch.clientY - move.y;
+        if (!moved && Math.hypot(dx, dy) < 10) return;
+        moved = true;
+        root.classList.add('transpono-mini-dragging');
+        setOffset(dx, dy);
+        // The page must not scroll under the finger meanwhile.
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
       if (dragStartY === null) return;
-      if (event.touches[0].clientY - dragStartY > 60) {
+      if (touch.clientY - dragStartY > 60) {
         dragStartY = null;
         setMini(true);
       }
+    }, {passive: false, capture: true});
+    document.addEventListener('touchend', event => {
+      dragStartY = null;
+      if (!move) return;
+      if (moved) {
+        // Settle in the corner nearest to where the finger let go.
+        const touch = event.changedTouches[0];
+        root.classList.toggle('transpono-mini-left', touch.clientX < window.innerWidth / 2);
+        root.classList.toggle('transpono-mini-top', touch.clientY < window.innerHeight / 2);
+        setOffset(0, 0);
+        root.classList.remove('transpono-mini-dragging');
+      }
+      move = null;
     }, {passive: true, capture: true});
-    document.addEventListener('touchend', () => { dragStartY = null; },
-      {passive: true, capture: true});
     // Tapping the small video brings the full player back instead of
-    // pausing it.
+    // pausing it; the click that ends a drag does nothing.
     document.addEventListener('click', event => {
       if (!root.classList.contains('transpono-mini')) return;
       const player = playerOf();
       if (!player || !player.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
+      if (moved) {
+        moved = false;
+        return;
+      }
       setMini(false);
     }, true);
     // Leaving the watch page (search, home) drops the mini state.
     setInterval(() => {
       if (root.classList.contains('transpono-mini') &&
           (!playerOf() || window.location.pathname !== '/watch')) {
-        root.classList.remove('transpono-mini');
+        setMini(false);
       }
     }, 500);
   }

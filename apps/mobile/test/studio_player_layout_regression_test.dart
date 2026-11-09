@@ -16,6 +16,28 @@ void main() {
         InMemorySharedPreferencesAsync.empty();
   });
 
+  testWidgets('a Cifra deslizada até ao fim não deixa ver a página por baixo', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1179, 2556);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.pumpAndSettle();
+    final scroll = find.byKey(const Key('unifiedChordScroll'));
+    expect(scroll, findsOneWidget);
+    await tester.drag(scroll, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    final backdrop = tester.getRect(
+      find.byKey(const Key('unifiedChordControlsBackdrop')),
+    );
+    final viewport = tester.getRect(scroll);
+    expect(backdrop.bottom, greaterThanOrEqualTo(viewport.bottom - 0.5));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('player fechado não mostra faixa de controlos redundante', (
     tester,
   ) async {

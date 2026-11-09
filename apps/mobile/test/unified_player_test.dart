@@ -37,6 +37,30 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('a navegar sem vídeo, Abrir ajustes também vira seta', (
+    tester,
+  ) async {
+    addTearDown(() => pageScrolledDown.value = false);
+    await tester.pumpWidget(
+      StudioVisualApp(
+        openSearchWhenEmpty: true,
+        youtubeSessionFactory: FakeYouTubeSession.new,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+    pageScrolledDown.value = true;
+    await tester.pumpAndSettle();
+    expect(find.text('Abrir ajustes'), findsNothing);
+    expect(
+      find.byKey(const Key('visualOpenAdjustmentsCompact')),
+      findsOneWidget,
+    );
+    pageScrolledDown.value = false;
+    await tester.pumpAndSettle();
+    expect(find.text('Abrir ajustes'), findsOneWidget);
+  });
+
   testWidgets('fechado mostra só vídeo e Abrir ajustes', (tester) async {
     await tester.pumpWidget(const StudioVisualApp());
     await tester.pumpAndSettle();
