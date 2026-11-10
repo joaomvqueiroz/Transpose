@@ -161,6 +161,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
             // its bar (the app just opened, a page is loading) it is hidden.
             final bool inBar =
                 source == ListeningSource.youtube ||
+                source == ListeningSource.youtubeMusic ||
                 (bars != null && (bars.topFree || bars.topAway));
             final EdgeInsets insets = MediaQuery.viewPaddingOf(context);
             final double top = insets.top;
@@ -194,7 +195,10 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
                   // its top bar (it then moves with the bar exactly).
                   (source == ListeningSource.youtube &&
                       bars != null &&
-                      (!bars.topFree || bars.homeInPage));
+                      (!bars.topFree || bars.homeInPage)) ||
+                  // YouTube Music: the page draws it in its top bar too.
+                  (source == ListeningSource.youtubeMusic &&
+                      (bars == null || !bars.topFree || bars.homeInPage));
               return IgnorePointer(
                 ignoring: hide,
                 child: AnimatedOpacity(

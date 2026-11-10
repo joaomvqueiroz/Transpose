@@ -408,6 +408,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _syncPageRoles();
   }
 
+  /// This studio browses YouTube Music.
+  bool get _musicSource => widget.youtubeHome?.host == 'music.youtube.com';
+
   /// The bottom bar stands on the player page too (two pages, a YouTube
   /// video open, upright, adjustments closed).
   bool get _playerBarShown =>
@@ -2158,6 +2161,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   // iPhone's glass bar carries the adjustments button.
                   if (bars?.hidden == true ||
                       bars?.shorts == true ||
+                      bars?.music == true ||
                       (nativeGlassBar.value && bars?.pivot != null)) {
                     return const Positioned(
                       left: 0,
@@ -2262,6 +2266,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           valueListenable: pageYouTubeBars,
           builder: (context, bars, _) {
             final browse = _browse;
+            // YouTube Music has no bottom bar on a phone: the app draws one.
+            if (bars?.music == true && browse != null) {
+              if (bars!.hidden) return const SizedBox.shrink();
+              return _MusicBottomBar(
+                current: bars.tab,
+                onTab: (name) => unawaited(browse.openTab(name)),
+                onAdjustments: _openAdjustmentsFromBar,
+              );
+            }
             if (bars?.shorts != true || browse == null) {
               return const SizedBox.shrink();
             }
@@ -3486,7 +3499,30 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       // Two pages with a video open: the bottom bar (it has
                       // the adjustments button) instead of the wide
                       // "Abrir ajustes".
-                      if (_playerBarShown) ...[
+                      if (_playerBarShown && _musicSource)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: ColoredBox(
+                            color: const Color(0xFF0F0F0F),
+                            child: Padding(
+                              padding: EdgeInsets.only(
+                                bottom: MediaQuery.viewPaddingOf(context)
+                                    .bottom,
+                              ),
+                              child: _MusicBottomBar(
+                                current: '',
+                                onTab: _playerBarTap,
+                                onAdjustments: () {
+                                  _playerBarTap('adjust');
+                                  return true;
+                                },
+                              ),
+                            ),
+                          ),
+                        )
+                      else if (_playerBarShown) ...[
                         if (nativeGlassBar.value)
                           _GlassBarHost(playerPage: true, onTap: _playerBarTap)
                         else
@@ -3663,6 +3699,62 @@ class _GlassBarHostState extends State<_GlassBarHost> {
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// YouTube Music's bottom bar (the site has none on a phone): home,
+/// explore, the adjustments button and the library.
+class _MusicBottomBar extends StatelessWidget {
+  const _MusicBottomBar({
+    required this.current,
+    required this.onTab,
+    required this.onAdjustments,
+  });
+
+  final String current;
+  final void Function(String name) onTab;
+  final bool Function() onAdjustments;
+
+  @override
+  Widget build(BuildContext context) {
+    const Color ink = Color(0xFFF1F1F1);
+    Widget tab(String name, String tooltip, IconData idle, IconData active) =>
+        Expanded(
+          child: IconButton(
+            key: Key('musicBar$name'),
+            tooltip: tooltip,
+            onPressed: () => onTab(name),
+            icon: Icon(current == name ? active : idle, size: 28, color: ink),
+          ),
+        );
+    return Container(
+      key: const Key('musicBottomBar'),
+      height: 48,
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F0F0F),
+        border: Border(top: BorderSide(color: Color(0x1FFFFFFF))),
+      ),
+      child: Row(
+        children: [
+          tab('home', 'Início', Icons.home_outlined, Icons.home_filled),
+          tab('explore', 'Explorar', Icons.explore_outlined, Icons.explore),
+          Expanded(
+            child: Center(
+              child: _BarAdjustmentsButton(
+                dark: true,
+                onPressed: onAdjustments,
+              ),
+            ),
+          ),
+          tab(
+            'library',
+            'Biblioteca',
+            Icons.library_music_outlined,
+            Icons.library_music,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The bottom bar under the Shorts page, like the YouTube app's: home,

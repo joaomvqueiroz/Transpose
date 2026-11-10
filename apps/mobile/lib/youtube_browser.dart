@@ -486,7 +486,8 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// Closes the site's search field (and its suggestions) if it is open.
   Future<void> leaveSearch() async {}
 
-  /// Opens one of the bottom bar's pages: "home", "shorts" or "you".
+  /// Opens one of the bottom bar's pages: "home", "shorts" or "you" on
+  /// YouTube; "home", "explore" or "library" on YouTube Music.
   Future<void> openTab(String name) async {}
 
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
@@ -1024,9 +1025,17 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
 
   @override
   Future<void> openTab(String name) async {
-    if (_disposed || !const {'home', 'shorts', 'you'}.contains(name)) return;
+    if (_disposed ||
+        !const {'home', 'shorts', 'you', 'explore', 'library'}.contains(name)) {
+      return;
+    }
     try {
       await controller.runJavaScript('''(() => {
+          if (window.location.hostname === 'music.youtube.com') {
+            const path = {home: '/', explore: '/explore', library: '/library'}['$name'];
+            if (path && window.location.pathname !== path) window.location.href = path;
+            return;
+          }
           const tab = {home: 'pivot-w2w', shorts: 'pivot-shorts', you: 'pivot-you'}['$name'];
           const target = document.querySelector('ytm-pivot-bar-renderer .' + tab);
           if (target) { target.click(); return; }

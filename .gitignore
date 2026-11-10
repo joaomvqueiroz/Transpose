@@ -17,3 +17,6 @@ Thumbs.db
 # Local, license-gated DSP evaluation source; never bundled by default.
 .third_party/
 
+
+# JVM heap dumps left by a Gradle crash
+*.hprof

@@ -37,6 +37,7 @@ typedef YouTubeBars = ({
   bool homeInPage,
   bool searching,
   bool shorts,
+  bool music,
   String avatar,
   String tab,
   bool dark,
@@ -76,6 +77,7 @@ YouTubeBars? youTubeBarsFromState(Object? raw) {
     homeInPage: raw['homeInPage'] == true,
     searching: raw['searching'] == true,
     shorts: raw['shorts'] == true,
+    music: raw['music'] == true,
     tab: switch (raw['tab']) {
       final String tab => tab,
       _ => '',

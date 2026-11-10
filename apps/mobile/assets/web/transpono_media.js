@@ -767,6 +767,80 @@
       // Dressing only: the page works without it.
     }
   }
+  // YouTube Music, dressed in the same way as YouTube: no "open the app"
+  // button or prompt, the app's start-screen icon in the site's top bar, the
+  // top bar sliding away while scrolling down, and (drawn by the app, since
+  // the site has none on a phone) a bottom bar with home, explore, the
+  // adjustments and the library.
+  const musicYouTube = () => /^music\.youtube\.com$/i.test(window.location.hostname);
+  if (musicYouTube() && !window.__transponoMusicBars) {
+    window.__transponoMusicBars = true;
+    const music = document.createElement('style');
+    music.id = 'transpono-music-style';
+    music.textContent = `
+      ytmusic-nav-bar .app-install-link { display: none !important; }
+      ytmusic-nav-bar, #nav-bar-background { transition: transform .22s ease; }
+      html.transpono-bars-away ytmusic-nav-bar,
+      html.transpono-bars-away #nav-bar-background {
+        transform: translateY(-80px) !important;
+      }`;
+    (document.head || document.documentElement).appendChild(music);
+  }
+  function musicBars() {
+    if (!musicYouTube()) return null;
+    try {
+      // The site's "open in the YouTube Music app" prompt: answer "not now".
+      const prompt = document.querySelector('ytmusic-popup-container tp-yt-paper-dialog');
+      if (prompt && prompt.offsetHeight > 0 && !prompt.__transponoDismissed &&
+          /app YouTube Music/i.test(prompt.textContent || '')) {
+        const decline = [...prompt.querySelectorAll('button')].find(
+          button => !/^(abrir|open|abre)\b/i.test((button.textContent || '').trim()));
+        if (decline) {
+          prompt.__transponoDismissed = true;
+          decline.click();
+        }
+      }
+      const field = document.activeElement;
+      const typing = !!field && !!field.matches &&
+        field.matches('input, textarea, [contenteditable="true"]');
+      const away = window.__transponoScrollDir === 'down' && !typing;
+      document.documentElement.classList.toggle('transpono-bars-away', away);
+      const nav = document.querySelector('ytmusic-nav-bar');
+      const search = nav ? nav.querySelector('ytmusic-search-box') : null;
+      const searchLeft = search ? search.getBoundingClientRect().left : 0;
+      // Room for the icon: left of the search button, where "open the app"
+      // was; not while the search field is opened over the bar.
+      const topFree = !!nav && nav.offsetHeight > 20 && !typing &&
+        searchLeft > window.innerWidth / 2;
+      const topRight = Math.round(window.innerWidth - searchLeft);
+      const homeInPage = placeHomeIcon(nav, topFree, topRight);
+      if (nav) {
+        const icon = nav.querySelector('.tp-home-icon');
+        if (icon) icon.style.top = '8px';
+      }
+      const picture = nav ? nav.querySelector('ytmusic-settings-button img') : null;
+      const path = window.location.pathname;
+      return {
+        pivot: null,
+        pivotX: null,
+        topFree,
+        topRight,
+        hidden: away,
+        searching: false,
+        shorts: false,
+        music: true,
+        avatar: picture && /^https:\/\//.test(picture.src || '') ? picture.src : '',
+        tab: path === '/' ? 'home'
+          : /^\/explore/.test(path) ? 'explore'
+          : /^\/library/.test(path) ? 'library' : '',
+        topAway: !topFree,
+        homeInPage,
+        dark: true,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
   // Where the page's own bars are, for the app's buttons that sit in them.
   // Measured from the layout (offset*), so a bar that is sliding in or out
   // reports its resting place.
@@ -2016,7 +2090,7 @@
           field.matches('input, textarea, [contenteditable="true"]');
       })(),
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
-      bars: pageBars(),
+      bars: pageBars() || musicBars(),
       // The site's vertical Shorts player is on screen.
       shortsPage: /^\/shorts(\/|$)/.test(window.location.pathname),
       // Counters, not one-shot flags: any snapshot (there are several
