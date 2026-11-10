@@ -14,6 +14,21 @@ class _BrowseSession extends FakeYouTubeSession {
   Widget buildView() => const Center(child: Text('Página de pesquisa'));
 }
 
+/// Counts the pointer events that reach the player page.
+class _PointerCountingSession extends FakeYouTubeSession {
+  int downs = 0, ups = 0, cancels = 0;
+
+  @override
+  Widget buildView() => Listener(
+    key: const Key('playerPointerSurface'),
+    behavior: HitTestBehavior.opaque,
+    onPointerDown: (_) => downs++,
+    onPointerUp: (_) => ups++,
+    onPointerCancel: (_) => cancels++,
+    child: const ColoredBox(color: Colors.black),
+  );
+}
+
 class _InteractivePlayerSession extends FakeYouTubeSession {
   int videoTaps = 0;
 
@@ -76,21 +91,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Página de pesquisa'), findsOneWidget);
       expect(find.byKey(const Key('appMiniPlayer')), findsOneWidget);
+      expect(player.appMiniSurface, isTrue);
       expect(player.commands.where((c) => c.$1 == 'pause'), isEmpty);
       expect(browse.publishesPageState, isTrue);
       expect(player.publishesPageState, isFalse);
 
-      // Touches on the video in the mini player go to YouTube's WebView. A
-      // separate, small control is used to restore the full player.
+      // The scaled mini-player surface never forwards native hit coordinates.
+      // Tapping it restores the full-size WebView before YouTube gets touches.
       final miniTopLeft = tester.getTopLeft(
         find.byKey(const Key('appMiniPlayerTouch')),
       );
       await tester.tapAt(miniTopLeft + const Offset(40, 40));
       await tester.pumpAndSettle();
-      expect(player.videoTaps, 1);
+      expect(player.videoTaps, 0);
+      expect(find.byKey(const Key('appMiniPlayer')), findsNothing);
+      expect(player.appMiniSurface, isFalse);
+      expect(find.text('Página de pesquisa'), findsNothing);
+
+      // It can be minimized again, dragged and settled against a side.
+      player.onMinimizeRequest!();
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('appMiniPlayer')), findsOneWidget);
 
-      // It can be dragged and settles against a side.
       final mini = find.byKey(const Key('appMiniPlayerTouch'));
       final before = tester.getTopLeft(mini);
       await tester.drag(mini, const Offset(-250, -200));
@@ -104,6 +126,81 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('appMiniPlayer')), findsNothing);
       expect(find.text('Página de pesquisa'), findsNothing);
+      expect(player.appMiniSurface, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'encolher espera o dedo levantar: o leitor nunca muda de sítio a meio de um toque',
+    (tester) async {
+      tester.view.physicalSize = const Size(1179, 2556);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final browse = _BrowseSession();
+      final player = _PointerCountingSession();
+      await tester.pumpWidget(
+        StudioVisualApp(
+          openSearchWhenEmpty: true,
+          youtubeSessionFactory: () => player,
+          browseSessionFactory: () => browse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      browse.onOpenRequest!(
+        Uri.https('m.youtube.com', '/watch', {'v': 'abcdefghijk'}),
+      );
+      await tester.pumpAndSettle();
+      player.state = const YouTubeMediaState(
+        videoId: 'abcdefghijk',
+        title: 'Música',
+        hasVideo: true,
+        playing: true,
+        duration: 200,
+      );
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      final mini = find.byKey(const Key('appMiniPlayer'));
+      final surface = find.byKey(const Key('playerPointerSurface'));
+
+      for (var cycle = 0; cycle < 6; cycle++) {
+        // The finger goes down on the video and drags; the page asks for
+        // the mini player while it is still down.
+        final at = tester.getTopLeft(surface) + const Offset(120, 120);
+        final gesture = await tester.startGesture(at);
+        await gesture.moveBy(const Offset(0, 90));
+        player.onMinimizeRequest!();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(mini, findsNothing, reason: 'ciclo $cycle: dedo ainda em baixo');
+        expect(player.downs - player.ups - player.cancels, 1);
+
+        // Odd cycles end with a cancelled gesture instead of a lift.
+        if (cycle.isOdd) {
+          await gesture.cancel();
+        } else {
+          await gesture.up();
+        }
+        await tester.pumpAndSettle();
+        expect(mini, findsOneWidget, reason: 'ciclo $cycle: encolhe ao largar');
+        expect(
+          player.downs,
+          player.ups + player.cancels,
+          reason: 'ciclo $cycle: o leitor recebeu o fim do toque',
+        );
+
+        // Restore and check a plain tap reaches the player again.
+        await tester.tap(find.byKey(const Key('appMiniPlayerExpand')));
+        await tester.pumpAndSettle();
+        expect(mini, findsNothing);
+        final before = player.ups;
+        await tester.tapAt(
+          tester.getTopLeft(surface) + const Offset(120, 120),
+        );
+        await tester.pumpAndSettle();
+        expect(player.ups, before + 1, reason: 'ciclo $cycle: toque chega');
+        expect(mini, findsNothing, reason: 'ciclo $cycle: pedido já consumido');
+      }
       expect(tester.takeException(), isNull);
     },
   );

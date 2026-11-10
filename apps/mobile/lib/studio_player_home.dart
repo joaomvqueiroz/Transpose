@@ -67,7 +67,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final GlobalKey _browseKey = GlobalKey(debugLabel: 'browse-surface');
   Offset? _miniOffset;
   bool _miniDragging = false;
+  int? _miniPointerId;
+  Offset? _miniPointerOrigin;
+  Offset _miniPointerDelta = Offset.zero;
   bool get _twoPages => _browse != null;
+
+  // Fingers currently down on the player surface, and a minimize request
+  // that waits for them to lift (see _minimize).
+  final Set<int> _mediaPointers = <int>{};
+  bool _minimizeWhenReleased = false;
+
+  void _mediaPointerReleased(PointerEvent event) {
+    _mediaPointers.remove(event.pointer);
+    if (_mediaPointers.isNotEmpty || !_minimizeWhenReleased) return;
+    // After this event finished its dispatch (the platform view gets its
+    // "up" through the pointer router, after the hit-test targets).
+    scheduleMicrotask(() {
+      if (mounted && _minimizeWhenReleased && _mediaPointers.isEmpty) {
+        _minimize();
+      }
+    });
+  }
 
   // Screen size outside picture-in-picture: the page keeps that layout and
   // the small window shows its video area, scaled.
@@ -254,6 +274,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   /// A video chosen in the browse page: play it full screen in the player.
   void _playChosen(Uri watch) {
     if (!mounted) return;
+    final player = _player.youtube;
+    if (player != null) unawaited(player.setAppMiniSurface(false));
     setState(() {
       _browsing = false;
       _mainControlsExpanded = false;
@@ -267,7 +289,22 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   /// the search the video came from) comes back behind it; it keeps playing.
   void _minimize() {
     if (!mounted || !_twoPages || _browsing) return;
+    // Never move the player's platform view while a finger is still on it
+    // (the drag that asks for the mini player is exactly that). Moving it
+    // re-parents its render object, which detaches it: Flutter then resets
+    // the view's gesture recognizer and the finger's "up" never reaches the
+    // native WebView, while Flutter's Android motion-event converter keeps
+    // that pointer as down. Every later touch is then sent as a second
+    // finger of a gesture that never ends, so taps and scrolling stop
+    // working. Wait for the finger to lift.
+    if (_mediaPointers.isNotEmpty) {
+      _minimizeWhenReleased = true;
+      return;
+    }
+    _minimizeWhenReleased = false;
     _hideAdjustmentChoices();
+    final player = _player.youtube;
+    if (player != null) unawaited(player.setAppMiniSurface(true));
     setState(() {
       _browsing = true;
       _mainControlsExpanded = false;
@@ -279,6 +316,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   void _expandMini() {
     if (!mounted) return;
+    final player = _player.youtube;
+    if (player != null) unawaited(player.setAppMiniSurface(false));
     setState(() => _browsing = false);
     _syncPageRoles();
   }
@@ -907,7 +946,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     return KeyedSubtree(
       key: _mediaKey,
       child: _player.isYouTube || _browsing
-          ? _browser ?? const Center(child: CircularProgressIndicator())
+          ? Listener(
+              // Observes only (see _minimize): which fingers are down here.
+              onPointerDown: (event) => _mediaPointers.add(event.pointer),
+              onPointerUp: _mediaPointerReleased,
+              onPointerCancel: _mediaPointerReleased,
+              child:
+                  _browser ?? const Center(child: CircularProgressIndicator()),
+            )
           : video != null && video.value.isInitialized
           ? ColoredBox(
               color: Colors.black,
@@ -1601,7 +1647,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   static const double _miniVideoTop = 48;
 
   Rect _miniRect(Size screen, EdgeInsets padding) {
-    final double width = (screen.width * .46).clamp(140.0, 280.0);
+    // YouTube's mobile player collapses and pauses below its 220×124 CSS-pixel
+    // minimum. Keep the native WebView viewport at least that wide so the video
+    // fits inside it instead of overflowing a smaller Flutter mini window.
+    final double width = (screen.width * .58).clamp(220.0, 280.0);
     final double height = width * 9 / 16;
     final Offset fallback = Offset(
       screen.width - width - 12,
@@ -1625,6 +1674,42 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _miniDragging = false;
       _miniOffset = Offset(left, top);
     });
+  }
+
+  void _miniPointerDown(PointerDownEvent event, Rect rect) {
+    if (_miniPointerId != null) return;
+    _miniPointerId = event.pointer;
+    _miniPointerOrigin = _miniOffset ?? rect.topLeft;
+    _miniPointerDelta = Offset.zero;
+  }
+
+  void _miniPointerMove(PointerMoveEvent event) {
+    if (_miniPointerId != event.pointer) return;
+    _miniPointerDelta += event.delta;
+    if (!_miniDragging && _miniPointerDelta.distance < 8) return;
+    final Offset origin = _miniPointerOrigin ?? Offset.zero;
+    setState(() {
+      _miniDragging = true;
+      _miniOffset = origin + _miniPointerDelta;
+    });
+  }
+
+  void _miniPointerEnd(
+    PointerEvent event,
+    Size screen,
+    EdgeInsets padding, {
+    bool expandIfTap = true,
+  }) {
+    if (_miniPointerId != event.pointer) return;
+    final bool moved = _miniDragging;
+    _miniPointerId = null;
+    _miniPointerOrigin = null;
+    _miniPointerDelta = Offset.zero;
+    if (moved) {
+      _settleMini(screen, padding);
+    } else if (expandIfTap) {
+      _expandMini();
+    }
   }
 
   /// Android picture-in-picture: only the video, filling the small window.
@@ -1666,68 +1751,76 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       top: rect.top,
       width: rect.width,
       height: rect.height,
-      child: GestureDetector(
-        key: const Key('appMiniPlayerTouch'),
-        behavior: HitTestBehavior.translucent,
-        onPanStart: (_) => setState(() {
-          _miniDragging = true;
-          _miniOffset = rect.topLeft;
-        }),
-        onPanUpdate: (details) => setState(
-          () => _miniOffset = (_miniOffset ?? rect.topLeft) + details.delta,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x99000000),
+              blurRadius: 24,
+              offset: Offset(0, 8),
+            ),
+          ],
         ),
-        onPanEnd: (_) => _settleMini(screen, padding),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x99000000),
-                blurRadius: 24,
-                offset: Offset(0, 8),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                OverflowBox(
-                  alignment: Alignment.topLeft,
-                  minWidth: screen.width,
-                  maxWidth: screen.width,
-                  minHeight: screen.height,
-                  maxHeight: screen.height,
-                  child: Transform(
-                    alignment: Alignment.topLeft,
-                    transform: Matrix4.diagonal3Values(scale, scale, 1)
-                      ..translateByDouble(0, -_miniVideoTop, 0, 1),
-                    child: SizedBox.fromSize(size: screen, child: media),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: Listener(
+                  key: const Key('appMiniPlayerTouch'),
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (event) => _miniPointerDown(event, rect),
+                  onPointerMove: _miniPointerMove,
+                  onPointerUp: (event) =>
+                      _miniPointerEnd(event, screen, padding),
+                  onPointerCancel: (event) => _miniPointerEnd(
+                    event,
+                    screen,
+                    padding,
+                    expandIfTap: false,
                   ),
-                ),
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Material(
-                    color: const Color(0x99000000),
-                    shape: const CircleBorder(),
-                    child: IconButton(
-                      key: const Key('appMiniPlayerExpand'),
-                      tooltip: 'Expandir vídeo',
-                      onPressed: _expandMini,
-                      icon: const Icon(Icons.open_in_full, size: 16),
-                      color: Colors.white,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 32,
-                        height: 32,
+                  // The native view remains full-size; only its pixels are
+                  // transformed and clipped. Mini-player taps expand the
+                  // video, avoiding scaled native hit-test coordinates.
+                  child: IgnorePointer(
+                    child: OverflowBox(
+                      alignment: Alignment.topLeft,
+                      minWidth: screen.width,
+                      maxWidth: screen.width,
+                      minHeight: screen.height,
+                      maxHeight: screen.height,
+                      child: Transform(
+                        alignment: Alignment.topLeft,
+                        transform: Matrix4.diagonal3Values(scale, scale, 1),
+                        child: SizedBox.fromSize(size: screen, child: media),
                       ),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              Positioned(
+                top: 2,
+                right: 2,
+                child: Material(
+                  color: const Color(0x99000000),
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    key: const Key('appMiniPlayerExpand'),
+                    tooltip: 'Expandir vídeo',
+                    onPressed: _expandMini,
+                    icon: const Icon(Icons.open_in_full, size: 16),
+                    color: Colors.white,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

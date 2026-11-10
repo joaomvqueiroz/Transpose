@@ -123,6 +123,61 @@
         padding: 0 !important; overflow: hidden !important;
       }`;
     (document.head || document.documentElement).appendChild(style);
+    // Flutter gives the player WebView the mini-player's actual bounds. Do
+    // not scale a full-screen platform view into a small Flutter rectangle:
+    // native hit testing can otherwise disagree with the visible player.
+    style.textContent += `
+      html.transpono-app-mini-surface,
+      html.transpono-app-mini-surface body {
+        width: 100% !important; height: 100% !important;
+        margin: 0 !important; overflow: hidden !important;
+        background: #000 !important;
+      }
+      html.transpono-app-mini-surface body :not(#player-container-id):not(#player-container-id *) {
+        visibility: hidden !important;
+      }
+      html.transpono-app-mini-surface #player-container-id,
+      html.transpono-app-mini-surface #player-container-id * {
+        visibility: visible !important;
+      }
+      html.transpono-app-mini-surface #player-container-id,
+      html.transpono-app-mini-surface #player-container-id.sticky-player {
+        position: fixed !important;
+        top: 0 !important; left: 0 !important; right: auto !important;
+        bottom: auto !important;
+        width: var(--transpono-app-mini-content-width) !important;
+        height: var(--transpono-app-mini-content-height) !important;
+        max-width: none !important;
+        transform: none !important;
+        transform-origin: top left !important;
+        min-width: 0 !important; min-height: 0 !important;
+        border-radius: 0 !important; clip-path: none !important;
+        overflow: hidden !important; z-index: 2147483000 !important;
+      }
+      html.transpono-app-mini-surface #movie_player,
+      html.transpono-app-mini-surface .html5-video-container,
+      html.transpono-app-mini-surface #player-container-id video {
+        width: 100% !important; height: 100% !important;
+        min-width: 0 !important; min-height: 0 !important;
+      }
+      html.transpono-app-mini-surface #player-container-id video {
+        display: block !important;
+        object-fit: contain !important;
+      }`;
+    // Keep the YouTube player at its regular CSS size while Flutter clips and
+    // scales the full-size WebView into the app's mini-player window. Resizing
+    // the player itself makes YouTube enter tiny mode and pause playback.
+    window.__transponoSetAppMiniSurface = visible => {
+      const wasVisible = root.classList.contains('transpono-app-mini-surface');
+      if (visible && !wasVisible) {
+        const contentWidth = Math.max(window.innerWidth, 220);
+        root.style.setProperty(
+          '--transpono-app-mini-content-width', `${contentWidth}px`);
+        root.style.setProperty(
+          '--transpono-app-mini-content-height', `${contentWidth * 9 / 16}px`);
+      }
+      root.classList.toggle('transpono-app-mini-surface', visible);
+    };
     const root = document.documentElement;
     const playerOf = () => document.querySelector('#player-container-id.sticky-player');
     // m.youtube.com keeps some bars (the filter chips) sticky/fixed just under
@@ -229,6 +284,20 @@
       }
       move = null;
     }, {passive: true, capture: true});
+    // A real touch cancellation must clear the drag state. Do not treat
+    // pointercancel as touchcancel: Android WebView can dispatch pointercancel
+    // while the same physical gesture continues as touchmove/touchend. If we
+    // clear dragStartY there, the app's minimize gesture never completes.
+    const cancelTouchGesture = () => {
+      dragStartY = null;
+      move = null;
+      moved = false;
+      root.classList.remove('transpono-mini-dragging');
+      setOffset(0, 0);
+    };
+    document.addEventListener('touchcancel', cancelTouchGesture, {
+      passive: true, capture: true,
+    });
     // Tapping the small video brings the full player back instead of
     // pausing it; the click that ends a drag does nothing.
     document.addEventListener('click', event => {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'home_button_visibility.dart';
@@ -480,6 +481,10 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// drives the app's floating controls.
   bool publishesPageState = true;
 
+  /// True only while Flutter places this player WebView in its small overlay.
+  /// The page then renders just the video into the WebView's real viewport.
+  bool appMiniSurface = false;
+
   /// A video chosen in a [browseOnly] page.
   void Function(Uri watch)? onOpenRequest;
 
@@ -488,6 +493,11 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
 
   /// Applies [browseOnly] and [appMini] to the current page.
   Future<void> applyPageRoles() async {}
+
+  Future<void> setAppMiniSurface(bool visible) async {
+    appMiniSurface = visible;
+    await applyPageRoles();
+  }
 }
 
 Uri _youtubeVideoUri(String videoId) {
@@ -966,7 +976,14 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     try {
       await controller.runJavaScript(
         'window.__transponoBrowseOnly = $browseOnly;'
-        'window.__transponoAppMini = $appMini;',
+        'window.__transponoAppMini = $appMini;'
+        'window.__transponoAppMiniSurface = $appMiniSurface;'
+        'if (window.__transponoSetAppMiniSurface) {'
+        'window.__transponoSetAppMiniSurface($appMiniSurface);'
+        '} else {'
+        'document.documentElement?.classList.toggle('
+        '"transpono-app-mini-surface", $appMiniSurface);'
+        '}',
       );
     } on Object {
       // No page yet: applied again when the bridge installs.
@@ -1158,9 +1175,32 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         platform: GeckoWebViewWidget(gecko, key: const Key('youtubeWebView')),
       );
     }
+    const Set<Factory<OneSequenceGestureRecognizer>> gestureRecognizers =
+        <Factory<OneSequenceGestureRecognizer>>{};
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      // Keep the default texture composition after comparing it with Hybrid
+      // Composition on the A16. The native mode did not fix the post-mini
+      // click loss and made the overlapping mini view less predictable.
+      // Leave gestures to the platform view: no Flutter recognizer should
+      // consume taps intended for YouTube's controls.
+      final PlatformWebViewWidgetCreationParams baseParams =
+          PlatformWebViewWidgetCreationParams(
+            key: const Key('youtubeWebView'),
+            controller: controller.platform,
+            gestureRecognizers: gestureRecognizers,
+          );
+      return WebViewWidget.fromPlatformCreationParams(
+        params:
+            AndroidWebViewWidgetCreationParams.fromPlatformWebViewWidgetCreationParams(
+              baseParams,
+              displayWithHybridComposition: false,
+            ),
+      );
+    }
     return WebViewWidget(
       key: const Key('youtubeWebView'),
       controller: controller,
+      gestureRecognizers: gestureRecognizers,
     );
   }
 

@@ -24,6 +24,7 @@ function fixture(options = {}) {
   let tick;
   let ad = false;
   const mediaEvents = new Map();
+  const documentEvents = new Map();
   const element = {
     currentSrc: 'blob:https://m.youtube.com/fixture', src: '', mediaKeys: null,
     currentTime: 10, duration: 100, playbackRate: 1, preservesPitch: true,
@@ -121,10 +122,17 @@ function fixture(options = {}) {
       return node;
     }
   }
+  const classes = new Set(options.mini ? ['transpono-mini'] : []);
+  const rootStyle = new Map();
+  const playerNode = {
+    contains(target) { return target === this; },
+  };
   const window = {
     location: new URL(options.url || 'https://m.youtube.com/watch?v=one'),
+    __transponoAppMini: !!options.appMini,
     __transponoAudioProbe: !!options.probe,
     AudioContext: Context,
+    scrollTo() {},
     async SignalsmithStretch(context, config) {
       if (!state.sources.length)
         assert.equal(state.sources.length, state.worklets.length, 'Worklet is prepared before attaching source');
@@ -149,6 +157,8 @@ function fixture(options = {}) {
   const document = {
     title: options.documentTitle ?? 'A song - YouTube',
     querySelector(selector) {
+      if (selector === '#player-container-id.sticky-player')
+        return options.player ? playerNode : null;
       if (selector === 'video.html5-main-video') return options.mainVideo === false ? null : selected;
       if (selector === 'video') return options.genericVideo || selected;
       if (selector === '.ad-showing, .ad-interrupting') return ad ? {} : null;
@@ -161,10 +171,26 @@ function fixture(options = {}) {
       return null;
     },
     // The mini player and the focus report attach page listeners and a style.
-    documentElement: {classList: {contains: () => false, toggle() {}}, appendChild() {}},
+    documentElement: {
+      classList: {
+        contains(name) { return classes.has(name); },
+        add(name) { classes.add(name); },
+        remove(...names) { for (const name of names) classes.delete(name); },
+        toggle(name, force) {
+          const add = force === undefined ? !classes.has(name) : force;
+          if (add) classes.add(name); else classes.delete(name);
+          return add;
+        },
+      },
+      style: {setProperty(name, value) { rootStyle.set(name, value); }},
+      appendChild() {},
+    },
     head: {appendChild() {}},
     createElement: () => ({}),
-    addEventListener() {},
+    addEventListener(name, handler) {
+      if (!documentEvents.has(name)) documentEvents.set(name, []);
+      documentEvents.get(name).push(handler);
+    },
   };
   const sandbox = {window, document, navigator: {}, URL, performance: {now: () => clock},
     setInterval(fn) { tick = fn; return 1; }, clearInterval() { tick = null; },
@@ -187,6 +213,12 @@ function fixture(options = {}) {
     },
     confirmSeek() { this.beginSeek(); this.finishSeek(); },
     setAd(value) { ad = value; this.advance(); },
+    fire(name, event) {
+      for (const handler of documentEvents.get(name) || []) handler(event);
+    },
+    classes,
+    rootStyle,
+    playerNode,
     navigate(id, replacement) {
       window.location = new URL(id ? 'https://m.youtube.com/watch?v=' + id : 'https://m.youtube.com/results?search_query=music');
       if (replacement !== undefined) selected = replacement;
@@ -233,6 +265,54 @@ test('timeline snapshots expose monotonic time and explicit seek/rate epochs', (
   f.setAd(true);
   assert.equal(f.api.snapshot().isAd, true);
   assert.equal(f.api.snapshot().playbackReady, false);
+});
+
+test('cancelled mini-player touch clears drag state and the next tap restores it', () => {
+  const f = fixture({mini: true, appMini: true, player: true});
+  f.fire('touchstart', {
+    target: f.playerNode,
+    touches: [{clientX: 10, clientY: 10}],
+  });
+  f.fire('touchmove', {
+    cancelable: true,
+    touches: [{clientX: 30, clientY: 40}],
+    preventDefault() {},
+  });
+  assert.equal(f.classes.has('transpono-mini-dragging'), true);
+
+  // Flutter can take over a drag, so WebView receives CANCEL rather than END.
+  f.fire('touchcancel', {});
+  assert.equal(f.classes.has('transpono-mini-dragging'), false);
+  f.fire('touchend', {changedTouches: [{clientX: 30, clientY: 40}]});
+  assert.equal(f.classes.has('transpono-mini-left'), false);
+  assert.equal(f.classes.has('transpono-mini-top'), false);
+
+  let prevented = false;
+  f.fire('click', {
+    target: f.playerNode,
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+  assert.equal(prevented, true);
+  assert.equal(f.classes.has('transpono-mini'), false);
+});
+
+test('Android pointercancel does not discard a continuing touch-to-minimize gesture', () => {
+  const f = fixture({appMini: true, player: true});
+  f.fire('touchstart', {
+    target: f.playerNode,
+    touches: [{clientX: 10, clientY: 10}],
+  });
+
+  // Some Android WebViews cancel the Pointer Events stream when the browser
+  // takes over a touch gesture, while continuing to send Touch Events.
+  f.fire('pointercancel', {});
+  f.fire('touchmove', {
+    cancelable: true,
+    touches: [{clientX: 10, clientY: 90}],
+    preventDefault() {},
+  });
+  assert.equal(f.window.__transponoMinimizeSeq, 1);
 });
 
 // Count active routes, including the final destination rather than only the
