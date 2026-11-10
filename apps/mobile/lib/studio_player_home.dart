@@ -2238,6 +2238,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             : box.maxHeight < 450
             ? (panelTop - 48).clamp(0.0, panelTop)
             : panelTop;
+        // The adjustments are a floating sheet of glass over the page: inset
+        // from the edges, fully rounded, blurring what is behind it.
+        final sheet = !_adjustmentsCoverVideo && !landscapePlayer;
+        final light = widget.appearance.mode == StudioAppearanceMode.light;
+        final sheetRadius = BorderRadius.circular(sheet ? 34 : 0);
+        // No side gap on very narrow screens: the controls need the width.
+        final double sheetSide = sheet && box.maxWidth >= 370 ? 8 : 0;
+        final double sheetBottom = sheet ? 8 : 0;
         return Stack(
           children: [
             SizedBox(
@@ -2261,9 +2269,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             if (open)
               Positioned(
                 top: overlayTop,
-                left: 0,
-                right: 0,
-                bottom: 0,
+                left: sheetSide,
+                right: sheetSide,
+                bottom: sheetBottom,
                 child: Theme(
                   data: studioColumnTheme(
                     Theme.of(context),
@@ -2272,20 +2280,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: ClipRect(
+                        child: ClipRRect(
                           key: const Key('unifiedAdjustmentsBlurBounds'),
+                          // The chord tab leaves the page showing above its
+                          // own rounded backdrop: only the bottom is clipped.
+                          borderRadius: sheet && chordPanel
+                              ? const BorderRadius.vertical(
+                                  bottom: Radius.circular(34),
+                                )
+                              : sheetRadius,
                           child: BackdropFilter(
                             filter: ImageFilter.blur(
-                              sigmaX:
-                                  widget.appearance.mode ==
-                                          StudioAppearanceMode.glass &&
-                                      !chordPanel
+                              sigmaX: sheet && !chordPanel
+                                  ? 22
+                                  : widget.appearance.mode ==
+                                            StudioAppearanceMode.glass &&
+                                        !chordPanel
                                   ? 10
                                   : 0,
-                              sigmaY:
-                                  widget.appearance.mode ==
-                                          StudioAppearanceMode.glass &&
-                                      !chordPanel
+                              sigmaY: sheet && !chordPanel
+                                  ? 22
+                                  : widget.appearance.mode ==
+                                            StudioAppearanceMode.glass &&
+                                        !chordPanel
                                   ? 10
                                   : 0,
                             ),
@@ -2314,16 +2331,77 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                       media,
                                       topGap: chordTopGap,
                                       viewportHeight:
-                                          box.maxHeight - overlayTop,
+                                          box.maxHeight -
+                                          overlayTop -
+                                          sheetBottom,
                                     ),
                                   )
                                 : ColoredBox(
-                                    color: _background,
+                                    color: sheet
+                                        ? (light
+                                              ? const Color(0xB8F4F7FB)
+                                              : const Color(0x8C17191E))
+                                        : _background,
                                     child: _sectionContent(media),
                                   ),
                           ),
                         ),
                       ),
+                      if (sheet) ...[
+                        // The glass's light rim (in the chord tab, around
+                        // the backdrop that starts under the page's strip).
+                        Positioned.fill(
+                          top: chordPanel ? chordTopGap : 0,
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: sheetRadius,
+                                border: Border.all(
+                                  color: light
+                                      ? const Color(0x33000000)
+                                      : const Color(0x38FFFFFF),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // The grabber: drag it down (or tap it) to close.
+                        Positioned(
+                          top: chordPanel ? chordTopGap : 0,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: GestureDetector(
+                              key: const Key('adjustmentsGrabber'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: _toggleMainAdjustments,
+                              onVerticalDragEnd: (details) {
+                                if ((details.primaryVelocity ?? 0) > 120) {
+                                  _toggleMainAdjustments();
+                                }
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  40,
+                                  5,
+                                  40,
+                                  9,
+                                ),
+                                child: Container(
+                                  width: 36,
+                                  height: 5,
+                                  decoration: BoxDecoration(
+                                    color: light
+                                        ? const Color(0x66000000)
+                                        : const Color(0x80FFFFFF),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -3000,7 +3078,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   decoration: BoxDecoration(
                     color: _background,
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(26),
+                      top: Radius.circular(34),
                     ),
                   ),
                   child: Column(
@@ -3085,7 +3163,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               decoration: BoxDecoration(
                 color: _background,
                 borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(26),
+                  top: Radius.circular(34),
                 ),
               ),
               // Room under the last control so it scrolls clear of the
