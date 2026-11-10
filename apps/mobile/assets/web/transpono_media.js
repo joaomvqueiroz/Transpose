@@ -257,14 +257,18 @@
         left: 24px !important; right: 24px !important; width: auto !important;
         bottom: 10px !important; height: 52px !important;
         padding: 0 4px !important; border-radius: 26px !important;
-        border: 1px solid rgba(255, 255, 255, .12) !important;
-        background: rgba(18, 18, 18, .82) !important;
-        -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+        /* Glass: the page shows through, blurred, with a light rim. */
+        border: 1px solid rgba(255, 255, 255, .18) !important;
+        background: rgba(30, 30, 30, .5) !important;
+        -webkit-backdrop-filter: blur(26px) saturate(180%);
+        backdrop-filter: blur(26px) saturate(180%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16),
+          0 8px 24px rgba(0, 0, 0, .35) !important;
         overflow: hidden !important;
       }
       html.tp-ios.tp-ios[data-transpono-theme="light"] ytm-pivot-bar-renderer {
-        border-color: rgba(0, 0, 0, .12) !important;
-        background: rgba(250, 250, 250, .86) !important;
+        border-color: rgba(0, 0, 0, .1) !important;
+        background: rgba(250, 250, 250, .6) !important;
       }
       html.tp-ios ytm-pivot-bar-renderer .pivot-bar-item-tab {
         height: 42px !important; margin: 4px 2px !important;
