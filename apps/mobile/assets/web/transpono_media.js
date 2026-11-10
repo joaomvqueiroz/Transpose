@@ -181,6 +181,63 @@
         background: var(--yt-spec-raised-background, #272727) !important;
       }
       header[data-mode="searching"] .ytSearchboxComponentInput { font-size: 16px !important; }
+      /* Search suggestions like the YouTube app's list: one colour (the
+         page's own), white text, an icon on the left (a clock for past
+         searches, a magnifier for the others) and taller rows. */
+      .ytSearchboxComponentSuggestionsContainer.ytSearchboxComponentSuggestionsContainer {
+        background: var(--yt-spec-base-background, #0f0f0f) !important;
+        border: 0 !important; box-shadow: none !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentSuggestion {
+        display: flex !important; align-items: center !important;
+        min-height: 48px !important; height: auto !important;
+        padding: 0 4px 0 16px !important; border: 0 !important;
+        background: transparent !important;
+        color: var(--yt-spec-text-primary, #f1f1f1) !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentText {
+        flex: 1 1 auto !important; min-width: 0 !important;
+        font-size: 16px !important; line-height: 22px !important;
+        color: inherit !important; background: transparent !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentText * {
+        color: inherit !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentLeftContainer {
+        display: flex !important; flex-direction: row !important;
+        flex-wrap: nowrap !important; align-items: center !important;
+        justify-content: flex-start !important; text-align: left !important;
+        min-width: 0 !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentLeftContainer > span {
+        flex: 1 1 auto !important; min-width: 0 !important;
+        overflow: hidden !important; text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentLeftContainer::before {
+        content: ''; flex: 0 0 24px; width: 24px; height: 24px; margin-right: 20px;
+        background: currentColor;
+        -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/></svg>") center / contain no-repeat;
+        mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/></svg>") center / contain no-repeat;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentPersonalizedSuggestion .ytSuggestionComponentLeftContainer::before {
+        -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z'/></svg>");
+        mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z'/></svg>");
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentBold {
+        font-weight: 400 !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentRightContainer,
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentRightContainer * {
+        background: transparent !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentRightContainer {
+        color: var(--yt-spec-text-primary, #f1f1f1) !important;
+      }
+      .ytSearchboxComponentSuggestionsContainer .ytSuggestionComponentRemoveLink {
+        color: var(--yt-spec-text-secondary, #aaa) !important;
+        font-size: 13px !important; padding: 0 12px !important;
+      }
       /* iPhone, like the YouTube app there: the bottom bar is a floating
          pill, the tab being shown stands on a lighter patch, and the "you"
          page is plain dark with outlined buttons. */
@@ -498,6 +555,44 @@
       // Quality stays as the site chose it.
     }
   }
+  // Leaving the site's search. Its back arrow steps back in the page's
+  // history; when the search is the only entry there (the page was loaded
+  // again while searching) that does nothing and the search could not be
+  // left at all. So: use the arrow, and if the search is still open a
+  // moment later, load the page again without the search mark.
+  const searchOpen = () => {
+    const header = document.querySelector(
+      'ytm-mobile-topbar-renderer header.mobile-topbar-header');
+    return !!header && header.getAttribute('data-mode') === 'searching';
+  };
+  const leaveSearchFallback = () => {
+    setTimeout(() => {
+      try {
+        if (!searchOpen()) return;
+        window.location.replace(window.location.href.split('#')[0]);
+      } catch (_) {}
+    }, 600);
+  };
+  if (plainYouTube() && !window.__transponoLeaveSearch) {
+    window.__transponoLeaveSearch = () => {
+      try {
+        if (!searchOpen()) return;
+        const back = document.querySelector(
+          'ytm-mobile-topbar-renderer .mobile-topbar-back-arrow');
+        if (back) back.click();
+        leaveSearchFallback();
+      } catch (_) {}
+    };
+    if (typeof document.addEventListener === 'function') {
+      // A finger on the arrow gets the same safety net.
+      document.addEventListener('click', event => {
+        if (!event.isTrusted || !event.target || !event.target.closest) return;
+        if (event.target.closest('.mobile-topbar-back-arrow') && searchOpen()) {
+          leaveSearchFallback();
+        }
+      }, true);
+    }
+  }
   // The app's start-screen icon is drawn by the page itself, inside the
   // site's top bar, so it moves with the bar exactly (sliding away and back,
   // scrolling with the video page): an icon drawn by the app over the page
@@ -670,6 +765,7 @@
       const header = document.querySelector(
         'ytm-mobile-topbar-renderer header.mobile-topbar-header');
       const barThere = !!header && header.offsetHeight > 20;
+      const searching = !!header && header.getAttribute('data-mode') === 'searching';
       if (barThere) hideOpenApp(header);
       const away = document.documentElement.classList.contains('transpono-bars-away');
       let topFree = barThere &&
@@ -709,7 +805,11 @@
         topFree,
         topRight,
         // Also while the site's side drawer ("more") covers the page.
-        hidden: away || !!document.querySelector('.ytmDrawerLayoutContainerOpened'),
+        hidden: away || searching ||
+          !!document.querySelector('.ytmDrawerLayoutContainerOpened'),
+        // The search field is open (with its list of suggestions): the
+        // system's back button closes it.
+        searching,
         // The Shorts page: the site shows no bottom bar there, the app draws
         // one under the page.
         shorts: !bar && /^\/shorts(\/|$)/.test(window.location.pathname),

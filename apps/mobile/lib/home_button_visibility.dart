@@ -35,6 +35,7 @@ typedef YouTubeBars = ({
   bool hidden,
   bool topAway,
   bool homeInPage,
+  bool searching,
   bool shorts,
   String avatar,
   bool dark,
@@ -67,6 +68,7 @@ YouTubeBars? youTubeBarsFromState(Object? raw) {
     hidden: raw['hidden'] == true,
     topAway: raw['topAway'] == true,
     homeInPage: raw['homeInPage'] == true,
+    searching: raw['searching'] == true,
     shorts: raw['shorts'] == true,
     avatar: switch (raw['avatar']) {
       final String url when url.startsWith('https://') => url,

@@ -483,6 +483,9 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   Future<void> playWatch(Uri watch) => start(watch);
   Future<void> focusVideo() async {}
 
+  /// Closes the site's search field (and its suggestions) if it is open.
+  Future<void> leaveSearch() async {}
+
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
   /// page's video list is scrolled back to the player at the top; on
   /// closing, it returns to where the user was.
@@ -1013,6 +1016,18 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final native = _native;
       if (native != null) unawaited(native.sync(_media));
       if (state['restoreReady'] == true) _pauseOnReadyVideoId = null;
+    }
+  }
+
+  @override
+  Future<void> leaveSearch() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(
+        'if (window.__transponoLeaveSearch) window.__transponoLeaveSearch();',
+      );
+    } on Object {
+      // The page changed meanwhile.
     }
   }
 

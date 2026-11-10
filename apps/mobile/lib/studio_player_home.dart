@@ -3093,10 +3093,21 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       behavior: HitTestBehavior.translucent,
       onPointerDown: _releasePageFocusOutside,
       child: PopScope(
-        canPop: !_browsing && !(_twoPages && _player.loaded),
+        canPop:
+            !_browsing &&
+            !(_twoPages && _player.loaded) &&
+            pageYouTubeBars.value?.searching != true,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
           final browse = _browse;
+          // The site's search is open: back closes it first.
+          if (pageYouTubeBars.value?.searching == true) {
+            final session = _browsing
+                ? (browse ?? _player.youtube)
+                : _player.youtube;
+            if (session != null) unawaited(session.leaveSearch());
+            return;
+          }
           if (browse != null) {
             // Two pages: back shrinks the video (it keeps playing); while
             // browsing it goes back in the browse page.
