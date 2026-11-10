@@ -92,6 +92,10 @@
         box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
         z-index: 9999 !important;
         transition: transform .18s ease;
+        /* The small video is moved with the finger: the page must not scroll
+           under it. Done here, not with preventDefault, so that the touchmove
+           listener can be passive and never delays the page's scrolling. */
+        touch-action: none;
       }
       html.transpono-mini.transpono-mini-left #player-container-id.sticky-player {
         right: auto !important; left: 10px !important; transform-origin: left bottom;
@@ -258,8 +262,7 @@
         moved = true;
         root.classList.add('transpono-mini-dragging');
         setOffset(dx, dy);
-        // The page must not scroll under the finger meanwhile.
-        if (event.cancelable) event.preventDefault();
+        // The page does not scroll under the finger: touch-action (style).
         return;
       }
       if (dragStartY === null) return;
@@ -270,7 +273,9 @@
         }
         else setMini(true);
       }
-    }, {passive: false, capture: true});
+    // Passive: a non-passive touchmove on the document makes every scroll of
+    // the page wait for this script, which made scrolling feel slow.
+    }, {passive: true, capture: true});
     document.addEventListener('touchend', event => {
       dragStartY = null;
       if (!move) return;
@@ -339,6 +344,42 @@
       field.blur();
       setTimeout(() => field.focus(), 0);
     }, true);
+  }
+  // A video that starts without a tap (chosen in the other page, next in a
+  // playlist, autoplay) is started muted by YouTube, with its "Toque para
+  // ativar o som" button. On the player page the app gives it its sound at
+  // once, the same way the 'unmute' command does, so the button never stays.
+  // Only where the app asks for it: on iPhone the native audio copy mutes the
+  // page's video on purpose.
+  if (!window.__transponoAutoSoundInstalled) {
+    window.__transponoAutoSoundInstalled = true;
+    let lastTry = 0;
+    const giveSound = () => {
+      if (window.__transponoAutoSound !== true) return;
+      if (window.location.pathname !== '/watch') return;
+      const video = document.querySelector('video.html5-main-video');
+      if (!video || video.paused || !(video.muted || video.volume === 0)) return;
+      const t = Date.now();
+      if (t - lastTry < 300) return;
+      lastTry = t;
+      const element = document.getElementById('movie_player');
+      const player = element && (element.wrappedJSObject || element);
+      try {
+        if (player && typeof player.unMute === 'function') {
+          player.unMute();
+          if (typeof player.getVolume === 'function' && player.getVolume() === 0 &&
+              typeof player.setVolume === 'function') player.setVolume(100);
+        }
+      } catch (_) {}
+      video.muted = false;
+      if (video.volume === 0) video.volume = 1;
+      const control = document.querySelector('.ytp-unmute');
+      if (control && typeof control.click === 'function') control.click();
+    };
+    for (const name of ['playing', 'volumechange', 'loadeddata']) {
+      document.addEventListener(name, giveSound, true);
+    }
+    setInterval(giveSound, 500);
   }
   // WebView can reinject after an SPA navigation. Reuse MediaElementAudioSource
   // ownership: creating a second source for the same element is not supported.

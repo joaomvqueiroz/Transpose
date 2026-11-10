@@ -32,6 +32,38 @@ String youtubeAppearanceScript(StudioAppearanceMode mode) {
       root.setAttribute('data-transpono-theme', desired);
       root.toggleAttribute('dark', dark);
       root.style.colorScheme = desired;
+      // YouTube keeps its own "Aparência" choice in the PREF cookie (f6, hex
+      // flags: 0x400 dark, 0x80000 light). When it disagrees with the app,
+      // YouTube renders the other theme and the overrides below only repaint
+      // part of it (white panels in dark, unreadable text). Make the cookie
+      // follow the app, and reload once unless a video is playing.
+      try {
+        const found = document.cookie.match(/(?:^|; )PREF=([^;]*)/);
+        const parts = found ? found[1].split('&').filter(Boolean) : [];
+        let seen = false;
+        const next = parts.map(part => {
+          if (part.indexOf('f6=') !== 0) return part;
+          seen = true;
+          const flags = parseInt(part.slice(3), 16) || 0;
+          const want = dark
+            ? ((flags & ~0x80000) | 0x400)
+            : ((flags & ~0x400) | 0x80000);
+          return 'f6=' + (want >>> 0).toString(16);
+        });
+        if (!seen) next.unshift('f6=' + (dark ? '400' : '80000'));
+        const value = next.join('&');
+        if (!found || found[1] !== value) {
+          document.cookie = 'PREF=' + value +
+            '; domain=.youtube.com; path=/; max-age=63072000; secure';
+          const written = document.cookie.match(/(?:^|; )PREF=([^;]*)/);
+          const video = document.querySelector('video.html5-main-video');
+          const playing = !!video && !video.paused && !video.ended;
+          if (written && written[1] === value && !playing) {
+            location.reload();
+            return;
+          }
+        }
+      } catch (_) {}
       for (const app of document.querySelectorAll('ytm-app, ytd-app')) {
         app.toggleAttribute('dark', dark);
       }
@@ -888,6 +920,12 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
     }
+    if (!browseOnly) {
+      pageUnmutePrompt.value =
+          _native == null &&
+          state['hasVideo'] == true &&
+          state['muted'] == true;
+    }
     // Each request carries a counter (per page); act on a new one once.
     final Object? minimizeSeq = state['minimizeSeq'];
     if (minimizeSeq is num && minimizeSeq.toInt() != _minimizeSeq) {
@@ -976,6 +1014,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     try {
       await controller.runJavaScript(
         'window.__transponoBrowseOnly = $browseOnly;'
+        'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'
         'window.__transponoAppMiniSurface = $appMiniSurface;'
         'if (window.__transponoSetAppMiniSurface) {'
@@ -1208,6 +1247,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   void dispose() {
     pageInputFocused.value = false;
     pageScrolledDown.value = false;
+    if (!browseOnly) pageUnmutePrompt.value = false;
     _disposed = true;
     _timer?.cancel();
     if (_native case final native?) native.dispose();

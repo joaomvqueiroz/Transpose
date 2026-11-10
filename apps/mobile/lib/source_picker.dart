@@ -115,6 +115,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
               pageInputFocused,
               adjustmentsCoverScreen,
               pictureInPictureShown,
+              pageUnmutePrompt,
             ]),
             builder: (context, child) => IgnorePointer(
               ignoring: hideHomeButton,

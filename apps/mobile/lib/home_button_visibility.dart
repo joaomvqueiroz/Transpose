@@ -14,8 +14,13 @@ final ValueNotifier<bool> pageScrolledDown = ValueNotifier<bool>(false);
 /// video). Mirrors `inPictureInPicture` (picture_in_picture.dart).
 final ValueNotifier<bool> pictureInPictureShown = ValueNotifier<bool>(false);
 
+/// YouTube shows its "Toque para ativar o som" button over the video (a muted
+/// start): the start-screen button sits in the same corner and gives way.
+final ValueNotifier<bool> pageUnmutePrompt = ValueNotifier<bool>(false);
+
 /// The floating "back to the start screen" button hides in these cases.
 bool get hideHomeButton =>
     pageInputFocused.value ||
     adjustmentsCoverScreen.value ||
-    pictureInPictureShown.value;
+    pictureInPictureShown.value ||
+    pageUnmutePrompt.value;
