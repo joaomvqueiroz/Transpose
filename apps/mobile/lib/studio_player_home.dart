@@ -2027,7 +2027,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ],
           ),
-        if (_player.message != null)
+        // Two pages: the player's notices belong to the player page; here
+        // they would push the browse page down.
+        if (_player.message != null && !_twoPages)
           Padding(
             padding: const EdgeInsets.all(8),
             child: Text(_player.message!),

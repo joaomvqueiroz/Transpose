@@ -117,6 +117,18 @@
       html.tp-tabs-on ytm-feed-filter-chip-bar-renderer { visibility: hidden !important; }
       html.tp-tabs-on.tp-tabs-pad .page-container { padding-top: 48px !important; }
       html.transpono-bars-away .tp-tabs { transform: translateY(-110px) !important; }
+      html.tp-shorts.tp-shorts ytm-mobile-topbar-renderer#header-bar,
+      html.tp-shorts.tp-shorts ytm-mobile-topbar-renderer#header-bar header {
+        background: transparent !important; box-shadow: none !important;
+        border: 0 !important;
+      }
+      html.tp-shorts ytm-mobile-topbar-renderer#header-bar header,
+      html.tp-shorts ytm-mobile-topbar-renderer#header-bar header * {
+        color: #fff !important;
+      }
+      html.tp-shorts ytm-mobile-topbar-renderer#header-bar svg {
+        filter: drop-shadow(0 0 2px rgba(0, 0, 0, .7));
+      }
       /* Subscriptions page: the row of channels like the YouTube app's,
          larger pictures with the channel's name under each, and the word
          "all" instead of an arrow. */
@@ -731,11 +743,15 @@
   function pageBars() {
     if (!plainYouTube()) return null;
     try {
-      // iPhone (the app's Gecko engine there, or any iOS browser engine).
+      // iPhone: the app says so (its engine there does not show it in the
+      // page); any iOS browser's own name counts too.
       const agent = navigator.userAgent || '';
       document.documentElement.classList.toggle('tp-ios',
-        /iPhone|iPad|iPod/.test(agent) ||
-        (typeof window.wrappedJSObject !== 'undefined' && !/Android/.test(agent)));
+        window.__transponoIOS === true || /iPhone|iPad|iPod/.test(agent));
+      // The Shorts page: the site's top bar floats over the video, with no
+      // band of its own, like in the YouTube app.
+      document.documentElement.classList.toggle('tp-shorts',
+        /^\/shorts(\/|$)/.test(window.location.pathname));
       ensureTopTabs();
       dressLibraryPage();
       shortsQuality();

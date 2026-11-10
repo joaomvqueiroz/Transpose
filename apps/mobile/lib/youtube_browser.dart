@@ -1079,6 +1079,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (_disposed) return;
     try {
       await controller.runJavaScript(
+        'window.__transponoIOS = '
+        '${defaultTargetPlatform == TargetPlatform.iOS};'
         'window.__transponoBrowseOnly = $browseOnly;'
         'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'
