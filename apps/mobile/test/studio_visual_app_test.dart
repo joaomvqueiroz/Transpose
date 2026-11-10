@@ -85,8 +85,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('appearanceModelight')));
     await tester.tap(find.byKey(const Key('appearanceModelight')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('unifiedSectionpractice')));
     await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
     await tester.pumpAndSettle();
     final lightPitch = tester.widget<Container>(
@@ -292,9 +294,15 @@ void main() {
   Future<void> tap(WidgetTester tester, String key) async {
     if (key == 'visualPlayerMenu') return;
     if (key.startsWith('unifiedSection') &&
+        key != 'unifiedSectionsetlist' &&
         find.byKey(Key(key)).evaluate().isEmpty) {
       await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
+    }
+    // The setlist is reached through the "Mais" tab.
+    if (key == 'unifiedSectionsetlist' &&
+        find.byKey(Key(key)).evaluate().isEmpty) {
+      await tap(tester, 'unifiedSectionappearanceSettings');
     }
     await tester.ensureVisible(find.byKey(Key(key)));
     await tester.tap(find.byKey(Key(key)));
@@ -388,10 +396,16 @@ void main() {
     expect(find.byKey(const Key('unifiedPitchUp')), findsOneWidget);
     for (final name in ['practice', 'chords', 'setlist']) {
       await tap(tester, 'unifiedSection$name');
-      expect(find.byKey(Key('unifiedSection$name')), findsOneWidget);
+      // The setlist has no tab of its own: it opens from "Mais".
+      expect(
+        find.byKey(
+          Key(name == 'setlist' ? 'unifiedSetlist' : 'unifiedSection$name'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);
     }
-    expect(find.byKey(const Key('unifiedSectionsetlist')), findsOneWidget);
+    expect(find.byKey(const Key('unifiedSetlist')), findsOneWidget);
     await tap(tester, 'visualMainAdjustments');
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     expect(find.byKey(const Key('unifiedSectionpractice')), findsNothing);

@@ -2342,7 +2342,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                               ? const Color(0xB8F4F7FB)
                                               : const Color(0x8C17191E))
                                         : _background,
-                                    child: _sectionContent(media),
+                                    // Nothing scrolls under the grabber's
+                                    // band.
+                                    child: Padding(
+                                      padding: EdgeInsets.only(
+                                        top: sheet ? 14 : 0,
+                                      ),
+                                      child: _sectionContent(media),
+                                    ),
                                   ),
                           ),
                         ),
@@ -2371,30 +2378,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           left: 0,
                           right: 0,
                           child: Center(
+                            // Dragging down anywhere on the band closes;
+                            // a tap closes only on the grabber itself, so
+                            // controls scrolled under the band still work.
                             child: GestureDetector(
-                              key: const Key('adjustmentsGrabber'),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: _toggleMainAdjustments,
+                              behavior: HitTestBehavior.translucent,
                               onVerticalDragEnd: (details) {
                                 if ((details.primaryVelocity ?? 0) > 120) {
                                   _toggleMainAdjustments();
                                 }
                               },
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  40,
-                                  5,
-                                  40,
-                                  9,
-                                ),
-                                child: Container(
-                                  width: 36,
-                                  height: 5,
-                                  decoration: BoxDecoration(
-                                    color: light
-                                        ? const Color(0x66000000)
-                                        : const Color(0x80FFFFFF),
-                                    borderRadius: BorderRadius.circular(3),
+                              child: Container(
+                                width: double.infinity,
+                                height: 20,
+                                alignment: Alignment.center,
+                                child: GestureDetector(
+                                  key: const Key('adjustmentsGrabber'),
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: _toggleMainAdjustments,
+                                  child: Container(
+                                    width: 96,
+                                    height: 20,
+                                    alignment: Alignment.center,
+                                    child: Container(
+                                      width: 36,
+                                      height: 5,
+                                      decoration: BoxDecoration(
+                                        color: light
+                                            ? const Color(0x66000000)
+                                            : const Color(0x80FFFFFF),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2413,11 +2428,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   static const _visibleTabs = <(StudioTab, String)>[
-    (StudioTab.chords, 'Cifra'),
+    // Tone (with the chord sheet that follows it), practice, sound, and
+    // "more": the setlist and the app's settings.
+    (StudioTab.chords, 'Tom'),
     (StudioTab.practice, 'Treino'),
-    (StudioTab.setlist, 'Setlist'),
     (StudioTab.audioSettings, 'Áudio'),
-    (StudioTab.appearanceSettings, 'Config.'),
+    (StudioTab.appearanceSettings, 'Mais'),
   ];
 
   Widget _coveredVideoTransport(double availableHeight) {
@@ -2537,9 +2553,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Widget _sectionTabs() {
-    final selected = _tab == StudioTab.player ? StudioTab.chords : _tab;
+    final selected = _tab == StudioTab.player
+        ? StudioTab.chords
+        : _tab == StudioTab.setlist
+        ? StudioTab.appearanceSettings
+        : _tab;
+    // The floating sheet keeps a band at its top for the grabber.
+    // The chord tab scrolls as one piece, so its tabs make the room; the
+    // other tabs get it from the sheet itself.
+    final sheet =
+        !_adjustmentsCoverVideo &&
+        !_isLandscapePlayer &&
+        (_tab == StudioTab.chords || _tab == StudioTab.player);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      margin: EdgeInsets.fromLTRB(16, sheet ? 20 : 8, 16, 8),
       padding: const EdgeInsets.all(4),
       decoration: studioPanelDecoration(
         radius: 26,
@@ -2589,7 +2616,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                               StudioTab.practice => Icons.graphic_eq,
                               StudioTab.setlist => Icons.queue_music,
                               StudioTab.audioSettings => Icons.equalizer,
-                              StudioTab.appearanceSettings => Icons.tune,
+                              StudioTab.appearanceSettings => Icons.more_horiz,
                               _ => Icons.music_note_outlined,
                             }, size: 12),
                             const SizedBox(width: 3),
@@ -2812,6 +2839,41 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           child: Column(
             children: [
               _sectionTabs(),
+              // "More" opens with the way into the setlist.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton(
+                    key: const Key('unifiedSectionsetlist'),
+                    onPressed: () => _select(StudioTab.setlist),
+                    style: OutlinedButton.styleFrom(
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(26),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.queue_music, size: 20),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Setlist',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Icon(Icons.chevron_right, size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: _appearanceSettingsContent(),
@@ -3204,11 +3266,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       child: PopScope(
         canPop:
             !_browsing &&
+            !(_mainControlsExpanded && !_isLandscapePlayer) &&
             !(_twoPages && _player.loaded) &&
             pageYouTubeBars.value?.searching != true,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
           final browse = _browse;
+          // The adjustments sheet is open: back closes it (it has no close
+          // button; the grabber does the same).
+          if (!_browsing && _mainControlsExpanded && !_isLandscapePlayer) {
+            _toggleMainAdjustments();
+            return;
+          }
           // The site's search is open: back closes it first.
           if (pageYouTubeBars.value?.searching == true) {
             final session = _browsing
@@ -3265,37 +3334,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           ],
                         ),
                       ),
-                      if (!landscapePlayer &&
-                          _mainControlsExpanded &&
-                          !_adjustmentsCoverVideo)
-                        Positioned(
-                          bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
-                          left: 0,
-                          right: 0,
-                          child: Center(
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 180),
-                              transitionBuilder: (child, animation) =>
-                                  FadeTransition(
-                                    opacity: animation,
-                                    child: ScaleTransition(
-                                      scale: animation,
-                                      child: child,
-                                    ),
-                                  ),
-                              child: _closeCompact
-                                  ? _CompactCloseAdjustments(
-                                      key: const ValueKey('compactClose'),
-                                      onPressed: _toggleMainAdjustments,
-                                    )
-                                  : _MainAdjustmentsBar(
-                                      key: const ValueKey('fullClose'),
-                                      expanded: true,
-                                      onPressed: _toggleMainAdjustments,
-                                    ),
-                            ),
-                          ),
-                        ),
                       if ((landscapePlayer && !_landscapeColumnsVisible) ||
                           (!landscapePlayer && !_mainControlsExpanded))
                         Positioned(

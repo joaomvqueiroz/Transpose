@@ -57,7 +57,7 @@ void main() {
       find.byKey(const Key('visualMainAdjustmentsBackdrop')),
       findsNothing,
     );
-    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
+    expect(find.byKey(const Key('adjustmentsGrabber')), findsOneWidget);
     expect(
       tester
           .widget<IconButton>(find.byKey(const Key('visualMainAdjustments')))
@@ -201,6 +201,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getSize(surface).height, closedHeight);
     for (final section in ['practice', 'chords', 'setlist']) {
+      // The setlist is reached through the "Mais" tab.
+      if (section == 'setlist') {
+        await tester.tap(
+          find.byKey(const Key('unifiedSectionappearanceSettings')),
+        );
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(Key('unifiedSection$section')));
+      }
       await tester.tap(find.byKey(Key('unifiedSection$section')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('visualMainMediaViewport')), findsOneWidget);

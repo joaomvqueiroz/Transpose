@@ -32,7 +32,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('visualOpenAdjustmentsCompact')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
+    expect(find.byKey(const Key('adjustmentsGrabber')), findsOneWidget);
     pageScrolledDown.value = false;
     await tester.pumpAndSettle();
   });
@@ -74,7 +74,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedYouTubeSearch')), findsNothing);
     expect(find.byKey(const Key('unifiedFullscreen')), findsNothing);
-    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
+    expect(find.byKey(const Key('adjustmentsGrabber')), findsOneWidget);
     expect(find.byKey(const Key('unifiedMore')), findsNothing);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
@@ -226,12 +226,20 @@ void main() {
     final mediaHeight = tester.getSize(viewport).height;
     final strip = find.byKey(const Key('unifiedSectionStrip'));
     final stripRect = tester.getRect(strip);
-    for (final tab in ['chords', 'practice', 'setlist', 'audioSettings']) {
+    for (final tab in [
+      'chords',
+      'practice',
+      'audioSettings',
+      'appearanceSettings',
+    ]) {
       final rect = tester.getRect(find.byKey(Key('unifiedSection$tab')));
       expect(rect.left, greaterThanOrEqualTo(stripRect.left));
       expect(rect.right, lessThanOrEqualTo(stripRect.right));
     }
     expect(tester.takeException(), isNull);
+    // The setlist is reached through the "Mais" tab.
+    await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('unifiedSectionsetlist')));
     await tester.tap(find.byKey(const Key('unifiedSectionsetlist')));
     await tester.pumpAndSettle();
