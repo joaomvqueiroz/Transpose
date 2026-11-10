@@ -51,6 +51,14 @@ abstract final class GlassBar {
     }
   }
 
+  /// Shakes one of the bar's buttons: "not now".
+  static void shake(String name) {
+    if (!nativeGlassBar.value) return;
+    unawaited(
+      _channel.invokeMethod<void>('shake', name).catchError((Object _) {}),
+    );
+  }
+
   static void update({
     required bool visible,
     String selected = '',

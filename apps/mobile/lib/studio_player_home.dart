@@ -407,6 +407,14 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _syncPageRoles();
   }
 
+  /// The bar's adjustments button: there is nothing to adjust before a
+  /// video is chosen, so it only opens with one (false: the button shakes).
+  bool _openAdjustmentsFromBar() {
+    if (!_player.loaded) return false;
+    _finishExpandMini(openAdjustments: true);
+    return true;
+  }
+
   /// The mini player's "x": the video pauses and the small window goes away.
   void _closeMini() {
     _miniControlsTimer?.cancel();
@@ -1783,8 +1791,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     // One eighth smaller than the first size (58% of the width, 220 to 280).
     // The page itself keeps its full size and is only drawn smaller, so
     // YouTube's player never sees a width below its 220 px minimum.
-    final double width = (screen.width * .58).clamp(220.0, 280.0) * 7 / 8;
-    final double height = width * 9 / 16;
+    // A little narrower than 16:9: with the slight zoom of the picture (see
+    // _miniPlayer) the sides are trimmed instead of leaving dark bands.
+    final double full = (screen.width * .58).clamp(220.0, 280.0) * 7 / 8;
+    final double width = full * .95;
+    final double height = full * 9 / 16;
     final Offset fallback = Offset(
       screen.width - width - 12,
       screen.height - padding.bottom - 76 - height,
@@ -1902,7 +1913,17 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       onEnd: _miniMoveEnded,
       builder: (context, animated, _) {
         final Rect rect = animated ?? target;
-        final double scale = rect.width / screen.width;
+        // The picture fills the window's height with a slight zoom (none at
+        // full size), centred, so a video's own dark bands fall outside.
+        final double smallNow =
+            ((full.width - rect.width) / (full.width - mini.width)).clamp(
+              0.0,
+              1.0,
+            );
+        final double scale =
+            rect.height / (screen.width * 9 / 16) * (1 + .07 * smallNow);
+        final double shiftX = (rect.width - screen.width * scale) / 2;
+        final double shiftY = (rect.height - screen.width * 9 / 16 * scale) / 2;
         // 0 at full size, 1 as the small window: corners, shadow and the
         // two buttons come in with it.
         final double small =
@@ -1956,7 +1977,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           maxHeight: screen.height,
                           child: Transform(
                             alignment: Alignment.topLeft,
-                            transform: Matrix4.diagonal3Values(scale, scale, 1),
+                            transform: Matrix4.identity()
+                              ..translateByDouble(shiftX, shiftY, 0, 1)
+                              ..scaleByDouble(scale, scale, 1, 1),
                             child: SizedBox.fromSize(
                               size: screen,
                               child: media,
@@ -1969,8 +1992,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   // Like the YouTube app's mini player: only pause on the
                   // left and close on the right.
                   Positioned(
-                    top: 4,
-                    left: 4,
+                    top: 9,
+                    left: 11,
                     child: Opacity(
                       opacity: small,
                       child: _MiniPlayerButton(
@@ -1988,8 +2011,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     ),
                   ),
                   Positioned(
-                    top: 4,
-                    right: 4,
+                    top: 9,
+                    right: 11,
                     child: Opacity(
                       opacity: small,
                       child: _MiniPlayerButton(
@@ -2108,8 +2131,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       widthFactor: x == null ? null : 1,
                       child: _BarAdjustmentsButton(
                         dark: bars.dark,
-                        onPressed: () =>
-                            _finishExpandMini(openAdjustments: true),
+                        onPressed: () => _openAdjustmentsFromBar(),
                       ),
                     ),
                   );
@@ -2170,7 +2192,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           _GlassBarHost(
             onTap: (name) {
               if (name == 'adjust') {
-                _finishExpandMini(openAdjustments: true);
+                if (!_openAdjustmentsFromBar()) GlassBar.shake('adjust');
               } else {
                 unawaited(_browse?.openTab(name));
               }
@@ -2191,7 +2213,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             // iPhone's glass bar floats here: only its dark strip is kept.
             if (nativeGlassBar.value) {
               return Container(
-                height: 68,
+                height: 62,
                 color: bars!.dark ? const Color(0xFF0F0F0F) : Colors.white,
               );
             }
@@ -2200,7 +2222,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               avatar: bars.avatar,
               onHome: () => open('/'),
               onYou: () => open('/feed/library'),
-              onAdjustments: () => _finishExpandMini(openAdjustments: true),
+              onAdjustments: _openAdjustmentsFromBar,
             );
           },
         ),
@@ -3520,7 +3542,7 @@ class _ShortsBottomBar extends StatelessWidget {
   final String avatar;
   final VoidCallback onHome;
   final VoidCallback onYou;
-  final VoidCallback onAdjustments;
+  final bool Function() onAdjustments;
 
   @override
   Widget build(BuildContext context) {
@@ -3714,25 +3736,70 @@ class _MiniPlayerButton extends StatelessWidget {
 /// The adjustments button inside YouTube's bottom bar, in the slot where
 /// the YouTube app has its "+": a plain sliders icon, the size of the bar's
 /// own icons (no ring around it, and it does not change).
-class _BarAdjustmentsButton extends StatelessWidget {
+class _BarAdjustmentsButton extends StatefulWidget {
   const _BarAdjustmentsButton({required this.dark, required this.onPressed});
 
   final bool dark;
-  final VoidCallback onPressed;
+
+  /// Returns false when there is nothing to open (no video chosen yet): the
+  /// button then shakes quickly from side to side, like a "no".
+  final bool Function() onPressed;
+
+  @override
+  State<_BarAdjustmentsButton> createState() => _BarAdjustmentsButtonState();
+}
+
+class _BarAdjustmentsButtonState extends State<_BarAdjustmentsButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _no = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 320),
+  );
+  late final Animation<double> _offset = TweenSequence<double>([
+    for (final (double from, double to) in const [
+      (0.0, -7.0),
+      (-7.0, 7.0),
+      (7.0, -5.0),
+      (-5.0, 5.0),
+      (5.0, -2.0),
+      (-2.0, 0.0),
+    ])
+      TweenSequenceItem(
+        tween: Tween(begin: from, end: to),
+        weight: 1,
+      ),
+  ]).animate(_no);
+
+  @override
+  void dispose() {
+    _no.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => SizedBox(
     width: 44,
     height: 44,
-    child: IconButton(
-      key: const Key('barOpenAdjustments'),
-      tooltip: 'Abrir ajustes',
-      onPressed: onPressed,
-      padding: EdgeInsets.zero,
-      icon: Icon(
-        Icons.tune_rounded,
-        size: 28,
-        color: dark ? const Color(0xFFF1F1F1) : const Color(0xFF0F0F0F),
+    child: AnimatedBuilder(
+      animation: _offset,
+      builder: (context, child) =>
+          Transform.translate(offset: Offset(_offset.value, 0), child: child),
+      child: IconButton(
+        key: const Key('barOpenAdjustments'),
+        tooltip: 'Abrir ajustes',
+        onPressed: () {
+          if (widget.onPressed()) return;
+          unawaited(HapticFeedback.lightImpact());
+          unawaited(_no.forward(from: 0));
+        },
+        padding: EdgeInsets.zero,
+        icon: Icon(
+          Icons.tune_rounded,
+          size: 28,
+          color: widget.dark
+              ? const Color(0xFFF1F1F1)
+              : const Color(0xFF0F0F0F),
+        ),
       ),
     ),
   );

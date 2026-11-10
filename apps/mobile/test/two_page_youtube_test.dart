@@ -330,9 +330,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // No video chosen yet: there is nothing to adjust, so the button
+      // only shakes and the browse page stays.
       await tester.tap(button);
       await tester.pumpAndSettle();
-      expect(find.text('Página de pesquisa'), findsNothing);
+      expect(find.text('Página de pesquisa'), findsOneWidget);
+      expect(button, findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

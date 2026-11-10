@@ -64,6 +64,9 @@ final class TransponoGlassBar: NSObject {
       case "update":
         self?.update(call.arguments as? [String: Any] ?? [:])
         result(nil)
+      case "shake":
+        self?.shake(call.arguments as? String ?? "")
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -73,7 +76,7 @@ final class TransponoGlassBar: NSObject {
   private func setIcons(_ icons: [String: Any]) {
     for (name, value) in icons {
       guard let data = (value as? FlutterStandardTypedData)?.data,
-        let image = UIImage(data: data, scale: 3)
+        let image = UIImage(data: data, scale: 3.6)
       else { continue }
       shorts[name] = image.withRenderingMode(.alwaysTemplate)
     }
@@ -112,6 +115,8 @@ final class TransponoGlassBar: NSObject {
   private func build(in window: UIWindow) {
     let effect = UIGlassEffect(style: .regular)
     effect.isInteractive = true
+    // Still glass, with a light touch of black.
+    effect.tintColor = UIColor.black.withAlphaComponent(0.28)
     let glass = UIVisualEffectView(effect: effect)
     glass.translatesAutoresizingMaskIntoConstraints = false
     glass.cornerConfiguration = .capsule()
@@ -120,10 +125,10 @@ final class TransponoGlassBar: NSObject {
     window.addSubview(glass)
     let safe = window.safeAreaLayoutGuide
     NSLayoutConstraint.activate([
-      glass.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: 24),
-      glass.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -24),
+      glass.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: 34),
+      glass.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -34),
       glass.bottomAnchor.constraint(equalTo: safe.bottomAnchor, constant: -10),
-      glass.heightAnchor.constraint(equalToConstant: 52),
+      glass.heightAnchor.constraint(equalToConstant: 46),
     ])
     let row = UIStackView()
     row.axis = .horizontal
@@ -133,15 +138,15 @@ final class TransponoGlassBar: NSObject {
     glass.contentView.addSubview(row)
     glass.contentView.isUserInteractionEnabled = true
     NSLayoutConstraint.activate([
-      row.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 5),
-      row.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -5),
-      row.topAnchor.constraint(equalTo: glass.contentView.topAnchor, constant: 5),
-      row.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -5),
+      row.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 4),
+      row.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -4),
+      row.topAnchor.constraint(equalTo: glass.contentView.topAnchor, constant: 4),
+      row.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -4),
     ])
     for name in TransponoGlassBar.names {
       let button = UIButton(type: .system)
       button.tintColor = .label
-      button.layer.cornerRadius = 21
+      button.layer.cornerRadius = 19
       button.layer.cornerCurve = .continuous
       button.imageView?.contentMode = .scaleAspectFit
       button.addAction(
@@ -156,7 +161,7 @@ final class TransponoGlassBar: NSObject {
   private func symbol(_ name: String) -> UIImage? {
     UIImage(
       systemName: name,
-      withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .medium))
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium))
   }
 
   private func refreshIcons() {
@@ -172,11 +177,21 @@ final class TransponoGlassBar: NSObject {
     }
   }
 
+  /// A quick side-to-side shake of one button: "not now".
+  private func shake(_ name: String) {
+    guard let button = buttons[name] else { return }
+    let wobble = CAKeyframeAnimation(keyPath: "transform.translation.x")
+    wobble.values = [0, -7, 7, -5, 5, -2, 0]
+    wobble.duration = 0.32
+    button.layer.add(wobble, forKey: "shake")
+    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+  }
+
   private func loadAvatar(_ text: String) {
     guard let url = URL(string: text), url.scheme == "https" else { return }
     URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
       guard let data = data, let image = UIImage(data: data) else { return }
-      let side: CGFloat = 28
+      let side: CGFloat = 24
       let round = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
         let box = CGRect(x: 0, y: 0, width: side, height: side)
         UIBezierPath(ovalIn: box).addClip()
