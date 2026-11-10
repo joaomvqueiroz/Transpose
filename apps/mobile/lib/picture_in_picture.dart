@@ -15,6 +15,10 @@ abstract final class PictureInPicture {
   static bool _listening = false;
   static bool? _playing;
 
+  /// A button of the small window was pressed: "play" (play or pause),
+  /// "back" or "forward" (10 seconds).
+  static void Function(String name)? onAction;
+
   static bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -25,6 +29,8 @@ abstract final class PictureInPicture {
       if (call.method == 'pipChanged') {
         inPictureInPicture.value = call.arguments == true;
         pictureInPictureShown.value = inPictureInPicture.value;
+      } else if (call.method == 'pipAction' && call.arguments is String) {
+        onAction?.call(call.arguments as String);
       }
       return null;
     });

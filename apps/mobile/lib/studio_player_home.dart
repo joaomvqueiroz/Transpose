@@ -133,6 +133,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
     inPictureInPicture.addListener(_pipChanged);
+    PictureInPicture.onAction = _pipButton;
     final browseFactory = widget.browseSessionFactory;
     if (browseFactory != null && widget.playerController == null) {
       final browse = browseFactory()
@@ -418,6 +419,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     });
   }
 
+  /// The small window's buttons: the same actions as the home-screen
+  /// widget's (play or pause, back and forward 10 seconds).
+  void _pipButton(String name) => unawaited(_runWidgetAction(name));
+
   void _pipChanged() {
     // In the system's small window the page shows only the video, from its
     // top-left corner (the same page mode as the app's mini player), so the
@@ -689,6 +694,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     WidgetsBinding.instance.removeObserver(this);
     _player.removeListener(_changed);
     inPictureInPicture.removeListener(_pipChanged);
+    if (PictureInPicture.onAction == _pipButton) {
+      PictureInPicture.onAction = null;
+    }
     unawaited(PictureInPicture.setVideoPlaying(false));
     _browse?.removeListener(_browseChanged);
     _browse?.dispose();

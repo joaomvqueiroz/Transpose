@@ -5,7 +5,10 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.graphics.drawable.Icon
 import android.content.res.Configuration
 import android.os.Build
 import android.util.Rational
@@ -38,6 +41,17 @@ class MainActivity : FlutterActivity() {
     private var pipChannel: MethodChannel? = null
     private var videoPlaying = false
 
+    // The small window's own buttons (back 10 s, play or pause, forward
+    // 10 s): each is a broadcast that goes on to the Dart side.
+    private val pipButtons = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val name = intent?.getStringExtra(PIP_BUTTON) ?: return
+            pipChannel?.invokeMethod("pipAction", name)
+        }
+    }
+    private var pipButtonsRegistered = false
+    private var inPip = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         if (packageName == "com.example.transpose_mobile.qa") {
@@ -59,7 +73,8 @@ class MainActivity : FlutterActivity() {
             it.setMethodCallHandler { call, result ->
                 if (call.method == "setVideoPlaying") {
                     videoPlaying = call.arguments == true
-                    if (Build.VERSION.SDK_INT >= 31) {
+                    // Also on older systems: the play/pause button follows.
+                    if (Build.VERSION.SDK_INT >= 26) {
                         setPictureInPictureParams(pipParams())
                     }
                     result.success(null)
@@ -74,6 +89,10 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(bandNoisy, filter, Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(bandNoisy, filter)
         bandNoisyRegistered = true
+        val pipFilter = IntentFilter(PIP_ACTION)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(pipButtons, pipFilter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(pipButtons, pipFilter)
+        pipButtonsRegistered = true
         processingProbe = Media3ChannelPlayer(
             this, flutterEngine.dartExecutor.binaryMessenger,
             "transpose/native_processing_probe",
@@ -113,6 +132,7 @@ class MainActivity : FlutterActivity() {
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         if (bandNoisyRegistered) { unregisterReceiver(bandNoisy); bandNoisyRegistered = false }
+        if (pipButtonsRegistered) { unregisterReceiver(pipButtons); pipButtonsRegistered = false }
         bandAudio?.close()
         bandAudio = null
         qaBandAcoustic?.close()
@@ -139,9 +159,25 @@ class MainActivity : FlutterActivity() {
     }
 
     @RequiresApi(26)
+    private fun pipButton(name: String, icon: Int, title: String, code: Int): RemoteAction {
+        val intent = Intent(PIP_ACTION).setPackage(packageName).putExtra(PIP_BUTTON, name)
+        val pending = PendingIntent.getBroadcast(
+            this, code, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return RemoteAction(Icon.createWithResource(this, icon), title, title, pending)
+    }
+
     private fun pipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
-        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(videoPlaying)
+        builder.setActions(
+            listOf(
+                pipButton("back", android.R.drawable.ic_media_rew, "Voltar 10 segundos", 1),
+                if (videoPlaying) pipButton("play", android.R.drawable.ic_media_pause, "Pausar", 2)
+                else pipButton("play", android.R.drawable.ic_media_play, "Reproduzir", 3),
+                pipButton("forward", android.R.drawable.ic_media_ff, "Avançar 10 segundos", 4),
+            ),
+        )
+        if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(videoPlaying || inPip)
         return builder.build()
     }
 
@@ -159,6 +195,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(inPip, newConfig)
+        this.inPip = inPip
         pipChannel?.invokeMethod("pipChanged", inPip)
+    }
+
+    companion object {
+        private const val PIP_ACTION = "com.example.transpose_mobile.PIP_BUTTON"
+        private const val PIP_BUTTON = "name"
     }
 }
