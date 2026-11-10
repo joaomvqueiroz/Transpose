@@ -40,6 +40,10 @@ typedef YouTubeBars = ({
   bool dark,
 });
 
+/// The home-screen search widget was tapped: the YouTube page opens its
+/// search field as soon as it is ready (set back to false when done).
+final ValueNotifier<bool> pendingPageSearch = ValueNotifier<bool>(false);
+
 /// Taps on the start-screen icon the page draws in its own top bar
 /// ([YouTubeBars.homeInPage]): each one adds one.
 final ValueNotifier<int> pageHomeRequests = ValueNotifier<int>(0);

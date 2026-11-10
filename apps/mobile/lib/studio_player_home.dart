@@ -3258,6 +3258,29 @@ class _ShortsBottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color ink = dark ? const Color(0xFFF1F1F1) : const Color(0xFF0F0F0F);
+    // iPhone: a floating pill on a dark strip, like the YouTube app there;
+    // the page being shown (Shorts) stands on a lighter patch.
+    final bool pill = Platform.isIOS;
+    final Widget row = _row(ink, pill);
+    if (pill) {
+      return Container(
+        key: const Key('shortsBottomBar'),
+        color: dark ? const Color(0xFF0F0F0F) : Colors.white,
+        padding: const EdgeInsets.fromLTRB(24, 6, 24, 10),
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: dark ? const Color(0xFF121212) : const Color(0xFFF7F7F7),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(
+              color: dark ? const Color(0x1FFFFFFF) : const Color(0x1F000000),
+            ),
+          ),
+          child: row,
+        ),
+      );
+    }
     return Container(
       key: const Key('shortsBottomBar'),
       height: 48,
@@ -3269,59 +3292,66 @@ class _ShortsBottomBar extends StatelessWidget {
           ),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _BarShapeButton(
-              key: const Key('shortsBarHome'),
-              tooltip: 'Início',
-              shape: _homeOutlineIconPath(),
-              color: ink,
-              onPressed: onHome,
-            ),
-          ),
-          Expanded(
-            child: _BarShapeButton(
-              tooltip: 'Shorts',
-              shape: _shortsFilledIconPath(),
-              color: ink,
-              onPressed: null,
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: _BarAdjustmentsButton(
-                dark: dark,
-                onPressed: onAdjustments,
-              ),
-            ),
-          ),
-          Expanded(
-            child: IconButton(
-              key: const Key('shortsBarYou'),
-              tooltip: 'Você',
-              onPressed: onYou,
-              icon: avatar.isEmpty
-                  ? Icon(Icons.account_circle_outlined, size: 28, color: ink)
-                  : ClipOval(
-                      child: Image.network(
-                        avatar,
-                        width: 26,
-                        height: 26,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stack) => Icon(
-                          Icons.account_circle_outlined,
-                          size: 28,
-                          color: ink,
-                        ),
-                      ),
-                    ),
-            ),
-          ),
-        ],
-      ),
+      child: row,
     );
   }
+
+  Widget _row(Color ink, bool pill) => Row(
+    children: [
+      Expanded(
+        child: _BarShapeButton(
+          key: const Key('shortsBarHome'),
+          tooltip: 'Início',
+          shape: _homeOutlineIconPath(),
+          color: ink,
+          onPressed: onHome,
+        ),
+      ),
+      Expanded(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: pill
+                ? (dark ? const Color(0x29FFFFFF) : const Color(0x1A000000))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(21),
+          ),
+          child: _BarShapeButton(
+            tooltip: 'Shorts',
+            shape: _shortsFilledIconPath(),
+            color: ink,
+            onPressed: null,
+          ),
+        ),
+      ),
+      Expanded(
+        child: Center(
+          child: _BarAdjustmentsButton(dark: dark, onPressed: onAdjustments),
+        ),
+      ),
+      Expanded(
+        child: IconButton(
+          key: const Key('shortsBarYou'),
+          tooltip: 'Você',
+          onPressed: onYou,
+          icon: avatar.isEmpty
+              ? Icon(Icons.account_circle_outlined, size: 28, color: ink)
+              : ClipOval(
+                  child: Image.network(
+                    avatar,
+                    width: 26,
+                    height: 26,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stack) => Icon(
+                      Icons.account_circle_outlined,
+                      size: 28,
+                      color: ink,
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    ],
+  );
 }
 
 /// A bar icon drawn from a shape of the site's own icon set (24 x 24 box).

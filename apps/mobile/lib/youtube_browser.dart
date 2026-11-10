@@ -929,6 +929,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
       pageYouTubeBars.value = youTubeBarsFromState(state['bars']);
+      if (pendingPageSearch.value && pageYouTubeBars.value?.topFree == true) {
+        pendingPageSearch.value = false;
+        unawaited(_openPageSearch());
+      }
     }
     if (!browseOnly) {
       pageUnmutePrompt.value =
@@ -1009,6 +1013,25 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final native = _native;
       if (native != null) unawaited(native.sync(_media));
       if (state['restoreReady'] == true) _pauseOnReadyVideoId = null;
+    }
+  }
+
+  /// Opens the site's search field (the home-screen search widget).
+  Future<void> _openPageSearch() async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript('''(() => {
+          const button = document.querySelector(
+            'ytm-mobile-topbar-renderer .topbar-button-search-button');
+          if (button) button.click();
+          setTimeout(() => {
+            const field = document.querySelector(
+              'ytm-mobile-topbar-renderer input.ytSearchboxComponentInput');
+            if (field) field.focus();
+          }, 300);
+        })()''');
+    } on Object {
+      // The page changed meanwhile: the search icon is still there to tap.
     }
   }
 

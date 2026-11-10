@@ -72,6 +72,8 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     final String? action = widgetSourceRequest.value;
     if (action == null) return;
     widgetSourceRequest.value = null;
+    // The widget's search bar: YouTube opens with its search field ready.
+    if (action == 'search') pendingPageSearch.value = true;
     final ListeningSource? source = switch (action) {
       'search' || 'source:youtube' => ListeningSource.youtube,
       'source:youtubeMusic' => ListeningSource.youtubeMusic,

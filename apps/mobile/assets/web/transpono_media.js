@@ -117,6 +117,70 @@
       html.tp-tabs-on ytm-feed-filter-chip-bar-renderer { visibility: hidden !important; }
       html.tp-tabs-on.tp-tabs-pad .page-container { padding-top: 48px !important; }
       html.transpono-bars-away .tp-tabs { transform: translateY(-110px) !important; }
+      /* Subscriptions page: the row of channels like the YouTube app's,
+         larger pictures with the channel's name under each, and the word
+         "all" instead of an arrow. */
+      ytm-channel-list-sub-menu-renderer.YtmChannelListSubMenuRendererHost {
+        height: auto !important; min-height: 0 !important;
+        align-items: flex-start !important; padding: 10px 0 6px !important;
+      }
+      ytm-channel-list-sub-menu-renderer .YtmChannelListSubMenuRendererAvatars {
+        height: auto !important; white-space: nowrap !important;
+      }
+      ytm-channel-list-sub-menu-avatar-renderer.YtmChannelListSubMenuAvatarRendererHost {
+        width: 72px !important; height: auto !important;
+        margin: 0 3px !important; padding: 0 !important;
+        vertical-align: top !important; text-align: center !important;
+        position: relative !important;
+      }
+      ytm-channel-list-sub-menu-avatar-renderer > a {
+        display: block !important; width: 72px !important; height: auto !important;
+        text-decoration: none !important;
+      }
+      ytm-channel-list-sub-menu-avatar-renderer ytm-profile-icon,
+      ytm-channel-list-sub-menu-avatar-renderer img.ytProfileIconImage {
+        width: 56px !important; height: 56px !important; border-radius: 50% !important;
+      }
+      ytm-channel-list-sub-menu-avatar-renderer > a::after {
+        content: attr(aria-label); display: block; margin: 6px auto 0;
+        max-width: 68px; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; font-size: 12px; line-height: 16px;
+        color: var(--yt-spec-text-primary, #f1f1f1);
+      }
+      ytm-channel-list-sub-menu-renderer a.channel-list-sub-menu-show-all {
+        width: auto !important; height: 56px !important;
+        display: flex !important; align-items: center !important;
+        padding: 0 12px 0 8px !important; text-decoration: none !important;
+      }
+      ytm-channel-list-sub-menu-renderer a.channel-list-sub-menu-show-all .icon-button {
+        display: none !important;
+      }
+      ytm-channel-list-sub-menu-renderer a.channel-list-sub-menu-show-all::after {
+        content: 'Todos'; font-size: 14px; font-weight: 500; color: #3ea6ff;
+      }
+      /* Search: one rounded field and the round microphone, on the page's
+         own background, like the YouTube app's search screen. */
+      ytm-mobile-topbar-renderer header[data-mode="searching"] {
+        background: var(--yt-spec-base-background, #0f0f0f) !important;
+      }
+      header[data-mode="searching"] .ytSearchboxComponentInputBox {
+        border-radius: 20px !important; height: 40px !important;
+        margin-top: -4px !important;
+        background: var(--yt-spec-raised-background, #272727) !important;
+        display: flex !important; align-items: center !important;
+        flex: 1 1 auto !important;
+      }
+      header[data-mode="searching"] .ytSearchboxComponentSearchButton {
+        display: none !important;
+      }
+      header[data-mode="searching"] .ytSearchboxComponentVoiceSearchWrapper {
+        width: 40px !important; height: 40px !important; margin-top: -4px !important;
+        margin-left: 8px !important; border-radius: 50% !important;
+        display: flex !important; align-items: center !important;
+        justify-content: center !important;
+        background: var(--yt-spec-raised-background, #272727) !important;
+      }
+      header[data-mode="searching"] .ytSearchboxComponentInput { font-size: 16px !important; }
       /* iPhone, like the YouTube app there: the bottom bar is a floating
          pill, the tab being shown stands on a lighter patch, and the "you"
          page is plain dark with outlined buttons. */

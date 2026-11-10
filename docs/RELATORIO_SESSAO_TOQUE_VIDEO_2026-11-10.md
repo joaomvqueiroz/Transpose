@@ -83,3 +83,37 @@ A de `0ceff15`: `_minimize` espera até não haver nenhum dedo na superfície do
 ### Estado do Git
 
 Ramo `toque-video-wip` em `0ceff15`, sem alterações de código. Este acrescento ao relatório está por commitar; commit e push só com o OK do dono.
+
+## Redesenho ao estilo da app do YouTube (10/11/2026, noite, PC de casa)
+
+Trabalho feito no ramo `toque-video-wip` a pedido do dono, com o A16 ligado ao PC de casa. Tudo o que mexe nas páginas do YouTube está no guião `apps/mobile/assets/web/transpono_media.js` e só atua em `m.youtube.com` (não no YouTube Music, SoundCloud ou Spotify).
+
+### O que mudou
+
+- **Barra de baixo:** só ícones, encostada ao fundo, com um lugar livre no meio onde a app desenha o botão dos ajustes (no sítio do «+» da app oficial). No iPhone a barra é uma pílula flutuante.
+- **Separadores do topo:** Início, Inscrições, Música, Ao vivo e Mais, no lugar dos filtros do site, também na página das Inscrições. «Mais» abre o painel lateral do site.
+- **Esconder ao rolar:** as duas barras saem ao rolar para baixo e voltam ao rolar para cima.
+- **Botão do menu inicial:** desenhado pela própria página dentro da barra de cima do site, para acompanhar a barra sem atraso. O botão «Abrir app» do site é escondido.
+- **Painel «Você»:** botão de contas, nome em grande, botão do canal, playlists em lista; a barra de cima copia a cor do fundo.
+- **Inscrições:** canais em círculo grande com o nome por baixo e «Todos».
+- **Pesquisa:** campo arredondado único e microfone redondo.
+- **Shorts:** ficam na página de navegação, na vertical, pedem alta definição (medido: de 360p para 1080p) e têm uma barra de baixo desenhada pela app por baixo da página.
+- **Mini leitor:** só pausar e fechar; tocar no resto expande; os botões esvaziam aos 3 s e somem aos 6 s; anima a partir do sítio do vídeo em grande; 1/8 mais pequeno; sem os controlos do YouTube por cima; volta a medir a largura ao rodar o telemóvel.
+- **Janela pequena do sistema (Android):** mostra o vídeo a partir do canto, sem corte.
+- **Ajustes:** o vídeo pode ser encolhido com os ajustes abertos; a frase «Tom aplicado · processamento experimental» deixou de aparecer.
+- **Widgets Android novos:** pesquisa com atalhos para as quatro fontes, e «a tocar» com a capa do vídeo.
+
+### Como foi verificado
+
+- Testes automáticos: 425 da app (`flutter test`) e 67 do guião da página (`node tool/tests/transpono_media_test.cjs`) a passar.
+- No A16, em *release*, por capturas de ecrã e por inspeção das páginas com uma compilação feita de propósito (`--dart-define=TRANSPONO_WEB_DEBUG=true`). A versão que fica instalada é a normal, sem inspeção.
+
+### Limitações e o que falta confirmar
+
+- Quase tudo foi visto por capturas e por toques enviados por comando, não com o dedo. Falta a confirmação do dono para: suavidade da animação do mini leitor, encolher com os ajustes abertos, ícone de pausa do mini leitor, botão do menu inicial ao rolar, janela pequena do sistema, mini leitor na horizontal e os dois widgets no ecrã inicial.
+- O widget de pesquisa abre o campo de pesquisa do YouTube, mas o teclado não aparece sozinho.
+- iPhone: nada foi testado num iPhone. A pílula foi só pré-visualizada no A16, forçando a classe do iPhone.
+- O site móvel não tem mensagens, notificações nem o «+» de criar, por isso não existem na app.
+- A página do vídeo não foi redesenhada (não havia captura de referência).
+- O estilo depende dos nomes internos do site do YouTube; uma mudança do site pode desfazer partes dele sem aviso.
+- Um teste antigo (`web_media_command_test.dart`, «never-completing cancellation…») falhou duas vezes de forma intermitente na bateria completa e passou sempre isolado; não tem relação com estas alterações e não foi investigado.
