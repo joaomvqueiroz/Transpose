@@ -86,6 +86,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   int? _miniPointerId;
   Offset? _miniPointerOrigin;
   Offset _miniPointerDelta = Offset.zero;
+  VelocityTracker? _miniVelocity;
   bool get _twoPages => _browse != null;
 
   // Fingers currently down on the player surface, and a minimize request
@@ -1446,11 +1447,24 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ChoiceChip(
                 key: Key('appearanceMode${mode.name}'),
                 label: Text(label),
-                selected: widget.appearance.mode == mode,
+                selected:
+                    widget.appearance.mode == mode && !widget.appearance.apple,
                 onSelected: (_) => widget.onAppearanceChanged?.call(
-                  widget.appearance.copyWith(mode: mode),
+                  widget.appearance.copyWith(mode: mode, apple: false),
                 ),
               ),
+            // The Apple design: glass colours plus the floating sheet.
+            ChoiceChip(
+              key: const Key('appearanceModeapple'),
+              label: const Text('Apple'),
+              selected: widget.appearance.apple,
+              onSelected: (_) => widget.onAppearanceChanged?.call(
+                widget.appearance.copyWith(
+                  mode: StudioAppearanceMode.glass,
+                  apple: true,
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 20),
@@ -1805,15 +1819,28 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   /// Settles the mini player against the nearest side, inside the screen.
-  void _settleMini(Size screen, EdgeInsets padding) {
+  ///
+  /// Thrown with some speed ([velocity], pixels per second), it goes on in
+  /// that direction and stays at the side, and the top or bottom, it was
+  /// thrown to.
+  void _settleMini(
+    Size screen,
+    EdgeInsets padding, {
+    Offset velocity = Offset.zero,
+  }) {
     final Rect now = _miniRect(screen, padding);
-    final double left = now.center.dx < screen.width / 2
+    final double highest = padding.top + 56;
+    final double lowest = screen.height - padding.bottom - 76 - now.height;
+    // Where the throw would carry it.
+    final Offset centre = now.center + velocity * .22;
+    final double left = centre.dx < screen.width / 2
         ? 12
         : screen.width - now.width - 12;
-    final double top = now.top.clamp(
-      padding.top + 56,
-      screen.height - padding.bottom - 76 - now.height,
-    );
+    final double top = velocity.dy < -900
+        ? highest
+        : velocity.dy > 900
+        ? lowest
+        : (centre.dy - now.height / 2).clamp(highest, lowest);
     setState(() {
       _miniDragging = false;
       _miniOffset = Offset(left, top);
@@ -1825,10 +1852,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _miniPointerId = event.pointer;
     _miniPointerOrigin = _miniOffset ?? rect.topLeft;
     _miniPointerDelta = Offset.zero;
+    _miniVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
   }
 
   void _miniPointerMove(PointerMoveEvent event) {
     if (_miniPointerId != event.pointer) return;
+    _miniVelocity?.addPosition(event.timeStamp, event.position);
     _miniPointerDelta += event.delta;
     if (!_miniDragging && _miniPointerDelta.distance < 8) return;
     final Offset origin = _miniPointerOrigin ?? Offset.zero;
@@ -1849,8 +1879,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _miniPointerId = null;
     _miniPointerOrigin = null;
     _miniPointerDelta = Offset.zero;
+    final Offset velocity =
+        _miniVelocity?.getVelocity().pixelsPerSecond ?? Offset.zero;
+    _miniVelocity = null;
     if (moved) {
-      _settleMini(screen, padding);
+      _settleMini(
+        screen,
+        padding,
+        velocity: velocity.distance > 500 ? velocity : Offset.zero,
+      );
     } else if (expandIfTap) {
       // With the buttons gone, the first tap only brings them back.
       if (_miniControls == 2) {
@@ -2276,7 +2313,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             : panelTop;
         // The adjustments are a floating sheet of glass over the page: inset
         // from the edges, fully rounded, blurring what is behind it.
-        final sheet = !_adjustmentsCoverVideo && !landscapePlayer;
+        final sheet =
+            widget.appearance.apple &&
+            !_adjustmentsCoverVideo &&
+            !landscapePlayer;
         final light = widget.appearance.mode == StudioAppearanceMode.light;
         final sheetRadius = BorderRadius.circular(sheet ? 34 : 0);
         // No side gap on very narrow screens: the controls need the width.
@@ -2616,6 +2656,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     // The chord tab scrolls as one piece, so its tabs make the room; the
     // other tabs get it from the sheet itself.
     final sheet =
+        widget.appearance.apple &&
         !_adjustmentsCoverVideo &&
         !_isLandscapePlayer &&
         (_tab == StudioTab.chords || _tab == StudioTab.player);
@@ -3388,6 +3429,39 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           ],
                         ),
                       ),
+                      // The Apple design closes with its grabber instead.
+                      if (!widget.appearance.apple &&
+                          !landscapePlayer &&
+                          _mainControlsExpanded &&
+                          !_adjustmentsCoverVideo)
+                        Positioned(
+                          bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: animation,
+                                      child: child,
+                                    ),
+                                  ),
+                              child: _closeCompact
+                                  ? _CompactCloseAdjustments(
+                                      key: const ValueKey('compactClose'),
+                                      onPressed: _toggleMainAdjustments,
+                                    )
+                                  : _MainAdjustmentsBar(
+                                      key: const ValueKey('fullClose'),
+                                      expanded: true,
+                                      onPressed: _toggleMainAdjustments,
+                                    ),
+                            ),
+                          ),
+                        ),
                       if ((landscapePlayer && !_landscapeColumnsVisible) ||
                           (!landscapePlayer && !_mainControlsExpanded))
                         Positioned(

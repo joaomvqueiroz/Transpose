@@ -32,7 +32,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('visualOpenAdjustmentsCompact')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('adjustmentsGrabber')), findsOneWidget);
+    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
     pageScrolledDown.value = false;
     await tester.pumpAndSettle();
   });
@@ -74,7 +74,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedYouTubeSearch')), findsNothing);
     expect(find.byKey(const Key('unifiedFullscreen')), findsNothing);
-    expect(find.byKey(const Key('adjustmentsGrabber')), findsOneWidget);
+    expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
     expect(find.byKey(const Key('unifiedMore')), findsNothing);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);

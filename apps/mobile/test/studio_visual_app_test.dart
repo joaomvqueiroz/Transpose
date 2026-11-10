@@ -82,8 +82,13 @@ void main() {
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
+    // The grabber belongs to the Apple design.
+    await StudioAppearanceStore().save(
+      const StudioAppearance(mode: StudioAppearanceMode.glass, apple: true),
+    );
     await tester.pumpWidget(const StudioVisualApp());
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('visualCloseAdjustments')), findsNothing);
     if (find.byKey(const Key('adjustmentsGrabber')).evaluate().isEmpty) {
       await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
