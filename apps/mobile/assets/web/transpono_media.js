@@ -259,16 +259,39 @@
         padding: 0 4px !important; border-radius: 26px !important;
         /* Glass: the page shows through, blurred, with a light rim. */
         border: 1px solid rgba(255, 255, 255, .18) !important;
-        background: rgba(30, 30, 30, .5) !important;
-        -webkit-backdrop-filter: blur(26px) saturate(180%);
-        backdrop-filter: blur(26px) saturate(180%);
+        background: transparent !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16),
           0 8px 24px rgba(0, 0, 0, .35) !important;
         overflow: hidden !important;
       }
+      /* Two layers of glass: the middle blurs what is behind it; the rim
+         keeps it almost sharp, brighter and more vivid, so the edges read
+         as a lens bending the page (page CSS cannot truly refract). */
+      html.tp-ios ytm-pivot-bar-renderer::after,
+      html.tp-ios ytm-pivot-bar-renderer::before {
+        content: ''; position: absolute; z-index: -1; pointer-events: none;
+      }
+      html.tp-ios ytm-pivot-bar-renderer::after {
+        inset: 5px; border-radius: 21px;
+        background: rgba(30, 30, 30, .45);
+        -webkit-backdrop-filter: blur(22px) saturate(180%);
+        backdrop-filter: blur(22px) saturate(180%);
+      }
+      html.tp-ios ytm-pivot-bar-renderer::before {
+        inset: 0; border-radius: 26px; padding: 5px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, .22),
+          rgba(255, 255, 255, .04) 45%, rgba(255, 255, 255, .14));
+        -webkit-backdrop-filter: blur(3px) brightness(1.35) saturate(220%) contrast(1.15);
+        backdrop-filter: blur(3px) brightness(1.35) saturate(220%) contrast(1.15);
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+      }
+      html.tp-ios[data-transpono-theme="light"] ytm-pivot-bar-renderer::after {
+        background: rgba(250, 250, 250, .5);
+      }
       html.tp-ios.tp-ios[data-transpono-theme="light"] ytm-pivot-bar-renderer {
         border-color: rgba(0, 0, 0, .1) !important;
-        background: rgba(250, 250, 250, .6) !important;
       }
       html.tp-ios ytm-pivot-bar-renderer .pivot-bar-item-tab {
         height: 42px !important; margin: 4px 2px !important;
