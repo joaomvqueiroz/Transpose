@@ -80,6 +80,110 @@ Path _homeOutlineIconPath() => Path()
   ..lineTo(5, 8.366)
   ..close();
 
+Path _shortsOutlineIconPath() => Path()
+  ..fillType = PathFillType.evenOdd
+  ..moveTo(13.467, 1.19)
+  ..lineTo(5.467, 5.89)
+  ..arcToPoint(
+    const Offset(5.212, 14.35),
+    radius: const Radius.elliptical(5, 5),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..arcToPoint(
+    const Offset(10.532, 22.812),
+    radius: const Radius.elliptical(5, 5),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..lineTo(18.532, 18.112)
+  ..arcToPoint(
+    const Offset(18.79, 9.65),
+    radius: const Radius.elliptical(5, 5),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..arcToPoint(
+    const Offset(20.431, 3.186),
+    radius: const Radius.elliptical(5, 5),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..lineTo(20.311, 2.969)
+  ..arcToPoint(
+    const Offset(13.467, 1.189),
+    radius: const Radius.elliptical(5, 5),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..moveTo(18.587, 3.979)
+  ..arcToPoint(
+    const Offset(17.52, 8.086),
+    radius: const Radius.elliptical(2.999, 2.999),
+    rotation: 0,
+    largeArc: false,
+    clockwise: true,
+  )
+  ..lineTo(16.193, 8.866)
+  ..arcToPoint(
+    const Offset(16.289, 10.641),
+    radius: const Radius.elliptical(1, 1),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..lineTo(17.232, 11.064)
+  ..arcToPoint(
+    const Offset(17.52, 16.387),
+    radius: const Radius.elliptical(3, 3),
+    rotation: 0,
+    largeArc: false,
+    clockwise: true,
+  )
+  ..lineTo(9.52, 21.087)
+  ..arcToPoint(
+    const Offset(6.481, 15.914),
+    radius: const Radius.elliptical(3, 3),
+    rotation: 0,
+    largeArc: false,
+    clockwise: true,
+  )
+  ..lineTo(7.808, 15.134)
+  ..arcToPoint(
+    const Offset(7.711, 13.359),
+    radius: const Radius.elliptical(1, 1),
+    rotation: 0,
+    largeArc: false,
+    clockwise: false,
+  )
+  ..lineTo(6.769, 12.936)
+  ..arcToPoint(
+    const Offset(6.481, 7.613),
+    radius: const Radius.elliptical(3, 3),
+    rotation: 0,
+    largeArc: false,
+    clockwise: true,
+  )
+  ..lineTo(14.481, 2.913)
+  ..arcToPoint(
+    const Offset(18.587, 3.979),
+    radius: const Radius.elliptical(3, 3),
+    rotation: 0,
+    largeArc: false,
+    clockwise: true,
+  )
+  ..close()
+  ..moveTo(15, 12)
+  ..lineTo(10, 9)
+  ..lineTo(10, 15)
+  ..lineTo(15, 12)
+  ..close();
+
 Path _shortsFilledIconPath() => Path()
   ..fillType = PathFillType.evenOdd
   ..moveTo(13.974, 2.052)

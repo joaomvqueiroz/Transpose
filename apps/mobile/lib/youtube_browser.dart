@@ -486,6 +486,9 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// Closes the site's search field (and its suggestions) if it is open.
   Future<void> leaveSearch() async {}
 
+  /// Opens one of the bottom bar's pages: "home", "shorts" or "you".
+  Future<void> openTab(String name) async {}
+
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
   /// page's video list is scrolled back to the player at the top; on
   /// closing, it returns to where the user was.
@@ -1020,6 +1023,22 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   @override
+  Future<void> openTab(String name) async {
+    if (_disposed || !const {'home', 'shorts', 'you'}.contains(name)) return;
+    try {
+      await controller.runJavaScript('''(() => {
+          const tab = {home: 'pivot-w2w', shorts: 'pivot-shorts', you: 'pivot-you'}['$name'];
+          const target = document.querySelector('ytm-pivot-bar-renderer .' + tab);
+          if (target) { target.click(); return; }
+          window.location.href =
+            {home: '/', shorts: '/shorts/', you: '/feed/library'}['$name'];
+        })()''');
+    } on Object {
+      // The page changed meanwhile.
+    }
+  }
+
+  @override
   Future<void> leaveSearch() async {
     if (_disposed) return;
     try {
@@ -1081,6 +1100,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       await controller.runJavaScript(
         'window.__transponoIOS = '
         '${defaultTargetPlatform == TargetPlatform.iOS};'
+        'window.__transponoNativeBar = ${nativeGlassBar.value};'
         'window.__transponoBrowseOnly = $browseOnly;'
         'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'

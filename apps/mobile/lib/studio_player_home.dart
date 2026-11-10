@@ -120,6 +120,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _homeWidgets = HomeWidgetBridge(onAction: _onWidgetAction);
+    // iPhone's own glass for the bottom bar, where the system has it.
+    unawaited(
+      GlassBar.checkAvailable().then((_) {
+        if (!mounted || !nativeGlassBar.value) return;
+        unawaited(_browse?.applyPageRoles());
+        unawaited(_player.youtube?.applyPageRoles());
+        setState(() {});
+      }),
+    );
     unawaited(_homeWidgets.initialize());
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
@@ -2051,7 +2060,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   // Scrolled down: the site's bars slid away, and the
                   // button with them. On the Shorts page the app draws the
                   // whole bottom bar itself, under the page.
-                  if (bars?.hidden == true || bars?.shorts == true) {
+                  // iPhone's glass bar carries the adjustments button.
+                  if (bars?.hidden == true ||
+                      bars?.shorts == true ||
+                      (nativeGlassBar.value && bars?.pivot != null)) {
                     return const Positioned(
                       left: 0,
                       top: 0,
@@ -2140,6 +2152,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ],
           ),
         ),
+        if (_twoPages)
+          _GlassBarHost(
+            onTap: (name) {
+              if (name == 'adjust') {
+                _finishExpandMini(openAdjustments: true);
+              } else {
+                unawaited(_browse?.openTab(name));
+              }
+            },
+          ),
         // The Shorts page has no bottom bar on the site: the app draws one
         // under the page (the page gets shorter and lays itself out).
         ValueListenableBuilder<YouTubeBars?>(
@@ -2152,6 +2174,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             void open(String path) => unawaited(
               browse.start(Uri.https('m.youtube.com', path)).catchError((_) {}),
             );
+            // iPhone's glass bar floats here: only its dark strip is kept.
+            if (nativeGlassBar.value) {
+              return Container(
+                height: 68,
+                color: bars!.dark ? const Color(0xFF0F0F0F) : Colors.white,
+              );
+            }
             return _ShortsBottomBar(
               dark: bars!.dark,
               avatar: bars.avatar,
@@ -3249,6 +3278,83 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
     unawaited(session.releaseFocus());
   }
+}
+
+/// Keeps the iPhone's native glass bar in step with the page being browsed:
+/// it shows while the site's bottom bar would (or on the Shorts page) and
+/// leaves with this page.
+class _GlassBarHost extends StatefulWidget {
+  const _GlassBarHost({required this.onTap});
+
+  final void Function(String name) onTap;
+
+  @override
+  State<_GlassBarHost> createState() => _GlassBarHostState();
+}
+
+class _GlassBarHostState extends State<_GlassBarHost> {
+  late final Listenable _watched = Listenable.merge([
+    pageYouTubeBars,
+    nativeGlassBar,
+    pictureInPictureShown,
+    pageInputFocused,
+  ]);
+  bool _iconsSent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    GlassBar.attach(_tap);
+    _watched.addListener(_sync);
+    _sync();
+  }
+
+  void _tap(String name) => widget.onTap(name);
+
+  Future<Uint8List> _png(Path shape) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)..scale(3.5);
+    canvas.drawPath(shape, Paint()..color = Colors.white);
+    final image = await recorder.endRecording().toImage(84, 84);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data!.buffer.asUint8List();
+  }
+
+  void _sync() {
+    if (!nativeGlassBar.value) return;
+    if (!_iconsSent) {
+      _iconsSent = true;
+      unawaited(() async {
+        await GlassBar.setIcons({
+          'shortsOutline': await _png(_shortsOutlineIconPath()),
+          'shortsFilled': await _png(_shortsFilledIconPath()),
+        });
+      }());
+    }
+    final bars = pageYouTubeBars.value;
+    GlassBar.update(
+      visible:
+          bars != null &&
+          !bars.hidden &&
+          (bars.pivot != null || bars.shorts) &&
+          !pictureInPictureShown.value &&
+          !pageInputFocused.value,
+      selected: bars?.tab ?? '',
+      avatar: bars?.avatar ?? '',
+      dark: bars?.dark ?? true,
+    );
+  }
+
+  @override
+  void dispose() {
+    _watched.removeListener(_sync);
+    GlassBar.update(visible: false);
+    GlassBar.detach(_tap);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// The bottom bar under the Shorts page, like the YouTube app's: home,

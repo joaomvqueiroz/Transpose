@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
@@ -29,6 +30,7 @@ import 'microphone_tuner.dart';
 import 'home_widget_bridge.dart';
 import 'studio_appearance.dart';
 import 'home_button_visibility.dart';
+import 'glass_bar.dart';
 import 'picture_in_picture.dart';
 import 'stem_panel.dart';
 import 'ambient_rhythm_trial.dart';

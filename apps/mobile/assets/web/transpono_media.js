@@ -117,6 +117,9 @@
       html.tp-tabs-on ytm-feed-filter-chip-bar-renderer { visibility: hidden !important; }
       html.tp-tabs-on.tp-tabs-pad .page-container { padding-top: 48px !important; }
       html.transpono-bars-away .tp-tabs { transform: translateY(-110px) !important; }
+      html.tp-native-bar.tp-native-bar.tp-native-bar ytm-pivot-bar-renderer {
+        opacity: 0 !important; pointer-events: none !important;
+      }
       html.tp-shorts.tp-shorts ytm-mobile-topbar-renderer#header-bar,
       html.tp-shorts.tp-shorts ytm-mobile-topbar-renderer#header-bar header {
         background: transparent !important; box-shadow: none !important;
@@ -775,6 +778,10 @@
       const agent = navigator.userAgent || '';
       document.documentElement.classList.toggle('tp-ios',
         window.__transponoIOS === true || /iPhone|iPad|iPod/.test(agent));
+      // The app draws the bottom bar itself (iPhone's own glass): the
+      // site's bar stays in the page, working but unseen.
+      document.documentElement.classList.toggle('tp-native-bar',
+        window.__transponoNativeBar === true);
       // The Shorts page: the site's top bar floats over the video, with no
       // band of its own, like in the YouTube app.
       document.documentElement.classList.toggle('tp-shorts',
@@ -857,6 +864,10 @@
         // one under the page.
         shorts: !bar && /^\/shorts(\/|$)/.test(window.location.pathname),
         avatar: typeof window.__transponoAvatar === 'string' ? window.__transponoAvatar : '',
+        // Which of the bar's tabs is the page being shown.
+        tab: (path => path === '/' ? 'home'
+          : /^\/shorts(\/|$)/.test(path) ? 'shorts'
+          : path === '/feed/library' ? 'you' : '')(window.location.pathname),
         topAway,
         homeInPage,
         dark: document.documentElement.getAttribute('data-transpono-theme') !== 'light',

@@ -263,6 +263,7 @@ void main() {
         searching: false,
         shorts: false,
         avatar: '',
+        tab: '',
         dark: true,
       );
       await tester.pumpAndSettle();
@@ -281,6 +282,7 @@ void main() {
         searching: false,
         shorts: false,
         avatar: '',
+        tab: '',
         dark: true,
       );
       await tester.pumpAndSettle();
@@ -306,6 +308,7 @@ void main() {
         searching: false,
         shorts: false,
         avatar: '',
+        tab: '',
         dark: true,
       );
       await tester.pumpAndSettle();
@@ -322,6 +325,7 @@ void main() {
         searching: false,
         shorts: false,
         avatar: '',
+        tab: '',
         dark: true,
       );
       await tester.pumpAndSettle();

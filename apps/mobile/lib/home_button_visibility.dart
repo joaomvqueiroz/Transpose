@@ -38,8 +38,14 @@ typedef YouTubeBars = ({
   bool searching,
   bool shorts,
   String avatar,
+  String tab,
   bool dark,
 });
+
+/// iPhone with the system's glass (iOS 26): the bottom bar is drawn natively
+/// above the page (glass_bar.dart); the page's own bar and the app's Flutter
+/// buttons in it stay out of sight.
+final ValueNotifier<bool> nativeGlassBar = ValueNotifier<bool>(false);
 
 /// The home-screen search widget was tapped: the YouTube page opens its
 /// search field as soon as it is ready (set back to false when done).
@@ -70,6 +76,10 @@ YouTubeBars? youTubeBarsFromState(Object? raw) {
     homeInPage: raw['homeInPage'] == true,
     searching: raw['searching'] == true,
     shorts: raw['shorts'] == true,
+    tab: switch (raw['tab']) {
+      final String tab => tab,
+      _ => '',
+    },
     avatar: switch (raw['avatar']) {
       final String url when url.startsWith('https://') => url,
       _ => '',
