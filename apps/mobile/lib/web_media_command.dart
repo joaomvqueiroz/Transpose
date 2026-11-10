@@ -108,12 +108,16 @@ class WebMediaCommandRunner {
     for (final action in actions) {
       final remaining = budget - watch.elapsed;
       if (!isCurrent() || remaining <= Duration.zero) return;
+      bool expired = false;
       try {
         await submitScript('window.TransponoMedia?.$action($encodedId);')
-            .timeout(remaining);
+            .timeout(remaining, onTimeout: () => expired = true);
       } on Object {
         // Cleanup cannot mask the result or wait forever on a destroyed page.
       }
+      // A timer may fire a fraction of a millisecond before the stopwatch
+      // reaches the budget; an expired step always ends the cleanup.
+      if (expired) return;
     }
   }
 }
