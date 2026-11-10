@@ -1,0 +1,47 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="10dp" android:background="@drawable/widget_flat_bg">
+    <LinearLayout android:id="@+id/ws_search" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:minHeight="40dp" android:orientation="horizontal"
+        android:gravity="center_vertical" android:paddingHorizontal="12dp"
+        android:background="@drawable/widget_pill">
+        <ImageView android:layout_width="26dp" android:layout_height="26dp" android:src="@mipmap/ic_launcher"
+            android:contentDescription="Transpono" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:paddingStart="10dp" android:text="Pesquisar no Transpono" android:textColor="#C8C8CC"
+            android:textSize="14sp" android:maxLines="1" android:ellipsize="end" />
+        <ImageView android:layout_width="22dp" android:layout_height="22dp" android:src="@drawable/widget_ic_search"
+            android:contentDescription="Pesquisar" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:minHeight="44dp" android:layout_marginTop="8dp" android:orientation="horizontal">
+        <LinearLayout android:id="@+id/ws_youtube" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+            <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/widget_ic_play"
+                android:contentDescription="YouTube" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="YouTube"
+                android:textColor="#F1F1F1" android:textSize="10sp" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/ws_music" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+            <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/widget_ic_note"
+                android:contentDescription="Music" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Music"
+                android:textColor="#F1F1F1" android:textSize="10sp" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/ws_soundcloud" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+            <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/widget_ic_cloud"
+                android:contentDescription="SoundCloud" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SoundCloud"
+                android:textColor="#F1F1F1" android:textSize="10sp" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/ws_spotify" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+            <ImageView android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/widget_ic_waves"
+                android:contentDescription="Spotify" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Spotify"
+                android:textColor="#F1F1F1" android:textSize="10sp" android:maxLines="1" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

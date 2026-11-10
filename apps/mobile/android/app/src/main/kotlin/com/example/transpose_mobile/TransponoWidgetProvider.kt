@@ -79,6 +79,7 @@ abstract class TransponoWidgetProvider(private val layout: Int) : AppWidgetProvi
             edit.putInt("pitch", (state["pitch"] as? Number)?.toInt() ?: 0)
             edit.putInt("progress", ((state["progress"] as? Number)?.toInt() ?: 0).coerceIn(0, 100))
             edit.apply()
+            TransponoWidgetNow.refresh(context, state["art"] as? String ?: "")
             val manager = AppWidgetManager.getInstance(context)
             providers.forEach { provider ->
                 val component = ComponentName(context, provider)

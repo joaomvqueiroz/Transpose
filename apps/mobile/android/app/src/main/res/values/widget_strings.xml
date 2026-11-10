@@ -3,4 +3,6 @@
     <string name="widget_medium_description">Transpono · Player e tom</string>
     <string name="widget_large_description">Transpono · Trecho e cifra</string>
     <string name="widget_cockpit_description">Transpono · Cockpit de ensaio</string>
+    <string name="widget_search_description">Transpono · Pesquisa e atalhos</string>
+    <string name="widget_now_description">Transpono · A tocar, com capa</string>
 </resources>

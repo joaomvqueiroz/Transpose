@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'google_sign_in_probe.dart';
 import 'home_button_visibility.dart';
+import 'home_widget_bridge.dart';
 import 'premium_branding.dart';
 import 'spotify_browser.dart';
 import 'youtube_browser.dart';
@@ -44,6 +45,48 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   int _generation = 0;
   SpotifyStudioSession? _spotify;
   final GoogleSignInGate _google = GoogleSignInGate();
+
+  @override
+  void initState() {
+    super.initState();
+    widgetSourceRequest.addListener(_widgetSource);
+    pageHomeRequests.addListener(_pageHome);
+    unawaited(HomeWidgetBridge.listenForSources());
+  }
+
+  @override
+  void dispose() {
+    widgetSourceRequest.removeListener(_widgetSource);
+    pageHomeRequests.removeListener(_pageHome);
+    super.dispose();
+  }
+
+  /// The start-screen icon the page draws in its top bar was tapped.
+  void _pageHome() {
+    if (mounted && _source != null) _choose(null);
+  }
+
+  /// A shortcut of the home-screen search widget: open that source. The one
+  /// already open stays as it is (its video keeps playing).
+  void _widgetSource() {
+    final String? action = widgetSourceRequest.value;
+    if (action == null) return;
+    widgetSourceRequest.value = null;
+    final ListeningSource? source = switch (action) {
+      'search' || 'source:youtube' => ListeningSource.youtube,
+      'source:youtubeMusic' => ListeningSource.youtubeMusic,
+      'source:soundCloud' => ListeningSource.soundCloud,
+      'source:spotify' => ListeningSource.spotify,
+      _ => null,
+    };
+    if (!mounted || source == null || source == _source) return;
+    if (source == ListeningSource.youtube ||
+        source == ListeningSource.youtubeMusic) {
+      unawaited(_chooseGoogle(source));
+    } else {
+      _choose(source);
+    }
+  }
 
   /// YouTube and YouTube Music: on iPhone, offer the Google sign-in first
   /// (it happens in Safari's engine and passes to Gecko by itself).
@@ -105,9 +148,29 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
         // Top left, just under the page's top bar (YouTube's is 48 px): any
         // higher and it covers the search bar's back arrow, and then the
         // page cannot leave the search.
-        Positioned(
-          left: 12,
-          top: MediaQuery.viewPaddingOf(context).top + 56,
+        // On YouTube's own pages it sits in the site's top bar, left of the
+        // search icon, like one more icon of the YouTube app's top bar.
+        ValueListenableBuilder<YouTubeBars?>(
+          valueListenable: pageYouTubeBars,
+          builder: (context, bars, child) {
+            // Also while that bar is scrolled away: the icon fades where it
+            // was, it does not jump to the floating place.
+            // On YouTube itself it never floats: until the page reports
+            // its bar (the app just opened, a page is loading) it is hidden.
+            final bool inBar =
+                source == ListeningSource.youtube ||
+                (bars != null && (bars.topFree || bars.topAway));
+            final EdgeInsets insets = MediaQuery.viewPaddingOf(context);
+            final double top = insets.top;
+            return Positioned(
+              left: inBar ? null : 12,
+              // The page starts after the system's side inset (the phone
+              // on its side has the system buttons there).
+              right: inBar ? (bars?.topRight ?? 48) + insets.right : null,
+              top: inBar ? top : top + 56,
+              child: child!,
+            );
+          },
           // Hidden while the search bar has the focus or the adjustments
           // cover the whole screen.
           child: ListenableBuilder(
@@ -116,16 +179,33 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
               adjustmentsCoverScreen,
               pictureInPictureShown,
               pageUnmutePrompt,
+              pageYouTubeBars,
             ]),
-            builder: (context, child) => IgnorePointer(
-              ignoring: hideHomeButton,
-              child: AnimatedOpacity(
-                opacity: hideHomeButton ? 0 : 1,
-                duration: const Duration(milliseconds: 200),
-                child: child,
-              ),
-            ),
+            builder: (context, child) {
+              // On YouTube, before the page's first report, the icon is
+              // already in the top bar (the bar is there from the first
+              // paint); after that it follows what the page reports.
+              final YouTubeBars? bars = pageYouTubeBars.value;
+              final bool hide =
+                  hideHomeButton ||
+                  // Once the page reports, it draws the icon itself in
+                  // its top bar (it then moves with the bar exactly).
+                  (source == ListeningSource.youtube &&
+                      bars != null &&
+                      (!bars.topFree || bars.homeInPage));
+              return IgnorePointer(
+                ignoring: hide,
+                child: AnimatedOpacity(
+                  opacity: hide ? 0 : 1,
+                  // It comes in softly and leaves at once, so it is never
+                  // seen where it does not belong.
+                  duration: Duration(milliseconds: hide ? 0 : 120),
+                  child: child,
+                ),
+              );
+            },
             child: _SourceSwitch(
+              inBar: source == ListeningSource.youtube,
               spotify: source == ListeningSource.spotify,
               session: _spotify,
               onHome: () => _choose(null),
@@ -142,12 +222,15 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
 /// on Spotify, "Tocar no YouTube com tom" for the song that is playing.
 class _SourceSwitch extends StatelessWidget {
   const _SourceSwitch({
+    required this.inBar,
     required this.spotify,
     required this.session,
     required this.onHome,
     required this.onPlayOnYouTube,
   });
 
+  /// YouTube itself: the start-screen icon always has the top-bar look.
+  final bool inBar;
   final bool spotify;
   final SpotifyStudioSession? session;
   final VoidCallback onHome;
@@ -155,7 +238,11 @@ class _SourceSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final home = _HomeButton(key: const Key('sourceHome'), onPressed: onHome);
+    final home = _HomeButton(
+      key: const Key('sourceHome'),
+      inBar: inBar,
+      onPressed: onHome,
+    );
     final current = session;
     if (!spotify || current == null) return home;
     return ListenableBuilder(
@@ -202,8 +289,9 @@ class _SourceSwitch extends StatelessWidget {
 /// pills, and every 10 seconds it changes between see-through and
 /// see-through black, so it stands out without covering the video for long.
 class _HomeButton extends StatefulWidget {
-  const _HomeButton({super.key, required this.onPressed});
+  const _HomeButton({super.key, required this.inBar, required this.onPressed});
 
+  final bool inBar;
   final VoidCallback onPressed;
 
   @override
@@ -230,7 +318,36 @@ class _HomeButtonState extends State<_HomeButton> {
   }
 
   @override
-  Widget build(BuildContext context) => Tooltip(
+  Widget build(BuildContext context) => ValueListenableBuilder<YouTubeBars?>(
+    valueListenable: pageYouTubeBars,
+    builder: (context, bars, floating) {
+      if (!widget.inBar && (bars == null || !(bars.topFree || bars.topAway))) {
+        return floating!;
+      }
+      // Inside YouTube's top bar: a plain icon, the size of the site's own.
+      return Tooltip(
+        message: 'Voltar ao ecrã inicial',
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: IconButton(
+            onPressed: widget.onPressed,
+            padding: EdgeInsets.zero,
+            icon: Icon(
+              Icons.apps_rounded,
+              size: 24,
+              color: bars?.dark != false
+                  ? const Color(0xFFF1F1F1)
+                  : const Color(0xFF0F0F0F),
+            ),
+          ),
+        ),
+      );
+    },
+    child: _floating(),
+  );
+
+  Widget _floating() => Tooltip(
     message: 'Voltar ao ecrã inicial',
     child: AnimatedContainer(
       duration: const Duration(milliseconds: 800),

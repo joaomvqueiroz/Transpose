@@ -1,7 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+/// A widget shortcut asked for a listening source: "source:youtube",
+/// "source:youtubeMusic", "source:soundCloud", "source:spotify" or "search".
+/// The first screen (source picker) acts on it and sets it back to null.
+final ValueNotifier<String?> widgetSourceRequest = ValueNotifier<String?>(null);
+
+bool isWidgetSourceAction(String action) =>
+    action == 'search' || action.startsWith('source:');
 
 /// Mirrors acknowledged player state into Android launchers. Widget actions
 /// always open the app; YouTube never plays from an invisible background view.
@@ -9,6 +18,42 @@ class HomeWidgetBridge {
   HomeWidgetBridge({required this.onAction});
 
   static const _channel = MethodChannel('transpose/home_widgets');
+
+  /// The action the app was opened with, when it was not a source shortcut:
+  /// kept for the studio, which is created after the first screen.
+  static String? _launchAction;
+  static bool _launchTaken = false;
+
+  /// Source shortcuts work with or without a studio on screen: the first
+  /// screen calls this once, and again whenever a studio's bridge goes away.
+  static bool _sourcesWanted = false;
+
+  static Future<void> listenForSources() async {
+    _sourcesWanted = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method != 'action' || call.arguments is! String) return;
+      final action = call.arguments as String;
+      if (isWidgetSourceAction(action)) {
+        widgetSourceRequest.value = action;
+      } else {
+        _launchAction = action;
+      }
+    });
+    if (_launchTaken) return;
+    _launchTaken = true;
+    try {
+      final action = await _channel.invokeMethod<String>('takeAction');
+      if (action == null) return;
+      if (isWidgetSourceAction(action)) {
+        widgetSourceRequest.value = action;
+      } else {
+        _launchAction = action;
+      }
+    } on MissingPluginException {
+      // iOS and widget tests do not use Android home widgets.
+    }
+  }
+
   final void Function(String action) onAction;
   Timer? _pending;
   Map<String, Object?>? _state;
@@ -21,14 +66,26 @@ class HomeWidgetBridge {
   Future<void> initialize() async {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'action' && call.arguments is String) {
-        onAction(call.arguments as String);
+        _dispatch(call.arguments as String);
       }
     });
+    final launch = _launchAction;
+    _launchAction = null;
+    if (launch != null) onAction(launch);
     try {
       final action = await _channel.invokeMethod<String>('takeAction');
-      if (action != null) onAction(action);
+      _launchTaken = true;
+      if (action != null) _dispatch(action);
     } on MissingPluginException {
       // iOS and widget tests do not use Android home widgets.
+    }
+  }
+
+  void _dispatch(String action) {
+    if (isWidgetSourceAction(action)) {
+      widgetSourceRequest.value = action;
+    } else {
+      onAction(action);
     }
   }
 
@@ -95,5 +152,6 @@ class HomeWidgetBridge {
     _disposed = true;
     _pending?.cancel();
     _channel.setMethodCallHandler(null);
+    if (_sourcesWanted) unawaited(listenForSources());
   }
 }

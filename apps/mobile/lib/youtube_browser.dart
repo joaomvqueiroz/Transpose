@@ -517,6 +517,10 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// The page then renders just the video into the WebView's real viewport.
   bool appMiniSurface = false;
 
+  /// A Short started playing in a [browseOnly] page, in the site's own
+  /// vertical player (Shorts are not handed to the player page).
+  VoidCallback? onShortsPlaying;
+
   /// A video chosen in a [browseOnly] page.
   void Function(Uri watch)? onOpenRequest;
 
@@ -678,7 +682,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           : const Color(0xFF080809),
     );
     if (controller.platform is AndroidWebViewController) {
-      await AndroidWebViewController.enableDebugging(kDebugMode);
+      // Page inspection from a computer: debug builds, or a build made on
+      // purpose with --dart-define=TRANSPONO_WEB_DEBUG=true.
+      await AndroidWebViewController.enableDebugging(
+        kDebugMode || const bool.fromEnvironment('TRANSPONO_WEB_DEBUG'),
+      );
       await (controller.platform as AndroidWebViewController)
           .setMediaPlaybackRequiresUserGesture(false);
     }
@@ -695,6 +703,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           _snapshotRevision = -1;
           // A new document counts its requests from zero.
           _minimizeSeq = null;
+          _homeSeq = null;
           _openSeq = null;
           _error = null;
           _media = const YouTubeMediaState();
@@ -919,6 +928,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (publishesPageState) {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
+      pageYouTubeBars.value = youTubeBarsFromState(state['bars']);
     }
     if (!browseOnly) {
       pageUnmutePrompt.value =
@@ -932,6 +942,12 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final bool first = _minimizeSeq == null;
       _minimizeSeq = minimizeSeq.toInt();
       if (!first || _minimizeSeq! > 0) onMinimizeRequest?.call();
+    }
+    final Object? homeSeq = state['homeSeq'];
+    if (homeSeq is num && homeSeq.toInt() != _homeSeq) {
+      final bool first = _homeSeq == null;
+      _homeSeq = homeSeq.toInt();
+      if (!first || _homeSeq! > 0) pageHomeRequests.value++;
     }
     final Object? openSeq = state['openSeq'];
     final Object? asked = state['openRequest'];
@@ -955,11 +971,21 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final Object? id = state['videoId'];
       // Back on a page without a video: the same one may be chosen again.
       if (id is! String || id.isEmpty) _handedOffVideoId = null;
-      if (id is String &&
+      if (state['shortsPage'] == true) {
+        // Shorts stay here, vertical; the other page's video gives way.
+        if (id is String &&
+            id.isNotEmpty &&
+            state['playing'] == true &&
+            id != _shortsVideoId) {
+          _shortsVideoId = id;
+          onShortsPlaying?.call();
+        }
+      } else if (id is String &&
           id.isNotEmpty &&
           state['hasVideo'] == true &&
           state['isAd'] != true &&
           id != _handedOffVideoId) {
+        _shortsVideoId = null;
         _handedOffVideoId = id;
         unawaited(_handOffVideo(id));
       }
@@ -987,9 +1013,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   String? _handedOffVideoId;
+  String? _shortsVideoId;
   String? _unmuteOnReadyVideoId;
   // Last request counters seen (null: none yet on this page).
   int? _minimizeSeq;
+  int? _homeSeq;
   int? _openSeq;
 
   Future<void> _handOffVideo(String id) async {
@@ -1247,6 +1275,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   void dispose() {
     pageInputFocused.value = false;
     pageScrolledDown.value = false;
+    if (publishesPageState) pageYouTubeBars.value = null;
     if (!browseOnly) pageUnmutePrompt.value = false;
     _disposed = true;
     _timer?.cancel();

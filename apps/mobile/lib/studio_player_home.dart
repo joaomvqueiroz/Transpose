@@ -67,6 +67,22 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final GlobalKey _browseKey = GlobalKey(debugLabel: 'browse-surface');
   Offset? _miniOffset;
   bool _miniDragging = false;
+
+  // The mini player is drawn at the full-size video's place: the first frame
+  // after shrinking (it then moves to its corner) and while it grows back.
+  bool _miniFull = false;
+  bool _browsePlayerPlaying = false;
+  bool _miniExpanding = false;
+
+  // Closed with its "x": paused and out of sight until another video is
+  // chosen or the player is opened again.
+  bool _miniClosed = false;
+
+  // The mini player's two buttons: 0 = on a dark disc, 1 = hollow (only the
+  // icon), 2 = gone. Three seconds in each of the first two; a tap on the
+  // mini player brings them back and the count starts again.
+  int _miniControls = 0;
+  Timer? _miniControlsTimer;
   int? _miniPointerId;
   Offset? _miniPointerOrigin;
   Offset _miniPointerDelta = Offset.zero;
@@ -112,7 +128,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (browseFactory != null && widget.playerController == null) {
       final browse = browseFactory()
         ..browseOnly = true
-        ..onOpenRequest = _playChosen;
+        ..onOpenRequest = _playChosen
+        // A Short playing in the browse page: the chosen video pauses, so
+        // the two are never heard together.
+        ..onShortsPlaying = () {
+          if (_player.loaded && _player.playing) unawaited(_player.pause());
+        };
       // Same light or dark look as the player page.
       unawaited(browse.setAppearanceMode(widget.appearance.mode));
       browse.addListener(_browseChanged);
@@ -278,6 +299,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (player != null) unawaited(player.setAppMiniSurface(false));
     setState(() {
       _browsing = false;
+      _miniFull = false;
+      _miniExpanding = false;
+      _miniClosed = false;
       _mainControlsExpanded = false;
       _adjustmentsCoverVideo = false;
     });
@@ -307,22 +331,95 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (player != null) unawaited(player.setAppMiniSurface(true));
     setState(() {
       _browsing = true;
+      // Starts where the full-size video was and moves to its corner.
+      _miniFull = true;
+      _miniExpanding = false;
+      _miniClosed = false;
       _mainControlsExpanded = false;
       _adjustmentsCoverVideo = false;
       _landscapeColumnsVisible = false;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _browsing && !_miniExpanding) {
+        setState(() => _miniFull = false);
+      }
+    });
+    _showMiniControls();
     _syncPageRoles();
   }
 
+  void _showMiniControls() {
+    _miniControlsTimer?.cancel();
+    if (!mounted) return;
+    if (_miniControls != 0) setState(() => _miniControls = 0);
+    _miniControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _miniControls = 1);
+      _miniControlsTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _miniControls = 2);
+      });
+    });
+  }
+
+  /// A tap on the mini player: it grows back to the full-size video's place,
+  /// and only then the player page takes over.
   void _expandMini() {
+    if (!mounted || !_browsing || _miniExpanding) return;
+    if (_miniClosed) {
+      _finishExpandMini();
+      return;
+    }
+    setState(() {
+      _miniExpanding = true;
+      _miniFull = true;
+    });
+  }
+
+  void _miniMoveEnded() {
+    if (_miniExpanding) _finishExpandMini();
+  }
+
+  void _finishExpandMini({bool openAdjustments = false}) {
+    _miniControlsTimer?.cancel();
     if (!mounted) return;
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(false));
-    setState(() => _browsing = false);
+    setState(() {
+      _browsing = false;
+      _miniFull = false;
+      _miniExpanding = false;
+      _miniClosed = false;
+      if (openAdjustments) {
+        _mainControlsExpanded = true;
+        _adjustmentsCoverVideo = false;
+      }
+    });
     _syncPageRoles();
   }
 
+  /// The mini player's "x": the video pauses and the small window goes away.
+  void _closeMini() {
+    _miniControlsTimer?.cancel();
+    if (!mounted) return;
+    unawaited(_player.pause());
+    setState(() {
+      _miniClosed = true;
+      _miniFull = false;
+      _miniExpanding = false;
+    });
+  }
+
   void _pipChanged() {
+    // In the system's small window the page shows only the video, from its
+    // top-left corner (the same page mode as the app's mini player), so the
+    // picture is never cut by the page's own top bar or scroll position.
+    // Back in the app, the page returns to what the screen was showing.
+    final player = _player.youtube;
+    if (player != null && _twoPages) {
+      unawaited(
+        player.setAppMiniSurface(inPictureInPicture.value || _browsing),
+      );
+    }
     if (mounted) setState(() {});
   }
 
@@ -365,7 +462,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     final browsePresentationChanged =
         _browsePlayerLoaded != _player.loaded ||
         _browsePlayerIsYouTube != _player.isYouTube ||
-        _browsePlayerMessage != _player.message;
+        _browsePlayerMessage != _player.message ||
+        // The mini player's pause/play icon.
+        _browsePlayerPlaying != _player.playing;
+    _browsePlayerPlaying = _player.playing;
     _browsePlayerLoaded = _player.loaded;
     _browsePlayerIsYouTube = _player.isYouTube;
     _browsePlayerMessage = _player.message;
@@ -476,6 +576,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           ? _player.title.trim()
           : 'Transpono',
       'subtitle': active ? _player.sourceLabel : '',
+      // The cover of the "now playing" widget: the video's own thumbnail.
+      'art': () {
+        final String id = _player.youtube?.media.videoId ?? '';
+        return active &&
+                _player.isYouTube &&
+                RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id)
+            ? 'https://i.ytimg.com/vi/$id/mqdefault.jpg'
+            : '';
+      }(),
       'position': _widgetTime(_player.position),
       'duration': _widgetTime(_player.duration),
       'progress': duration > 0 ? (position * 100 / duration).round() : 0,
@@ -577,6 +686,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _practice.removeListener(_practiceChanged);
     _practice.dispose();
     _bandSession.dispose();
+    _miniControlsTimer?.cancel();
     _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();
@@ -1636,7 +1746,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ),
           ),
-          if (_player.loaded && _player.isYouTube)
+          if (_player.loaded && _player.isYouTube && !_miniClosed)
             _miniPlayer(media, screen, padding),
         ],
       );
@@ -1647,10 +1757,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   static const double _miniVideoTop = 48;
 
   Rect _miniRect(Size screen, EdgeInsets padding) {
-    // YouTube's mobile player collapses and pauses below its 220×124 CSS-pixel
-    // minimum. Keep the native WebView viewport at least that wide so the video
-    // fits inside it instead of overflowing a smaller Flutter mini window.
-    final double width = (screen.width * .58).clamp(220.0, 280.0);
+    // One eighth smaller than the first size (58% of the width, 220 to 280).
+    // The page itself keeps its full size and is only drawn smaller, so
+    // YouTube's player never sees a width below its 220 px minimum.
+    final double width = (screen.width * .58).clamp(220.0, 280.0) * 7 / 8;
     final double height = width * 9 / 16;
     final Offset fallback = Offset(
       screen.width - width - 12,
@@ -1708,7 +1818,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (moved) {
       _settleMini(screen, padding);
     } else if (expandIfTap) {
-      _expandMini();
+      // With the buttons gone, the first tap only brings them back.
+      if (_miniControls == 2) {
+        _showMiniControls();
+      } else {
+        _expandMini();
+      }
     }
   }
 
@@ -1728,8 +1843,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             maxHeight: page.height,
             child: Transform(
               alignment: Alignment.topLeft,
+              // Two pages: the page is in its video-only mode (see
+              // _pipChanged). One page: the video sits under the site's
+              // top bar.
               transform: Matrix4.diagonal3Values(scale, scale, 1)
-                ..translateByDouble(0, -_miniVideoTop, 0, 1),
+                ..translateByDouble(0, _twoPages ? 0 : -_miniVideoTop, 0, 1),
               child: SizedBox.fromSize(size: page, child: media),
             ),
           ),
@@ -1738,92 +1856,134 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     ),
   );
 
+  /// Where the video sits at full size: the mini player grows to and shrinks
+  /// from this, so the change between the two reads as one movement.
+  Rect _miniFullRect(Size screen, EdgeInsets padding) => Rect.fromLTWH(
+    0,
+    padding.top + _miniVideoTop,
+    screen.width,
+    screen.width * 9 / 16,
+  );
+
   Widget _miniPlayer(Widget media, Size screen, EdgeInsets padding) {
-    final Rect rect = _miniRect(screen, padding);
-    final double scale = rect.width / screen.width;
-    return AnimatedPositioned(
+    final Rect mini = _miniRect(screen, padding);
+    final Rect full = _miniFullRect(screen, padding);
+    final Rect target = _miniFull ? full : mini;
+    return TweenAnimationBuilder<Rect?>(
       key: const Key('appMiniPlayer'),
+      tween: RectTween(end: target),
       duration: _miniDragging
           ? Duration.zero
-          : const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x99000000),
-              blurRadius: 24,
-              offset: Offset(0, 8),
+          : const Duration(milliseconds: 280),
+      curve: Curves.easeInOutCubic,
+      onEnd: _miniMoveEnded,
+      builder: (context, animated, _) {
+        final Rect rect = animated ?? target;
+        final double scale = rect.width / screen.width;
+        // 0 at full size, 1 as the small window: corners, shadow and the
+        // two buttons come in with it.
+        final double small =
+            ((full.width - rect.width) / (full.width - mini.width)).clamp(
+              0.0,
+              1.0,
+            );
+        final BorderRadius corners = BorderRadius.circular(12 * small);
+        return Positioned.fromRect(
+          rect: rect,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: corners,
+              boxShadow: [
+                BoxShadow(
+                  color: Color.fromRGBO(0, 0, 0, .6 * small),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Positioned.fill(
-                child: Listener(
-                  key: const Key('appMiniPlayerTouch'),
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (event) => _miniPointerDown(event, rect),
-                  onPointerMove: _miniPointerMove,
-                  onPointerUp: (event) =>
-                      _miniPointerEnd(event, screen, padding),
-                  onPointerCancel: (event) => _miniPointerEnd(
-                    event,
-                    screen,
-                    padding,
-                    expandIfTap: false,
-                  ),
-                  // The native view remains full-size; only its pixels are
-                  // transformed and clipped. Mini-player taps expand the
-                  // video, avoiding scaled native hit-test coordinates.
-                  child: IgnorePointer(
-                    child: OverflowBox(
-                      alignment: Alignment.topLeft,
-                      minWidth: screen.width,
-                      maxWidth: screen.width,
-                      minHeight: screen.height,
-                      maxHeight: screen.height,
-                      child: Transform(
-                        alignment: Alignment.topLeft,
-                        transform: Matrix4.diagonal3Values(scale, scale, 1),
-                        child: SizedBox.fromSize(size: screen, child: media),
+            child: ClipRRect(
+              borderRadius: corners,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned.fill(
+                    child: Listener(
+                      key: const Key('appMiniPlayerTouch'),
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: (event) => _miniPointerDown(event, mini),
+                      onPointerMove: _miniPointerMove,
+                      onPointerUp: (event) =>
+                          _miniPointerEnd(event, screen, padding),
+                      onPointerCancel: (event) => _miniPointerEnd(
+                        event,
+                        screen,
+                        padding,
+                        expandIfTap: false,
+                      ),
+                      // The native view remains full-size; only its pixels
+                      // are transformed and clipped. A tap anywhere but the
+                      // two buttons expands the video, avoiding scaled
+                      // native hit-test coordinates.
+                      child: IgnorePointer(
+                        child: OverflowBox(
+                          alignment: Alignment.topLeft,
+                          minWidth: screen.width,
+                          maxWidth: screen.width,
+                          minHeight: screen.height,
+                          maxHeight: screen.height,
+                          child: Transform(
+                            alignment: Alignment.topLeft,
+                            transform: Matrix4.diagonal3Values(scale, scale, 1),
+                            child: SizedBox.fromSize(
+                              size: screen,
+                              child: media,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-              Positioned(
-                top: 2,
-                right: 2,
-                child: Material(
-                  color: const Color(0x99000000),
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    key: const Key('appMiniPlayerExpand'),
-                    tooltip: 'Expandir vídeo',
-                    onPressed: _expandMini,
-                    icon: const Icon(Icons.open_in_full, size: 16),
-                    color: Colors.white,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 32,
-                      height: 32,
+                  // Like the YouTube app's mini player: only pause on the
+                  // left and close on the right.
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: Opacity(
+                      opacity: small,
+                      child: _MiniPlayerButton(
+                        key: const Key('appMiniPlayerPause'),
+                        phase: _miniControls,
+                        tooltip: _player.playing ? 'Pausar' : 'Reproduzir',
+                        icon: _player.playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        onPressed: () {
+                          _showMiniControls();
+                          unawaited(_player.playPause());
+                        },
+                      ),
                     ),
                   ),
-                ),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: Opacity(
+                      opacity: small,
+                      child: _MiniPlayerButton(
+                        key: const Key('appMiniPlayerClose'),
+                        phase: _miniControls,
+                        tooltip: 'Fechar vídeo',
+                        icon: Icons.close_rounded,
+                        onPressed: _closeMini,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -1881,50 +2041,123 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   child: media,
                 ),
               ),
-              if (!_player.loaded)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 8,
-                  // Browsing without a video (home, search, YouTube Music,
-                  // SoundCloud…): the same arrow on scrolling down as with a
-                  // video open.
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: pageScrolledDown,
-                    builder: (context, scrolledDown, _) {
-                      void open() => setState(() {
-                        _browsing = false;
-                        _mainControlsExpanded = true;
-                        _adjustmentsCoverVideo = false;
-                      });
-                      return AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: animation,
-                            child: child,
-                          ),
+              // On YouTube's own pages the button sits in the middle of the
+              // site's bottom bar, where the YouTube app has its "+".
+              ValueListenableBuilder<YouTubeBars?>(
+                valueListenable: pageYouTubeBars,
+                builder: (context, bars, pill) {
+                  // Scrolled down: the site's bars slid away, and the
+                  // button with them. On the Shorts page the app draws the
+                  // whole bottom bar itself, under the page.
+                  if (bars?.hidden == true || bars?.shorts == true) {
+                    return const Positioned(
+                      left: 0,
+                      top: 0,
+                      child: SizedBox.shrink(),
+                    );
+                  }
+                  // YouTube itself, before the page reported its bars (the
+                  // app just opened, a page is loading): nothing yet, instead
+                  // of the wide button flashing over the page.
+                  final Uri? home = widget.youtubeHome;
+                  if (bars == null &&
+                      _twoPages &&
+                      (home == null || home.host == 'm.youtube.com')) {
+                    return const Positioned(
+                      left: 0,
+                      top: 0,
+                      child: SizedBox.shrink(),
+                    );
+                  }
+                  final double? centre = bars?.pivot;
+                  if (centre == null) return pill!;
+                  final double? x = bars!.pivotX;
+                  return Positioned(
+                    left: x == null ? 0 : x - 22,
+                    right: x == null ? 0 : null,
+                    bottom: centre - 22,
+                    child: Center(
+                      widthFactor: x == null ? null : 1,
+                      child: _BarAdjustmentsButton(
+                        dark: bars.dark,
+                        onPressed: () =>
+                            _finishExpandMini(openAdjustments: true),
+                      ),
+                    ),
+                  );
+                },
+                child: _player.loaded
+                    ? const Positioned(
+                        left: 0,
+                        top: 0,
+                        child: SizedBox.shrink(),
+                      )
+                    : Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 8,
+                        // Browsing without a video (home, search, YouTube Music,
+                        // SoundCloud…): the same arrow on scrolling down as with a
+                        // video open.
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: pageScrolledDown,
+                          builder: (context, scrolledDown, _) {
+                            void open() => setState(() {
+                              _browsing = false;
+                              _mainControlsExpanded = true;
+                              _adjustmentsCoverVideo = false;
+                            });
+                            return AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: animation,
+                                      child: child,
+                                    ),
+                                  ),
+                              child: scrolledDown
+                                  ? Center(
+                                      key: const ValueKey('browseCompactOpen'),
+                                      child: _CompactCloseAdjustments(
+                                        open: true,
+                                        onPressed: open,
+                                      ),
+                                    )
+                                  : _MainAdjustmentsBar(
+                                      key: const ValueKey('browseFullOpen'),
+                                      expanded: false,
+                                      onPressed: open,
+                                    ),
+                            );
+                          },
                         ),
-                        child: scrolledDown
-                            ? Center(
-                                key: const ValueKey('browseCompactOpen'),
-                                child: _CompactCloseAdjustments(
-                                  open: true,
-                                  onPressed: open,
-                                ),
-                              )
-                            : _MainAdjustmentsBar(
-                                key: const ValueKey('browseFullOpen'),
-                                expanded: false,
-                                onPressed: open,
-                              ),
-                      );
-                    },
-                  ),
-                ),
+                      ),
+              ),
             ],
           ),
+        ),
+        // The Shorts page has no bottom bar on the site: the app draws one
+        // under the page (the page gets shorter and lays itself out).
+        ValueListenableBuilder<YouTubeBars?>(
+          valueListenable: pageYouTubeBars,
+          builder: (context, bars, _) {
+            final browse = _browse;
+            if (bars?.shorts != true || browse == null) {
+              return const SizedBox.shrink();
+            }
+            void open(String path) => unawaited(
+              browse.start(Uri.https('m.youtube.com', path)).catchError((_) {}),
+            );
+            return _ShortsBottomBar(
+              dark: bars!.dark,
+              avatar: bars.avatar,
+              onHome: () => open('/'),
+              onYou: () => open('/feed/library'),
+              onAdjustments: () => _finishExpandMini(openAdjustments: true),
+            );
+          },
         ),
       ],
     );
@@ -3003,6 +3236,209 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
     unawaited(session.releaseFocus());
   }
+}
+
+/// The bottom bar under the Shorts page, like the YouTube app's: home,
+/// Shorts (the page being shown), the adjustments button and the account.
+class _ShortsBottomBar extends StatelessWidget {
+  const _ShortsBottomBar({
+    required this.dark,
+    required this.avatar,
+    required this.onHome,
+    required this.onYou,
+    required this.onAdjustments,
+  });
+
+  final bool dark;
+  final String avatar;
+  final VoidCallback onHome;
+  final VoidCallback onYou;
+  final VoidCallback onAdjustments;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color ink = dark ? const Color(0xFFF1F1F1) : const Color(0xFF0F0F0F);
+    return Container(
+      key: const Key('shortsBottomBar'),
+      height: 48,
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF0F0F0F) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: dark ? const Color(0x1FFFFFFF) : const Color(0x1F000000),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _BarShapeButton(
+              key: const Key('shortsBarHome'),
+              tooltip: 'Início',
+              shape: _homeOutlineIconPath(),
+              color: ink,
+              onPressed: onHome,
+            ),
+          ),
+          Expanded(
+            child: _BarShapeButton(
+              tooltip: 'Shorts',
+              shape: _shortsFilledIconPath(),
+              color: ink,
+              onPressed: null,
+            ),
+          ),
+          Expanded(
+            child: Center(
+              child: _BarAdjustmentsButton(
+                dark: dark,
+                onPressed: onAdjustments,
+              ),
+            ),
+          ),
+          Expanded(
+            child: IconButton(
+              key: const Key('shortsBarYou'),
+              tooltip: 'Você',
+              onPressed: onYou,
+              icon: avatar.isEmpty
+                  ? Icon(Icons.account_circle_outlined, size: 28, color: ink)
+                  : ClipOval(
+                      child: Image.network(
+                        avatar,
+                        width: 26,
+                        height: 26,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stack) => Icon(
+                          Icons.account_circle_outlined,
+                          size: 28,
+                          color: ink,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A bar icon drawn from a shape of the site's own icon set (24 x 24 box).
+class _BarShapeButton extends StatelessWidget {
+  const _BarShapeButton({
+    super.key,
+    required this.tooltip,
+    required this.shape,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final Path shape;
+  final Color color;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    onPressed: onPressed ?? () {},
+    icon: CustomPaint(
+      size: const Size(28, 28),
+      painter: _ShapePainter(shape, color),
+    ),
+  );
+}
+
+class _ShapePainter extends CustomPainter {
+  const _ShapePainter(this.shape, this.color);
+
+  final Path shape;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24, size.height / 24);
+    canvas.drawPath(shape, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_ShapePainter old) => old.color != color;
+}
+
+/// One of the mini player's two buttons: a white icon on a dark disc.
+class _MiniPlayerButton extends StatelessWidget {
+  const _MiniPlayerButton({
+    super.key,
+    required this.phase,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  /// 0 = on a dark disc, 1 = hollow (only the icon), 2 = gone.
+  final int phase;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    ignoring: phase == 2,
+    child: AnimatedOpacity(
+      opacity: phase == 2 ? 0 : 1,
+      duration: const Duration(milliseconds: 350),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 350),
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: phase == 0 ? const Color(0x73000000) : Colors.transparent,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: IconButton(
+            tooltip: tooltip,
+            onPressed: onPressed,
+            icon: Icon(icon, size: 20),
+            color: Colors.white,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// The adjustments button inside YouTube's bottom bar, in the slot where
+/// the YouTube app has its "+": a plain sliders icon, the size of the bar's
+/// own icons (no ring around it, and it does not change).
+class _BarAdjustmentsButton extends StatelessWidget {
+  const _BarAdjustmentsButton({required this.dark, required this.onPressed});
+
+  final bool dark;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 44,
+    height: 44,
+    child: IconButton(
+      key: const Key('barOpenAdjustments'),
+      tooltip: 'Abrir ajustes',
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      icon: Icon(
+        Icons.tune_rounded,
+        size: 28,
+        color: dark ? const Color(0xFFF1F1F1) : const Color(0xFF0F0F0F),
+      ),
+    ),
+  );
 }
 
 /// Small round "close adjustments" arrow shown while scrolling down.

@@ -34,6 +34,7 @@ import 'stem_panel.dart';
 import 'ambient_rhythm_trial.dart';
 
 part 'studio_player_home.dart';
+part 'youtube_bar_icons.dart';
 
 /// Resolution-independent shell based on the six references supplied with the
 /// project. Actions without a product implementation remain explicitly pending.

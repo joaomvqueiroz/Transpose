@@ -12,6 +12,597 @@
   // sandbox, where the page's own prototype is reached through
   // wrappedJSObject and the hook is handed back with exportFunction.)
   const soundCloud = () => /(^|\.)soundcloud\.com$/i.test(window.location.hostname);
+  // The YouTube mobile site itself (not YouTube Music).
+  const plainYouTube = () => /(^|\.)youtube\.com$/i.test(window.location.hostname) &&
+    !/^music\./i.test(window.location.hostname);
+
+  // The YouTube site dressed like the YouTube app for Android:
+  // - bottom bar: icons only (home, Shorts, a free slot, "you"); the free slot
+  //   is where the official app has "+", and where this app draws its round
+  //   "adjustments" button; subscriptions move to the top tabs;
+  // - top: the filter chips become text tabs with a red line under the
+  //   selected one, with a "subscriptions" tab after the first;
+  // - scrolling down hides both bars, scrolling up brings them back.
+  if (plainYouTube() && !window.__transponoBars) {
+    window.__transponoBars = true;
+    const bars = document.createElement('style');
+    bars.id = 'transpono-bars-style';
+    bars.textContent = `
+      /* The site keeps room under the bar for the system's buttons; the app
+         already sits above them, so the bar goes right to the bottom. */
+      ytm-pivot-bar-renderer {
+        bottom: 0 !important; padding-bottom: 0 !important;
+        margin-bottom: 0 !important; height: 48px !important;
+        min-height: 0 !important; box-sizing: border-box !important;
+        justify-content: flex-start !important;
+        transition: transform .22s ease;
+      }
+      ytm-pivot-bar-renderer ytm-pivot-bar-item-renderer {
+        flex: 0 0 25% !important; width: 25% !important; max-width: 25% !important;
+        margin: 0 !important;
+      }
+      ytm-pivot-bar-renderer ytm-pivot-bar-item-renderer:has(.pivot-subs) {
+        display: none !important;
+      }
+      ytm-pivot-bar-renderer ytm-pivot-bar-item-renderer:has(.pivot-shorts) {
+        margin-right: 25% !important;
+      }
+      ytm-pivot-bar-renderer .pivot-bar-item-tab { height: 48px !important; }
+      ytm-pivot-bar-renderer .pivot-bar-item-title { display: none !important; }
+      ytm-pivot-bar-renderer c3-icon {
+        width: 28px !important; height: 28px !important;
+      }
+      /* Text tabs instead of chips. */
+      ytm-feed-filter-chip-bar-renderer { transition: transform .22s ease; }
+      ytm-mobile-topbar-renderer { transition: transform .22s ease; }
+      ytm-feed-filter-chip-bar-renderer ytm-chip-cloud-chip-renderer.more-drawer,
+      ytm-feed-filter-chip-bar-renderer ytm-chip-divider-renderer {
+        display: none !important;
+      }
+      ytm-feed-filter-chip-bar-renderer ytm-chip-cloud-chip-renderer,
+      ytm-feed-filter-chip-bar-renderer .transpono-tab {
+        margin: 0 10px !important; padding: 0 !important;
+      }
+      ytm-feed-filter-chip-bar-renderer .chip-container.chip-container.chip-container.chip-container,
+      ytm-feed-filter-chip-bar-renderer .transpono-tab {
+        background: transparent !important; border: 0 !important;
+        border-radius: 0 !important; padding: 0 2px !important;
+        height: 40px !important; min-width: 0 !important;
+        display: flex !important; align-items: center !important;
+        color: var(--yt-spec-text-primary, #f1f1f1) !important;
+        font-size: 17px !important; font-weight: 500 !important;
+        white-space: nowrap; box-sizing: border-box !important;
+        border-bottom: 3px solid transparent !important;
+      }
+      /* The row is a line of inline blocks: the extra tab stays in it. */
+      ytm-feed-filter-chip-bar-renderer .transpono-tab {
+        display: inline-flex !important; vertical-align: top !important;
+      }
+      ytm-feed-filter-chip-bar-renderer .chip-container.chip-container.chip-container.chip-container * {
+        color: inherit !important; font-size: inherit !important;
+        font-weight: inherit !important; background: transparent !important;
+      }
+      ytm-feed-filter-chip-bar-renderer ytm-chip-cloud-chip-renderer[aria-selected="true"] .chip-container.chip-container.chip-container.chip-container {
+        border-bottom-color: #ff0033 !important;
+      }
+      /* Scrolled down: both bars slide away. */
+      html.transpono-bars-away ytm-mobile-topbar-renderer,
+      html.transpono-bars-away ytm-feed-filter-chip-bar-renderer {
+        transform: translateY(-110px) !important;
+      }
+      html.transpono-bars-away ytm-pivot-bar-renderer {
+        transform: translateY(60px) !important;
+      }
+      /* The app's own row of tabs (see ensureTopTabs): it stands where the
+         site's filter chips are on the home page, and is also there on the
+         subscriptions page, which has no chips. */
+      .tp-tabs {
+        position: fixed; left: 0; right: 0; top: 48px; height: 48px;
+        z-index: 3; display: flex; align-items: stretch;
+        overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+        padding: 0 6px; box-sizing: border-box;
+        background: var(--yt-spec-base-background, #0f0f0f);
+        transition: transform .22s ease;
+        scrollbar-width: none;
+      }
+      .tp-tabs::-webkit-scrollbar { display: none; }
+      .tp-tabs .tp-tab {
+        flex: 0 0 auto; display: flex; align-items: center;
+        height: 40px; margin: 0 10px; padding: 0 2px;
+        border: 0; border-bottom: 3px solid transparent; background: none;
+        color: var(--yt-spec-text-primary, #f1f1f1);
+        font: 500 17px/1 Roboto, Arial, sans-serif; box-sizing: border-box;
+      }
+      .tp-tabs .tp-tab[aria-selected="true"] { border-bottom-color: #ff0033; }
+      html.tp-tabs-on ytm-feed-filter-chip-bar-renderer { visibility: hidden !important; }
+      html.tp-tabs-on.tp-tabs-pad .page-container { padding-top: 48px !important; }
+      html.transpono-bars-away .tp-tabs { transform: translateY(-110px) !important; }
+      /* The "you" page dressed like the YouTube app's: a teal wash at the
+         top, an accounts pill instead of the logo, the name large, a light
+         "channel" button, plain section titles with an arrow, and the
+         playlists as a list. Dark theme only for the colours. */
+      html.tp-library:not([data-transpono-theme="light"]) ytm-mobile-topbar-renderer#header-bar,
+      html.tp-library:not([data-transpono-theme="light"]) ytm-mobile-topbar-renderer#header-bar header {
+        /* The bar has no colour of its own: it takes the colour the page's
+           background has where the bar is (see libraryBarColour). */
+        background: var(--tp-bar-bg, #0d3a42) !important;
+      }
+      html.tp-library:not([data-transpono-theme="light"]) .page-container {
+        background: linear-gradient(180deg, #0d3a42 0px, #0f0f0f 430px) !important;
+      }
+      html.tp-library ytm-browse,
+      html.tp-library yt-page-header-renderer,
+      html.tp-library yt-page-header-view-model,
+      html.tp-library ytm-single-column-browse-results-renderer,
+      html.tp-library ytm-section-list-renderer,
+      html.tp-library ytm-item-section-renderer {
+        background: transparent !important;
+      }
+      html.tp-library ytm-home-logo c3-icon { display: none !important; }
+      html.tp-library ytm-home-logo button::after {
+        content: attr(data-tp-accounts) '  \\25BE';
+        display: inline-flex; align-items: center; height: 36px;
+        margin-left: 12px; padding: 0 16px; border-radius: 18px;
+        background: rgba(255, 255, 255, .1);
+        color: var(--yt-spec-text-primary, #f1f1f1);
+        font-size: 15px; font-weight: 500; white-space: nowrap;
+      }
+      html.tp-library .dynamicTextViewModelH1 {
+        font-size: 28px !important; line-height: 34px !important;
+        font-weight: 700 !important;
+      }
+      html.tp-library:not([data-transpono-theme="light"]) .ytContentMetadataViewModelMetadataRow > span:first-child {
+        color: #7fd6e8 !important;
+      }
+      html.tp-library .ytContentMetadataViewModelDelimiter,
+      html.tp-library .ytContentMetadataViewModelMetadataTextLastPart {
+        display: none !important;
+      }
+      html.tp-library .ytFlexibleActionsViewModelActionRow { gap: 8px; }
+      html.tp-library .ytFlexibleActionsViewModelAction { flex: 1 1 0 !important; padding: 0 !important; }
+      html.tp-library .ytFlexibleActionsViewModelAction:has(button):not(.tp-channel) {
+        display: none !important;
+      }
+      html.tp-library .ytFlexibleActionsViewModelAction button-view-model,
+      html.tp-library .ytFlexibleActionsViewModelAction button-view-model a {
+        width: 100% !important; height: 36px !important; border-radius: 18px !important;
+      }
+      html.tp-library .tp-channel a {
+        display: flex; align-items: center; justify-content: center;
+        height: 36px; border-radius: 18px; text-decoration: none;
+        background: #c9f3fb; color: #0f0f0f;
+        font-size: 14px; font-weight: 500;
+      }
+      html.tp-library .horizontal-card-list-top-container {
+        justify-content: flex-start !important; align-items: center !important;
+      }
+      html.tp-library .ytm-rich-list-header-title {
+        font-size: 20px !important; line-height: 26px !important;
+        font-weight: 700 !important; overflow: visible !important;
+      }
+      html.tp-library .horizontal-card-list-button a {
+        border: 0 !important; background: none !important;
+        min-width: 0 !important; padding: 0 6px !important;
+      }
+      html.tp-library .horizontal-card-list-button yt-light-shape { display: none !important; }
+      html.tp-library .horizontal-card-list-button .ytSpecButtonShapeNextButtonTextContent {
+        font-size: 0 !important;
+      }
+      html.tp-library .horizontal-card-list-button .ytSpecButtonShapeNextButtonTextContent::after {
+        content: '\\203A'; font-size: 28px; line-height: 36px;
+        color: var(--yt-spec-text-primary, #f1f1f1);
+      }
+      html.tp-library .horizontal-card-list-cards:has(ytm-playlist-card-renderer) {
+        overflow-x: hidden !important; white-space: normal !important;
+      }
+      html.tp-library ytm-playlist-card-renderer.horizontal-card-list-card {
+        display: flex !important; align-items: center !important;
+        width: auto !important; margin: 0 12px 14px !important;
+      }
+      html.tp-library ytm-playlist-card-renderer .playlist-card-image {
+        flex: 0 0 160px !important; width: 160px !important;
+      }
+      html.tp-library ytm-playlist-card-renderer .playlist-card-metadata {
+        flex: 1 1 auto !important; min-width: 0 !important;
+        padding-left: 16px !important;
+      }
+      html.tp-library ytm-playlist-card-renderer .playlist-card-title {
+        font-size: 16px !important; line-height: 21px !important;
+        max-height: 42px !important; white-space: normal !important;
+      }
+      html.tp-library ytm-playlist-card-renderer .playlist-card-title-container {
+        height: auto !important;
+      }`;
+    (document.head || document.documentElement).appendChild(bars);
+  }
+  // The row of tabs under the top bar, like the YouTube app's: home,
+  // subscriptions, music, live and "more". The site has filter chips on the
+  // home page only; this row stands in their place there and stays on the
+  // subscriptions page too. Each tab works the site's own controls: the
+  // bottom-bar tabs (home, subscriptions), the home page's "music" and
+  // "live" chips, and the "explore" drawer for "more".
+  function ensureTopTabs() {
+    if (!plainYouTube()) return;
+    try {
+      const root = document.documentElement;
+      const path = window.location.pathname;
+      const wanted = (path === '/' || path === '/feed/subscriptions') &&
+        !!document.querySelector('ytm-pivot-bar-renderer');
+      let row = document.querySelector('.tp-tabs');
+      if (!wanted) {
+        if (row) row.remove();
+        root.classList.remove('tp-tabs-on', 'tp-tabs-pad');
+        return;
+      }
+      const chipRow = document.querySelector(
+        'ytm-feed-filter-chip-bar-renderer .chip-bar-contents');
+      const chips = chipRow
+        ? [...chipRow.querySelectorAll('ytm-chip-cloud-chip-renderer')] : [];
+      const words = chip => (chip.textContent || '').trim();
+      const chipOf = kind => {
+        if (kind === 'home') return chips.find(c => c.classList.contains('all-chip-renderer'));
+        if (kind === 'music') return chips.find(c => /^(m[uú]sica|music)$/i.test(words(c)));
+        if (kind === 'live') return chips.find(c => /^(ao vivo|em direto|live)$/i.test(words(c)));
+        if (kind === 'more') return chips.find(c => c.classList.contains('more-drawer'));
+        return null;
+      };
+      const tap = element => {
+        if (!element) return false;
+        (element.querySelector('.chip-container') || element).click();
+        return true;
+      };
+      // A tab whose control only exists on the home page: go there first,
+      // then use it as soon as it shows up.
+      const pending = window.__transponoPendingTab;
+      if (pending && path === '/' && chipOf(pending)) {
+        window.__transponoPendingTab = null;
+        tap(chipOf(pending));
+      }
+      const pivotLabel = name => {
+        const title = document.querySelector(
+          `ytm-pivot-bar-renderer .${name} .pivot-bar-item-title`);
+        return title ? (title.textContent || '').trim() : '';
+      };
+      const remembered = window.__transponoTabLabels || (window.__transponoTabLabels = {});
+      const label = (kind, found, fallback) => {
+        if (found) remembered[kind] = found;
+        return remembered[kind] || fallback;
+      };
+      const tabs = [
+        ['home', label('home', pivotLabel('pivot-w2w'), 'Início')],
+        ['subs', label('subs', pivotLabel('pivot-subs'), 'Inscrições')],
+        ['music', label('music', chipOf('music') ? words(chipOf('music')) : '', 'Música')],
+        ['live', label('live', chipOf('live') ? words(chipOf('live')) : '', 'Ao vivo')],
+        ['more', 'Mais'],
+      ];
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'tp-tabs';
+        row.setAttribute('role', 'tablist');
+        row.addEventListener('click', event => {
+          const tab = event.target && event.target.closest
+            ? event.target.closest('.tp-tab') : null;
+          if (!tab) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const kind = tab.getAttribute('data-kind');
+          const here = window.location.pathname;
+          const pivot = name => {
+            const target = document.querySelector(`ytm-pivot-bar-renderer .${name}`);
+            if (target) target.click();
+          };
+          if (kind === 'subs') {
+            pivot('pivot-subs');
+          } else if (here !== '/') {
+            window.__transponoPendingTab = kind;
+            pivot('pivot-w2w');
+          } else {
+            const live = document.querySelector(
+              'ytm-feed-filter-chip-bar-renderer .chip-bar-contents');
+            const all = live ? [...live.querySelectorAll('ytm-chip-cloud-chip-renderer')] : [];
+            const text = chip => (chip.textContent || '').trim();
+            const target =
+              kind === 'home' ? all.find(c => c.classList.contains('all-chip-renderer')) :
+              kind === 'music' ? all.find(c => /^(m[uú]sica|music)$/i.test(text(c))) :
+              kind === 'live' ? all.find(c => /^(ao vivo|em direto|live)$/i.test(text(c))) :
+              all.find(c => c.classList.contains('more-drawer'));
+            if (target) (target.querySelector('.chip-container') || target).click();
+          }
+          if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+        });
+        document.body.appendChild(row);
+      }
+      // Which tab is the one being shown.
+      const selectedChip = chips.find(c => c.getAttribute('aria-selected') === 'true');
+      const drawerOpen = !!document.querySelector('.ytmDrawerLayoutContainerOpened');
+      const current = path === '/feed/subscriptions' ? 'subs'
+        : drawerOpen ? 'more'
+        : selectedChip && selectedChip === chipOf('music') ? 'music'
+        : selectedChip && selectedChip === chipOf('live') ? 'live'
+        : 'home';
+      const signature = tabs.map(t => t.join(':')).join('|');
+      if (row.getAttribute('data-tabs') !== signature) {
+        row.setAttribute('data-tabs', signature);
+        while (row.firstChild) row.removeChild(row.firstChild);
+        for (const [kind, text] of tabs) {
+          const tab = document.createElement('button');
+          tab.className = 'tp-tab';
+          tab.setAttribute('type', 'button');
+          tab.setAttribute('role', 'tab');
+          tab.setAttribute('data-kind', kind);
+          tab.textContent = text;
+          row.appendChild(tab);
+        }
+      }
+      for (const tab of row.children) {
+        const on = tab.getAttribute('data-kind') === current;
+        if (tab.getAttribute('aria-selected') !== String(on)) {
+          tab.setAttribute('aria-selected', String(on));
+        }
+      }
+      root.classList.add('tp-tabs-on');
+      // The home page already keeps room for its chips; other pages do not.
+      root.classList.toggle('tp-tabs-pad', !chipRow);
+    } catch (_) {
+      // The row is an extra: the page works without it.
+    }
+  }
+  // The site's "open the app" button in the top bar has no use inside this
+  // app: it goes, and the app's own start-screen icon takes its place. Found
+  // by its words, since the site gives it no stable name.
+  function hideOpenApp(header) {
+    try {
+      for (const button of header.querySelectorAll('a, button')) {
+        if (button.__transponoChecked) continue;
+        button.__transponoChecked = true;
+        const words = ((button.getAttribute('aria-label') || '') + ' ' +
+          (button.textContent || '')).trim();
+        if (!/^(abrir|open|abre|usar)\b.*\b(app|aplicativo|aplicação)\b/i.test(words)) continue;
+        const holder = button.closest('ytm-button-renderer') || button;
+        holder.style.setProperty('display', 'none', 'important');
+      }
+    } catch (_) {}
+  }
+  // Shorts start in a low quality inside an app's page (360p on a phone
+  // that shows 1080p): ask the site's player for HD, once per Short and
+  // again if it fell back.
+  function shortsQuality() {
+    try {
+      if (!/^\/shorts(\/|$)/.test(window.location.pathname)) return;
+      const player = document.querySelector('#movie_player');
+      if (!player || typeof player.setPlaybackQualityRange !== 'function') return;
+      const now = Date.now();
+      const id = window.location.pathname;
+      const low = typeof player.getPlaybackQuality === 'function' &&
+        /^(tiny|small|medium|large)$/.test(player.getPlaybackQuality() || '');
+      if (window.__transponoShortsQ === id &&
+          (!low || now - (window.__transponoShortsQAt || 0) < 4000)) return;
+      const levels = typeof player.getAvailableQualityLevels === 'function'
+        ? player.getAvailableQualityLevels() || [] : [];
+      const best = ['hd1080', 'hd720'].find(level => levels.indexOf(level) >= 0);
+      if (!best) return;
+      window.__transponoShortsQ = id;
+      window.__transponoShortsQAt = now;
+      player.setPlaybackQualityRange(best, best);
+    } catch (_) {
+      // Quality stays as the site chose it.
+    }
+  }
+  // The app's start-screen icon is drawn by the page itself, inside the
+  // site's top bar, so it moves with the bar exactly (sliding away and back,
+  // scrolling with the video page): an icon drawn by the app over the page
+  // always arrived a moment late. A tap is counted and the app acts on it.
+  function placeHomeIcon(header, free, right) {
+    try {
+      if (!header || typeof document.createElementNS !== 'function') return false;
+      let icon = header.querySelector('.tp-home-icon');
+      if (!icon) {
+        icon = document.createElement('button');
+        icon.className = 'tp-home-icon';
+        icon.setAttribute('type', 'button');
+        icon.setAttribute('aria-label', 'Menu inicial do Transpono');
+        icon.style.cssText = 'position:absolute;top:0;width:48px;height:48px;' +
+          'margin:0;padding:12px;border:0;background:none;box-sizing:border-box;' +
+          'color:var(--yt-spec-text-primary,#f1f1f1);z-index:3;';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '24');
+        svg.setAttribute('height', '24');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('fill', 'currentColor');
+        path.setAttribute('d', 'M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4z' +
+          'm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z');
+        svg.appendChild(path);
+        icon.appendChild(svg);
+        icon.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          window.__transponoHomeSeq = (window.__transponoHomeSeq || 0) + 1;
+          if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+        });
+        if (getComputedStyle(header).position === 'static') header.style.position = 'relative';
+        header.appendChild(icon);
+      }
+      // Measured against the header's own box (it can be narrower than the
+      // page when the phone is on its side).
+      const box = header.getBoundingClientRect();
+      const fromRight = Math.max(0, Math.round(right - (window.innerWidth - box.right)));
+      icon.style.right = fromRight + 'px';
+      icon.style.display = free ? 'block' : 'none';
+      return free;
+    } catch (_) {
+      return false;
+    }
+  }
+  // Bars away while reading down a list page; never on a video page or while
+  // typing in the search field.
+  function syncBarsAway() {
+    if (!plainYouTube()) return;
+    try {
+      const field = document.activeElement;
+      const typing = !!field && !!field.matches &&
+        field.matches('input, textarea, [contenteditable="true"]');
+      const away = window.__transponoScrollDir === 'down' && !typing &&
+        window.location.pathname !== '/watch' &&
+        !document.documentElement.classList.contains('transpono-mini');
+      document.documentElement.classList.toggle('transpono-bars-away', away);
+    } catch (_) {}
+  }
+  // The "you" page's top bar copies the background behind it: the page's
+  // wash goes from teal (13, 58, 66) at the top to the page's dark
+  // (15, 15, 15) 430 px down, and the bar shows the colour at its own place
+  // as the page scrolls under it, so it reads as see-through to the
+  // background only, never to the content.
+  function libraryBarColour() {
+    try {
+      const root = document.documentElement;
+      if (!root.classList.contains('tp-library')) return;
+      const scroller = document.scrollingElement || root;
+      const top = Math.max(0, window.scrollY || scroller.scrollTop || 0);
+      const t = Math.min(1, top / 430);
+      const mix = (a, b) => Math.round(a + (b - a) * t);
+      root.style.setProperty(
+        '--tp-bar-bg', `rgb(${mix(13, 15)}, ${mix(58, 15)}, ${mix(66, 15)})`);
+    } catch (_) {}
+  }
+  // The "you" page: the accounts pill takes the logo's place (it opens the
+  // site's own account switcher) and a light "channel" button stands where
+  // the switcher's button was, opening the channel link the page shows.
+  function dressLibraryPage() {
+    if (!plainYouTube()) return;
+    try {
+      const root = document.documentElement;
+      const library = window.location.pathname === '/feed/library';
+      root.classList.toggle('tp-library', library);
+      if (!library) return;
+      const switcher = document.querySelector('.ytFlexibleActionsViewModelAction button');
+      const logo = document.querySelector('ytm-home-logo button');
+      if (logo && switcher && !logo.hasAttribute('data-tp-accounts')) {
+        const words = (switcher.getAttribute('aria-label') || '').trim().split(/\s+/);
+        // "Mudar de conta" → "Contas": the last word, in the plural.
+        const last = words.length ? words[words.length - 1] : '';
+        logo.setAttribute('data-tp-accounts',
+          last ? last.charAt(0).toUpperCase() + last.slice(1) + 's' : 'Contas');
+      }
+      if (!window.__transponoBarColour && typeof document.addEventListener === 'function') {
+        window.__transponoBarColour = true;
+        document.addEventListener('scroll', libraryBarColour, {passive: true, capture: true});
+      }
+      libraryBarColour();
+      if (!window.__transponoAccountsTap && typeof document.addEventListener === 'function') {
+        window.__transponoAccountsTap = true;
+        document.addEventListener('click', event => {
+          if (!document.documentElement.classList.contains('tp-library')) return;
+          if (!event.target || !event.target.closest ||
+              !event.target.closest('ytm-home-logo')) return;
+          const target = document.querySelector('.ytFlexibleActionsViewModelAction button');
+          if (!target) return;
+          event.preventDefault();
+          event.stopPropagation();
+          target.click();
+        }, true);
+      }
+      const row = document.querySelector('.ytFlexibleActionsViewModelActionRow');
+      const channel = document.querySelector(
+        '.ytContentMetadataViewModelMetadataTextLastPart a[href^="/channel/"], ' +
+        '.ytContentMetadataViewModelMetadataTextLastPart a[href^="/@"]');
+      if (row && channel && !row.querySelector('.tp-channel')) {
+        const holder = document.createElement('div');
+        holder.className =
+          'ytFlexibleActionsViewModelAction ytFlexibleActionsViewModelActionRowAction tp-channel';
+        const link = document.createElement('a');
+        link.setAttribute('href', channel.getAttribute('href'));
+        link.textContent = (channel.textContent || '').trim() || 'Ver canal';
+        holder.appendChild(link);
+        row.insertBefore(holder, row.firstChild);
+      }
+    } catch (_) {
+      // Dressing only: the page works without it.
+    }
+  }
+  // Where the page's own bars are, for the app's buttons that sit in them.
+  // Measured from the layout (offset*), so a bar that is sliding in or out
+  // reports its resting place.
+  function pageBars() {
+    if (!plainYouTube()) return null;
+    try {
+      ensureTopTabs();
+      dressLibraryPage();
+      shortsQuality();
+      syncBarsAway();
+      const bar = document.querySelector('ytm-pivot-bar-renderer');
+      const shorts = bar
+        ? bar.querySelector('ytm-pivot-bar-item-renderer:has(.pivot-shorts)') : null;
+      // The account picture of the bar's last tab, kept for the bar the app
+      // draws itself under the Shorts page (the site has none there).
+      try {
+        const picture = bar && bar.querySelector('.pivot-you img, avatar-view-model img');
+        if (picture && picture.src && /^https:\/\//.test(picture.src)) {
+          window.__transponoAvatar = picture.src;
+          window.localStorage.setItem('transpono-avatar', picture.src);
+        } else if (!window.__transponoAvatar) {
+          window.__transponoAvatar = window.localStorage.getItem('transpono-avatar') || '';
+        }
+      } catch (_) {}
+      const shown = !!bar && !!shorts && bar.offsetHeight > 20 &&
+        getComputedStyle(bar).visibility !== 'hidden';
+      // The site's top bar, on any of its pages (lists, a video, a playlist,
+      // a channel…). The app's start-screen icon lives only there, just left
+      // of the bar's own icons on the right (search; on some pages also
+      // settings or a menu). Where the bar has no room for it (a search
+      // field fills it), is scrolled out of sight or does not exist, the
+      // icon is hidden: it never floats over the page.
+      const header = document.querySelector(
+        'ytm-mobile-topbar-renderer header.mobile-topbar-header');
+      const barThere = !!header && header.offsetHeight > 20;
+      if (barThere) hideOpenApp(header);
+      const away = document.documentElement.classList.contains('transpono-bars-away');
+      let topFree = barThere &&
+        (away || header.getBoundingClientRect().top > -8);
+      let topRight = 48;
+      if (topFree) {
+        let left = window.innerWidth;
+        for (const icon of header.querySelectorAll('button, a')) {
+          if (icon.classList.contains('tp-home-icon')) continue;
+          const at = icon.getBoundingClientRect();
+          if (at.width > 20 && at.width < 80 && at.left > window.innerWidth / 2) {
+            left = Math.min(left, at.left);
+          }
+        }
+        topRight = Math.round(window.innerWidth - left);
+        // The icon's own 48 px slot must be free of the search field.
+        const slotLeft = left - 48;
+        for (const field of header.querySelectorAll('input:not([type="file"])')) {
+          const at = field.getBoundingClientRect();
+          if (at.width > 20 && at.height > 8 && at.right > slotLeft + 4) {
+            topFree = false;
+          }
+        }
+        if (slotLeft < window.innerWidth / 3) topFree = false;
+      }
+      const topAway = !topFree;
+      const homeInPage = placeHomeIcon(header, topFree, topRight);
+      return {
+        // Centre of the free slot: up from the bottom, and from the left.
+        pivot: shown ? Math.round(bar.offsetHeight / 2) : null,
+        pivotX: shown
+          ? Math.round(shorts.offsetLeft + shorts.offsetWidth * 1.5) : null,
+        topFree,
+        topRight,
+        // Also while the site's side drawer ("more") covers the page.
+        hidden: away || !!document.querySelector('.ytmDrawerLayoutContainerOpened'),
+        // The Shorts page: the site shows no bottom bar there, the app draws
+        // one under the page.
+        shorts: !bar && /^\/shorts(\/|$)/.test(window.location.pathname),
+        avatar: typeof window.__transponoAvatar === 'string' ? window.__transponoAvatar : '',
+        topAway,
+        homeInPage,
+        dark: document.documentElement.getAttribute('data-transpono-theme') !== 'light',
+      };
+    } catch (_) {
+      return null;
+    }
+  }
   if (soundCloud() && !window.__transponoPlayHook) {
     window.__transponoPlayHook = true;
     try {
@@ -45,7 +636,16 @@
       const before = lastTop.get(target);
       if (Math.abs(top - before) < 12) return;
       lastTop.set(target, top);
-      window.__transponoScrollDir = top > before && top > 40 ? 'down' : 'up';
+      const direction = top > before && top > 40 ? 'down' : 'up';
+      if (direction === window.__transponoScrollDir) return;
+      window.__transponoScrollDir = direction;
+      // The bars slide at once and the app hears of it at once, so its own
+      // buttons leave and return together with the bars (not at the next
+      // periodic report).
+      try {
+        if (typeof syncBarsAway === 'function') syncBarsAway();
+        if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+      } catch (_) {}
     }, {passive: true, capture: true});
   }
   // Two-page mode, browse page: a tap on a video (a /watch link) is handed to
@@ -55,13 +655,12 @@
     window.__transponoOpenWatch = true;
     document.addEventListener('click', event => {
       if (!window.__transponoBrowseOnly || !event.target || !event.target.closest) return;
-      const link = event.target.closest('a[href*="/watch?"], a[href*="/shorts/"]');
+      // Shorts are not handed over: they open here, in the site's own
+      // vertical player, like in the YouTube app.
+      const link = event.target.closest('a[href*="/watch?"]');
       if (!link) return;
       let url;
       try { url = new URL(link.getAttribute('href'), window.location.href); } catch (_) { return; }
-      // A Short plays in the player page as a normal watch page.
-      const short = url.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
-      if (short) url = new URL(`/watch?v=${short[1]}`, url);
       if (url.pathname !== '/watch' || !url.searchParams.get('v')) return;
       event.preventDefault();
       event.stopPropagation();
@@ -144,6 +743,11 @@
       html.transpono-app-mini-surface #player-container-id * {
         visibility: visible !important;
       }
+      /* In the small window only the picture shows: YouTube's own controls
+         (play, time, settings…) are hidden; the app draws pause and close. */
+      html.transpono-app-mini-surface #player-container-id *:not(video):not(:has(video)) {
+        visibility: hidden !important;
+      }
       html.transpono-app-mini-surface #player-container-id,
       html.transpono-app-mini-surface #player-container-id.sticky-player {
         position: fixed !important;
@@ -171,17 +775,25 @@
     // Keep the YouTube player at its regular CSS size while Flutter clips and
     // scales the full-size WebView into the app's mini-player window. Resizing
     // the player itself makes YouTube enter tiny mode and pause playback.
+    // The video fills the page's width; the app then scales the whole page
+    // down to the small window. Measured again when the page changes size
+    // (the phone was turned), or the video would keep its old width.
+    const sizeAppMini = () => {
+      const contentWidth = Math.max(window.innerWidth, 220);
+      root.style.setProperty(
+        '--transpono-app-mini-content-width', `${contentWidth}px`);
+      root.style.setProperty(
+        '--transpono-app-mini-content-height', `${contentWidth * 9 / 16}px`);
+    };
     window.__transponoSetAppMiniSurface = visible => {
-      const wasVisible = root.classList.contains('transpono-app-mini-surface');
-      if (visible && !wasVisible) {
-        const contentWidth = Math.max(window.innerWidth, 220);
-        root.style.setProperty(
-          '--transpono-app-mini-content-width', `${contentWidth}px`);
-        root.style.setProperty(
-          '--transpono-app-mini-content-height', `${contentWidth * 9 / 16}px`);
-      }
+      if (visible) sizeAppMini();
       root.classList.toggle('transpono-app-mini-surface', visible);
     };
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', () => {
+        if (root.classList.contains('transpono-app-mini-surface')) sizeAppMini();
+      });
+    }
     const root = document.documentElement;
     const playerOf = () => document.querySelector('#player-container-id.sticky-player');
     // m.youtube.com keeps some bars (the filter chips) sticky/fixed just under
@@ -248,8 +860,9 @@
         dragStartY = null;
         return;
       }
-      // Never while the studio's adjustments are open over the page.
-      dragStartY = player && !window.__transponoAdjustmentsOpen &&
+      // Also while the studio's adjustments are open: the video shrinks the
+      // same way, and the app closes the adjustments as it does.
+      dragStartY = player &&
         window.location.pathname === '/watch' && player.contains(event.target)
         ? touch.clientY : null;
     }, {passive: true, capture: true});
@@ -1130,9 +1743,13 @@
           field.matches('input, textarea, [contenteditable="true"]');
       })(),
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
+      bars: pageBars(),
+      // The site's vertical Shorts player is on screen.
+      shortsPage: /^\/shorts(\/|$)/.test(window.location.pathname),
       // Counters, not one-shot flags: any snapshot (there are several
       // callers) may read them; the app acts on each new number once.
       minimizeSeq: window.__transponoMinimizeSeq || 0,
+      homeSeq: window.__transponoHomeSeq || 0,
       openSeq: window.__transponoOpenSeq || 0,
       openRequest: typeof window.__transponoOpenRequest === 'string'
         ? window.__transponoOpenRequest : '',
@@ -1409,7 +2026,8 @@
         // This processor was already producing audio. Updating its pitch does
         // not require switching back to the unprocessed route or re-priming it.
         pitchStatus = 'active';
-        pitchMessage = 'Tom aplicado · processamento experimental';
+        // Applied: nothing to tell (no banner over the player).
+        pitchMessage = '';
       } else {
         // First activation still needs real output before leaving the dry route.
         dry(graph);
@@ -1498,7 +2116,8 @@
           graph.noSignalPlayingMs = 0;
           graph.lastConfirmationTick = null;
           pitchStatus = 'active';
-          pitchMessage = 'Tom aplicado · processamento experimental';
+          // Applied: nothing to tell (no banner over the player).
+          pitchMessage = '';
         } else if (hasSignal(graph.input, graph.samples)) {
           if (graph.silentSince === null) graph.silentSince = now();
           if (now() - graph.silentSince >= 2500) {
