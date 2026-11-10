@@ -786,11 +786,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   /// the full "Fechar ajustes" button.
   bool _closeCompact = false;
 
+  // The adjustments sheet at its lowest height: only the tabs and the first
+  // card (the tone), with the video and most of the page in sight.
+  bool _sheetLow = false;
+
   void _toggleMainAdjustments() {
     _hideAdjustmentChoices();
     if (_mainControlsExpanded) _stopChordAutoScroll();
     setState(() {
       _closeCompact = false;
+      _sheetLow = false;
       _mainControlsExpanded = !_mainControlsExpanded;
       _adjustmentsCoverVideo = false;
       _adjustmentChoicesVisible = false;
@@ -808,6 +813,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     setState(() {
       _mainControlsExpanded = true;
       _adjustmentsCoverVideo = true;
+      _sheetLow = false;
     });
   }
 
@@ -2246,6 +2252,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         // No side gap on very narrow screens: the controls need the width.
         final double sheetSide = sheet && box.maxWidth >= 370 ? 8 : 0;
         final double sheetBottom = sheet ? 8 : 0;
+        // Three heights: low (tabs and the first card), medium (from under
+        // the video) and high (over the video, the existing covered state).
+        final double sheetTop = sheet && _sheetLow
+            ? (box.maxHeight - 204).clamp(overlayTop, box.maxHeight)
+            : overlayTop;
         return Stack(
           children: [
             SizedBox(
@@ -2267,8 +2278,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ),
             if (open)
-              Positioned(
-                top: overlayTop,
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                top: sheetTop,
                 left: sheetSide,
                 right: sheetSide,
                 bottom: sheetBottom,
@@ -2332,7 +2345,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                       topGap: chordTopGap,
                                       viewportHeight:
                                           box.maxHeight -
-                                          overlayTop -
+                                          sheetTop -
                                           sheetBottom,
                                     ),
                                   )
@@ -2383,9 +2396,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             // controls scrolled under the band still work.
                             child: GestureDetector(
                               behavior: HitTestBehavior.translucent,
+                              // Down: medium → low → closed (a hard flick
+                              // closes at once). Up: low → medium → high.
                               onVerticalDragEnd: (details) {
-                                if ((details.primaryVelocity ?? 0) > 120) {
+                                final double speed =
+                                    details.primaryVelocity ?? 0;
+                                if (speed > 1400 ||
+                                    (speed > 120 && _sheetLow)) {
                                   _toggleMainAdjustments();
+                                } else if (speed > 120) {
+                                  setState(() => _sheetLow = true);
+                                } else if (speed < -120 && _sheetLow) {
+                                  setState(() => _sheetLow = false);
+                                } else if (speed < -120) {
+                                  _coverVideoWithAdjustments();
                                 }
                               },
                               child: Container(

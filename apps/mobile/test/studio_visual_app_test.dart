@@ -76,6 +76,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a pega baixa a folha dos ajustes e depois fecha-a', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const StudioVisualApp());
+    await tester.pumpAndSettle();
+    if (find.byKey(const Key('adjustmentsGrabber')).evaluate().isEmpty) {
+      await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+      await tester.pumpAndSettle();
+    }
+    final grabber = find.byKey(const Key('adjustmentsGrabber'));
+    final sheet = find.byKey(const Key('unifiedAdjustmentsBlurBounds'));
+    expect(grabber, findsOneWidget);
+    final double medium = tester.getTopLeft(sheet).dy;
+
+    // Down once: the low height (tabs and the first card).
+    await tester.fling(grabber, const Offset(0, 60), 600);
+    await tester.pumpAndSettle();
+    expect(grabber, findsOneWidget);
+    expect(tester.getTopLeft(sheet).dy, greaterThan(medium + 40));
+
+    // Up: back to the medium height.
+    await tester.fling(grabber, const Offset(0, -60), 600);
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, closeTo(medium, 1));
+
+    // Down twice: low, then closed.
+    await tester.fling(grabber, const Offset(0, 60), 600);
+    await tester.pumpAndSettle();
+    await tester.fling(grabber, const Offset(0, 60), 600);
+    await tester.pumpAndSettle();
+    expect(grabber, findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('claro ilumina cartões de Cifra e Treino; Vidro é translúcido', (
     tester,
   ) async {

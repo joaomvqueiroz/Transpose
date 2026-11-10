@@ -1170,29 +1170,54 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
   final bool showPracticeControls;
   final bool compactBottom;
 
+  static const _keyNames = <String>[
+    'C',
+    'C♯',
+    'D',
+    'E♭',
+    'E',
+    'F',
+    'F♯',
+    'G',
+    'A♭',
+    'A',
+    'B♭',
+    'B',
+  ];
+
+  /// The detected key moved by [semitones] ("D maior"), or null while the
+  /// key is not known.
+  String? _keyName(int semitones) {
+    final root = model.detectedKeyRoot;
+    if (!model.loaded ||
+        root == null ||
+        (model.detectedKeyMode != 'major' &&
+            model.detectedKeyMode != 'minor')) {
+      return null;
+    }
+    final mode = model.detectedKeyMode == 'major' ? 'maior' : 'menor';
+    return '${_keyNames[(root + semitones) % 12]} $mode';
+  }
+
+  /// The tone being heard: with a change and a known key, the change and the
+  /// key it gives ("+2 st · D maior"); otherwise the change alone.
+  String _pitchHeadline() {
+    final int change = model.pitch.round();
+    final String? key = change == 0 ? null : _keyName(change);
+    return key == null
+        ? '${_pitchLabel(model.pitch)} semitons'
+        : '${_pitchLabel(model.pitch)} st · $key';
+  }
+
   String _detectedKeyLabel() {
     if (!model.loaded) return 'Tom: escolha uma música';
-    final root = model.detectedKeyRoot;
-    if (root != null &&
-        (model.detectedKeyMode == 'major' ||
-            model.detectedKeyMode == 'minor')) {
-      const names = <String>[
-        'C',
-        'C♯',
-        'D',
-        'E♭',
-        'E',
-        'F',
-        'F♯',
-        'G',
-        'A♭',
-        'A',
-        'B♭',
-        'B',
-      ];
-      final transposed = (root + model.pitch.round()) % 12;
-      final mode = model.detectedKeyMode == 'major' ? 'maior' : 'menor';
-      return 'Tom estimado: ${names[transposed]} $mode';
+    final String? original = _keyName(0);
+    if (original != null) {
+      // With a change, the headline names the new key and this line keeps
+      // the song's own.
+      return model.pitch.round() == 0
+          ? 'Tom estimado: $original'
+          : 'Original: $original';
     }
     return switch (model.keyDetectionStatus) {
       'analyzing' => 'Tom: a analisar áudio…',
@@ -1295,8 +1320,11 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                             child: Column(
                               children: [
                                 Text(
-                                  '${_pitchLabel(model.pitch)} semitons',
+                                  _pitchHeadline(),
+                                  key: const Key('unifiedPitchHeadline'),
                                   textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w900,

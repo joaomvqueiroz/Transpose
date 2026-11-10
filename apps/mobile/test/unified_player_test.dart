@@ -491,7 +491,10 @@ void main() {
     );
     session.notifyListeners();
     await tester.pump();
-    expect(find.text('Tom estimado: D maior'), findsOneWidget);
+    // With a change, the headline names the new key and the line under it
+    // keeps the song's own.
+    expect(find.text('+2 st · D maior'), findsOneWidget);
+    expect(find.text('Original: C maior'), findsOneWidget);
   });
 }
 
