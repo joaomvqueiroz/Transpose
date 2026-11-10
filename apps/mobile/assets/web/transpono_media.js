@@ -117,6 +117,51 @@
       html.tp-tabs-on ytm-feed-filter-chip-bar-renderer { visibility: hidden !important; }
       html.tp-tabs-on.tp-tabs-pad .page-container { padding-top: 48px !important; }
       html.transpono-bars-away .tp-tabs { transform: translateY(-110px) !important; }
+      /* iPhone, like the YouTube app there: the bottom bar is a floating
+         pill, the tab being shown stands on a lighter patch, and the "you"
+         page is plain dark with outlined buttons. */
+      html.tp-ios.tp-ios ytm-pivot-bar-renderer {
+        left: 24px !important; right: 24px !important; width: auto !important;
+        bottom: 10px !important; height: 52px !important;
+        padding: 0 4px !important; border-radius: 26px !important;
+        border: 1px solid rgba(255, 255, 255, .12) !important;
+        background: rgba(18, 18, 18, .82) !important;
+        -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+        overflow: hidden !important;
+      }
+      html.tp-ios.tp-ios[data-transpono-theme="light"] ytm-pivot-bar-renderer {
+        border-color: rgba(0, 0, 0, .12) !important;
+        background: rgba(250, 250, 250, .86) !important;
+      }
+      html.tp-ios ytm-pivot-bar-renderer .pivot-bar-item-tab {
+        height: 42px !important; margin: 4px 2px !important;
+        border-radius: 21px !important;
+      }
+      html.tp-ios ytm-pivot-bar-renderer .pivot-bar-item-tab[aria-selected="true"] {
+        background: rgba(255, 255, 255, .16) !important;
+      }
+      html.tp-ios[data-transpono-theme="light"] ytm-pivot-bar-renderer .pivot-bar-item-tab[aria-selected="true"] {
+        background: rgba(0, 0, 0, .1) !important;
+      }
+      html.tp-ios.transpono-bars-away ytm-pivot-bar-renderer {
+        transform: translateY(90px) !important;
+      }
+      html.tp-ios.tp-library.tp-library .page-container,
+      html.tp-ios.tp-library.tp-library ytm-mobile-topbar-renderer#header-bar,
+      html.tp-ios.tp-library.tp-library ytm-mobile-topbar-renderer#header-bar header {
+        background: var(--yt-spec-base-background, #0f0f0f) !important;
+      }
+      html.tp-ios.tp-library.tp-library .ytContentMetadataViewModelMetadataRow > span:first-child {
+        color: var(--yt-spec-text-secondary, #aaa) !important;
+      }
+      html.tp-ios.tp-library ytm-home-logo button::after {
+        background: transparent; border: 1px solid rgba(128, 128, 128, .6);
+      }
+      html.tp-ios.tp-library .tp-channel a { background: #f1f1f1; }
+      html.tp-ios.tp-library .ytFlexibleActionsViewModelAction button-view-model a {
+        background: transparent !important;
+        border: 1px solid rgba(128, 128, 128, .6) !important;
+      }
       /* The "you" page dressed like the YouTube app's: a teal wash at the
          top, an accounts pill instead of the logo, the name large, a light
          "channel" button, plain section titles with an arrow, and the
@@ -369,7 +414,8 @@
   function shortsQuality() {
     try {
       if (!/^\/shorts(\/|$)/.test(window.location.pathname)) return;
-      const player = document.querySelector('#movie_player');
+      const element = document.querySelector('#movie_player');
+      const player = element && (element.wrappedJSObject || element);
       if (!player || typeof player.setPlaybackQualityRange !== 'function') return;
       const now = Date.now();
       const id = window.location.pathname;
@@ -378,7 +424,7 @@
       if (window.__transponoShortsQ === id &&
           (!low || now - (window.__transponoShortsQAt || 0) < 4000)) return;
       const levels = typeof player.getAvailableQualityLevels === 'function'
-        ? player.getAvailableQualityLevels() || [] : [];
+        ? Array.from(player.getAvailableQualityLevels() || []) : [];
       const best = ['hd1080', 'hd720'].find(level => levels.indexOf(level) >= 0);
       if (!best) return;
       window.__transponoShortsQ = id;
@@ -526,6 +572,11 @@
   function pageBars() {
     if (!plainYouTube()) return null;
     try {
+      // iPhone (the app's Gecko engine there, or any iOS browser engine).
+      const agent = navigator.userAgent || '';
+      document.documentElement.classList.toggle('tp-ios',
+        /iPhone|iPad|iPod/.test(agent) ||
+        (typeof window.wrappedJSObject !== 'undefined' && !/Android/.test(agent)));
       ensureTopTabs();
       dressLibraryPage();
       shortsQuality();
@@ -584,9 +635,13 @@
       const homeInPage = placeHomeIcon(header, topFree, topRight);
       return {
         // Centre of the free slot: up from the bottom, and from the left.
-        pivot: shown ? Math.round(bar.offsetHeight / 2) : null,
+        pivot: shown
+          ? Math.round((parseFloat(getComputedStyle(bar).bottom) || 0) + bar.offsetHeight / 2)
+          : null,
         pivotX: shown
-          ? Math.round(shorts.offsetLeft + shorts.offsetWidth * 1.5) : null,
+          ? Math.round((shorts.offsetParent === bar ? bar.offsetLeft : 0) +
+              shorts.offsetLeft + shorts.offsetWidth * 1.5)
+          : null,
         topFree,
         topRight,
         // Also while the site's side drawer ("more") covers the page.
