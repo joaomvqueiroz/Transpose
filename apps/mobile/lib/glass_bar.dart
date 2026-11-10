@@ -37,6 +37,10 @@ abstract final class GlassBar {
 
   static void attach(void Function(String name) onTap) => _onTap = onTap;
 
+  /// Whether [onTap] is the one the bar talks to now (a page that is leaving
+  /// must not hide a bar the next page already took over).
+  static bool isAttached(void Function(String name) onTap) => _onTap == onTap;
+
   static void detach(void Function(String name) onTap) {
     if (_onTap == onTap) _onTap = null;
   }

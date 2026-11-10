@@ -408,6 +408,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _syncPageRoles();
   }
 
+  /// The bottom bar stands on the player page too (two pages, a YouTube
+  /// video open, upright, adjustments closed).
+  bool get _playerBarShown =>
+      _twoPages &&
+      !_browsing &&
+      !_isLandscapePlayer &&
+      !_mainControlsExpanded &&
+      _player.loaded &&
+      _player.isYouTube;
+
+  /// A tap on the player page's bottom bar: the adjustments open here; the
+  /// other three shrink the video and open that page behind it.
+  void _playerBarTap(String name) {
+    if (name == 'adjust') {
+      _toggleMainAdjustments();
+      return;
+    }
+    _minimize();
+    unawaited(_browse?.openTab(name));
+  }
+
   /// The bar's adjustments button: there is nothing to adjust before a
   /// video is chosen, so it only opens with one (false: the button shakes).
   bool _openAdjustmentsFromBar() {
@@ -3462,7 +3483,45 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             ),
                           ),
                         ),
-                      if ((landscapePlayer && !_landscapeColumnsVisible) ||
+                      // Two pages with a video open: the bottom bar (it has
+                      // the adjustments button) instead of the wide
+                      // "Abrir ajustes".
+                      if (_playerBarShown) ...[
+                        if (nativeGlassBar.value)
+                          _GlassBarHost(playerPage: true, onTap: _playerBarTap)
+                        else
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: ValueListenableBuilder<YouTubeBars?>(
+                              valueListenable: pageYouTubeBars,
+                              builder: (context, bars, _) => ColoredBox(
+                                color: bars?.dark == false
+                                    ? Colors.white
+                                    : const Color(0xFF0F0F0F),
+                                child: Padding(
+                                  padding: EdgeInsets.only(
+                                    bottom: MediaQuery.viewPaddingOf(context)
+                                        .bottom,
+                                  ),
+                                  child: _ShortsBottomBar(
+                                    dark: bars?.dark != false,
+                                    avatar: bars?.avatar ?? '',
+                                    onHome: () => _playerBarTap('home'),
+                                    onShorts: () => _playerBarTap('shorts'),
+                                    onYou: () => _playerBarTap('you'),
+                                    onAdjustments: () {
+                                      _playerBarTap('adjust');
+                                      return true;
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ] else if ((landscapePlayer &&
+                              !_landscapeColumnsVisible) ||
                           (!landscapePlayer && !_mainControlsExpanded))
                         Positioned(
                           bottom: MediaQuery.viewPaddingOf(context).bottom + 8,
@@ -3528,9 +3587,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 /// it shows while the site's bottom bar would (or on the Shorts page) and
 /// leaves with this page.
 class _GlassBarHost extends StatefulWidget {
-  const _GlassBarHost({required this.onTap});
+  const _GlassBarHost({required this.onTap, this.playerPage = false});
 
   final void Function(String name) onTap;
+
+  /// Over the player page (a video is open): the bar shows whatever the
+  /// page's own bars are doing, with no tab marked as the current one.
+  final bool playerPage;
 
   @override
   State<_GlassBarHost> createState() => _GlassBarHostState();
@@ -3577,13 +3640,14 @@ class _GlassBarHostState extends State<_GlassBarHost> {
     }
     final bars = pageYouTubeBars.value;
     GlassBar.update(
-      visible:
-          bars != null &&
-          !bars.hidden &&
-          (bars.pivot != null || bars.shorts) &&
-          !pictureInPictureShown.value &&
-          !pageInputFocused.value,
-      selected: bars?.tab ?? '',
+      visible: widget.playerPage
+          ? !pictureInPictureShown.value && !pageInputFocused.value
+          : bars != null &&
+                !bars.hidden &&
+                (bars.pivot != null || bars.shorts) &&
+                !pictureInPictureShown.value &&
+                !pageInputFocused.value,
+      selected: widget.playerPage ? '' : bars?.tab ?? '',
       avatar: bars?.avatar ?? '',
       dark: bars?.dark ?? true,
     );
@@ -3592,7 +3656,7 @@ class _GlassBarHostState extends State<_GlassBarHost> {
   @override
   void dispose() {
     _watched.removeListener(_sync);
-    GlassBar.update(visible: false);
+    if (GlassBar.isAttached(_tap)) GlassBar.update(visible: false);
     GlassBar.detach(_tap);
     super.dispose();
   }
@@ -3610,6 +3674,7 @@ class _ShortsBottomBar extends StatelessWidget {
     required this.onHome,
     required this.onYou,
     required this.onAdjustments,
+    this.onShorts,
   });
 
   final bool dark;
@@ -3617,6 +3682,10 @@ class _ShortsBottomBar extends StatelessWidget {
   final VoidCallback onHome;
   final VoidCallback onYou;
   final bool Function() onAdjustments;
+
+  /// Null on the Shorts page itself (its icon is then the current one);
+  /// elsewhere it opens Shorts.
+  final VoidCallback? onShorts;
 
   @override
   Widget build(BuildContext context) {
@@ -3673,16 +3742,18 @@ class _ShortsBottomBar extends StatelessWidget {
       Expanded(
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: pill
+            color: pill && onShorts == null
                 ? (dark ? const Color(0x29FFFFFF) : const Color(0x1A000000))
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(21),
           ),
           child: _BarShapeButton(
             tooltip: 'Shorts',
-            shape: _shortsFilledIconPath(),
+            shape: onShorts == null
+                ? _shortsFilledIconPath()
+                : _shortsOutlineIconPath(),
             color: ink,
-            onPressed: null,
+            onPressed: onShorts,
           ),
         ),
       ),
