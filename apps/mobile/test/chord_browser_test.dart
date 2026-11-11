@@ -26,12 +26,6 @@ void main() {
       await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
     }
-    // The chord sheet has its own tab ("Cifra"), apart from the tone.
-    if (key == 'unifiedChooseChord' &&
-        find.byKey(Key(key)).evaluate().isEmpty) {
-      await tester.tap(find.byKey(const Key('unifiedSectionchordSheet')));
-      await tester.pumpAndSettle();
-    }
     final target = find.byKey(Key(key));
     await tester.ensureVisible(target);
     await tester.pumpAndSettle();

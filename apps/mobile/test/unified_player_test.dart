@@ -89,16 +89,17 @@ void main() {
     );
     expect(closeButton.tooltip, 'Expandir ou fechar ajustes');
     expect(find.byKey(const Key('unifiedSectioninstruments')), findsNothing);
-    // "Tom" holds the tone only; the chord sheet lives in "Cifra".
-    expect(find.byKey(const Key('unifiedChooseChord')), findsNothing);
-    final pitchButtonsInTom =
+    expect(find.byKey(const Key('unifiedChooseChord')), findsOneWidget);
+    final pitchButtonsInCifra =
         tester.getCenter(find.byKey(const Key('unifiedPitchUp'))).dx -
         tester.getCenter(find.byKey(const Key('unifiedPitchDown'))).dx;
-    expect(pitchButtonsInTom, lessThan(230));
-    await tester.tap(find.byKey(const Key('unifiedSectionchordSheet')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('unifiedChooseChord')), findsOneWidget);
-    expect(find.byKey(const Key('unifiedPitchCard')), findsNothing);
+    expect(pitchButtonsInCifra, lessThan(230));
+    expect(
+      tester.getTopLeft(find.byKey(const Key('unifiedChooseChord'))).dy,
+      greaterThanOrEqualTo(
+        tester.getBottomLeft(find.byKey(const Key('unifiedPitchCard'))).dy,
+      ),
+    );
     expect(find.byKey(const Key('unifiedSpeedSlider')), findsNothing);
     expect(find.byKey(const Key('unifiedLoopToggle')), findsNothing);
 
