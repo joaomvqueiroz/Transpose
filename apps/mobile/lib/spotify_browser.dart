@@ -521,6 +521,12 @@ String _seekScript(double seconds) =>
 })()
 ''';
 
+/// iPhone: Spotify's page runs in Safari's engine (WKWebView), where its
+/// protected songs play (Gecko has no such DRM: "Reprodução desativada") and
+/// its sign-in works; the sound, with the tone, comes from YouTube in Gecko
+/// behind it, as on Android. False puts the page back in Gecko.
+bool spotifyInSafariEngine = true;
+
 /// Spotify's web player as the studio's media source.
 ///
 /// The studio shows exactly what it shows for YouTube. Spotify's audio is
@@ -529,7 +535,7 @@ String _seekScript(double seconds) =>
 /// own controls. The song title feeds the studio's chord search.
 class SpotifyStudioSession extends YouTubeBrowserSession {
   SpotifyStudioSession() {
-    if (GeckoEngine.isAvailable) {
+    if (GeckoEngine.isAvailable && !spotifyInSafariEngine) {
       final gecko = GeckoWebViewController();
       _gecko = gecko;
       _controller = WebViewController.fromPlatform(gecko);
@@ -621,9 +627,13 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   /// The same song, played from YouTube behind the Spotify page: Spotify
   /// stays as the remote control (songs, playlists, play, pause, next) with
   /// its sound off, and the tone, EQ and effects work on what is heard.
-  /// Android only for now.
+  /// Android, and iPhone with Gecko (the YouTube page plays in Gecko, the
+  /// Spotify page in Safari's engine).
   late final WebViewYouTubeSession? _shadow =
-      _gecko == null && defaultTargetPlatform == TargetPlatform.android
+      _gecko == null &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              (defaultTargetPlatform == TargetPlatform.iOS &&
+                  GeckoEngine.isAvailable))
       ? (WebViewYouTubeSession()
           ..publishesPageState = false
           ..lowVideo = true
