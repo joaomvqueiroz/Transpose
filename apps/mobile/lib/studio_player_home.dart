@@ -5960,7 +5960,10 @@ class _CompactCloseAdjustments extends StatelessWidget {
     valueListenable: pageDrawsAdjustButton,
     builder: (context, inPage, child) =>
         (inPage && open && !(studioSpotifySource && !studioSpotifySkin)) ||
-            (studioSpotifySkin && !studioYouTubeSkin)
+            (studioSpotifySkin && !studioYouTubeSkin) ||
+            // YouTube Music: the adjustments come up from under the player
+            // and the bottom bar has their button; no arrow over the page.
+            studioMusicSource
         ? const SizedBox.shrink()
         : child!,
     child: _button(context),
