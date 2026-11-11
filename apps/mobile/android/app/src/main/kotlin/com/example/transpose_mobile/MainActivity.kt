@@ -75,7 +75,11 @@ class MainActivity : FlutterActivity() {
                     videoPlaying = call.arguments == true
                     // Also on older systems: the play/pause button follows.
                     if (Build.VERSION.SDK_INT >= 26) {
-                        setPictureInPictureParams(pipParams())
+                        try {
+                            setPictureInPictureParams(pipParams())
+                        } catch (_: RuntimeException) {
+                            // Refused right now: tried again at the next change.
+                        }
                     }
                     result.success(null)
                 } else {
@@ -169,14 +173,19 @@ class MainActivity : FlutterActivity() {
 
     private fun pipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
-        builder.setActions(
-            listOf(
-                pipButton("back", android.R.drawable.ic_media_rew, "Voltar 10 segundos", 1),
-                if (videoPlaying) pipButton("play", android.R.drawable.ic_media_pause, "Pausar", 2)
-                else pipButton("play", android.R.drawable.ic_media_play, "Reproduzir", 3),
-                pipButton("forward", android.R.drawable.ic_media_ff, "Avançar 10 segundos", 4),
-            ),
-        )
+        // The buttons are an extra: if the system refuses them, the small
+        // window must still open.
+        try {
+            builder.setActions(
+                listOf(
+                    pipButton("back", android.R.drawable.ic_media_rew, "Voltar 10 segundos", 1),
+                    if (videoPlaying) pipButton("play", android.R.drawable.ic_media_pause, "Pausar", 2)
+                    else pipButton("play", android.R.drawable.ic_media_play, "Reproduzir", 3),
+                    pipButton("forward", android.R.drawable.ic_media_ff, "Avançar 10 segundos", 4),
+                ),
+            )
+        } catch (_: RuntimeException) {
+        }
         if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(videoPlaying || inPip)
         return builder.build()
     }
