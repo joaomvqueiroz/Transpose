@@ -488,7 +488,10 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
 
   /// Opens one of the bottom bar's pages: "home", "shorts" or "you" on
   /// YouTube; "home", "explore" or "library" on YouTube Music.
-  Future<void> openTab(String name) async {}
+  ///
+  /// With [keepPlace], a page that is already the one being shown is left
+  /// exactly as it is (no scroll back to the top, no reload).
+  Future<void> openTab(String name, {bool keepPlace = false}) async {}
 
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
   /// page's video list is scrolled back to the player at the top; on
@@ -1024,7 +1027,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   @override
-  Future<void> openTab(String name) async {
+  Future<void> openTab(String name, {bool keepPlace = false}) async {
     if (_disposed ||
         !const {'home', 'shorts', 'you', 'explore', 'library'}.contains(name)) {
       return;
@@ -1036,6 +1039,13 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
             if (path && window.location.pathname !== path) window.location.href = path;
             return;
           }
+          const here = window.location.pathname;
+          const shown = {
+            home: here === '/',
+            shorts: here.indexOf('/shorts') === 0,
+            you: here === '/feed/library',
+          }['$name'];
+          if ($keepPlace && shown) return;
           const tab = {home: 'pivot-w2w', shorts: 'pivot-shorts', you: 'pivot-you'}['$name'];
           const target = document.querySelector('ytm-pivot-bar-renderer .' + tab);
           if (target) { target.click(); return; }

@@ -979,8 +979,9 @@
       const top = target === document.documentElement
         ? (window.scrollY || document.documentElement.scrollTop || 0)
         : (target.scrollTop || 0);
-      if (!lastTop.has(target)) { lastTop.set(target, top); return; }
-      const before = lastTop.get(target);
+      // A scroller seen for the first time starts from its top, so the
+      // very first scroll already counts.
+      const before = lastTop.has(target) ? lastTop.get(target) : 0;
       if (Math.abs(top - before) < 12) return;
       lastTop.set(target, top);
       const direction = top > before && top > 40 ? 'down' : 'up';

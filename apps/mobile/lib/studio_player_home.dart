@@ -308,6 +308,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (!mounted) return;
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(false));
+    // The page that takes over starts at its top: nothing is hidden for a
+    // scroll made on the other page.
+    pageScrolledDown.value = false;
     setState(() {
       _browsing = false;
       _miniFull = false;
@@ -395,6 +398,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (!mounted) return;
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(false));
+    // The page that takes over starts at its top: nothing is hidden for a
+    // scroll made on the other page.
+    pageScrolledDown.value = false;
     setState(() {
       _browsing = false;
       _miniFull = false;
@@ -429,7 +435,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     _minimize();
-    unawaited(_browse?.openTab(name));
+    // Already on that page: it stays where it was (no jump to its top).
+    unawaited(_browse?.openTab(name, keepPlace: true));
   }
 
   /// The bar's adjustments button: there is nothing to adjust before a
@@ -3504,20 +3511,22 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           left: 0,
                           right: 0,
                           bottom: 0,
-                          child: ColoredBox(
-                            color: const Color(0xFF0F0F0F),
-                            child: Padding(
-                              padding: EdgeInsets.only(
-                                bottom: MediaQuery.viewPaddingOf(context)
-                                    .bottom,
-                              ),
-                              child: _MusicBottomBar(
-                                current: '',
-                                onTab: _playerBarTap,
-                                onAdjustments: () {
-                                  _playerBarTap('adjust');
-                                  return true;
-                                },
+                          child: _HideOnScrollDown(
+                            child: ColoredBox(
+                              color: const Color(0xFF0F0F0F),
+                              child: Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: MediaQuery.viewPaddingOf(context)
+                                      .bottom,
+                                ),
+                                child: _MusicBottomBar(
+                                  current: '',
+                                  onTab: _playerBarTap,
+                                  onAdjustments: () {
+                                    _playerBarTap('adjust');
+                                    return true;
+                                  },
+                                ),
                               ),
                             ),
                           ),
@@ -3530,27 +3539,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             left: 0,
                             right: 0,
                             bottom: 0,
-                            child: ValueListenableBuilder<YouTubeBars?>(
-                              valueListenable: pageYouTubeBars,
-                              builder: (context, bars, _) => ColoredBox(
-                                color: bars?.dark == false
-                                    ? Colors.white
-                                    : const Color(0xFF0F0F0F),
-                                child: Padding(
-                                  padding: EdgeInsets.only(
-                                    bottom: MediaQuery.viewPaddingOf(context)
-                                        .bottom,
-                                  ),
-                                  child: _ShortsBottomBar(
-                                    dark: bars?.dark != false,
-                                    avatar: bars?.avatar ?? '',
-                                    onHome: () => _playerBarTap('home'),
-                                    onShorts: () => _playerBarTap('shorts'),
-                                    onYou: () => _playerBarTap('you'),
-                                    onAdjustments: () {
-                                      _playerBarTap('adjust');
-                                      return true;
-                                    },
+                            child: _HideOnScrollDown(
+                              child: ValueListenableBuilder<YouTubeBars?>(
+                                valueListenable: pageYouTubeBars,
+                                builder: (context, bars, _) => ColoredBox(
+                                  color: bars?.dark == false
+                                      ? Colors.white
+                                      : const Color(0xFF0F0F0F),
+                                  child: Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom: MediaQuery.viewPaddingOf(context)
+                                          .bottom,
+                                    ),
+                                    child: _ShortsBottomBar(
+                                      dark: bars?.dark != false,
+                                      avatar: bars?.avatar ?? '',
+                                      onHome: () => _playerBarTap('home'),
+                                      onShorts: () => _playerBarTap('shorts'),
+                                      onYou: () => _playerBarTap('you'),
+                                      onAdjustments: () {
+                                        _playerBarTap('adjust');
+                                        return true;
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3641,6 +3652,7 @@ class _GlassBarHostState extends State<_GlassBarHost> {
     nativeGlassBar,
     pictureInPictureShown,
     pageInputFocused,
+    pageScrolledDown,
   ]);
   bool _iconsSent = false;
 
@@ -3676,8 +3688,11 @@ class _GlassBarHostState extends State<_GlassBarHost> {
     }
     final bars = pageYouTubeBars.value;
     GlassBar.update(
+      // On the player page the bar leaves while the page is scrolled down.
       visible: widget.playerPage
-          ? !pictureInPictureShown.value && !pageInputFocused.value
+          ? !pictureInPictureShown.value &&
+                !pageInputFocused.value &&
+                !pageScrolledDown.value
           : bars != null &&
                 !bars.hidden &&
                 (bars.pivot != null || bars.shorts) &&
@@ -3699,6 +3714,29 @@ class _GlassBarHostState extends State<_GlassBarHost> {
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// Slides its child down and out while the page is scrolled down, and back
+/// when it is scrolled up (the bottom bar on the player page).
+class _HideOnScrollDown extends StatelessWidget {
+  const _HideOnScrollDown({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: pageScrolledDown,
+    builder: (context, down, bar) => IgnorePointer(
+      ignoring: down,
+      child: AnimatedSlide(
+        offset: Offset(0, down ? 1.2 : 0),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        child: bar,
+      ),
+    ),
+    child: child,
+  );
 }
 
 /// YouTube Music's bottom bar (the site has none on a phone): home,
