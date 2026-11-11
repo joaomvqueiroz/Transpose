@@ -866,7 +866,15 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       _notify();
     }
 
-    void onPageStarted(String _) {
+    void onPageStarted(String url) {
+      // Gecko does not ask about every load (a server redirect to the
+      // sign-in arrives unannounced): reaching Spotify's sign-in here also
+      // opens it in Safari's engine, and the player goes back home.
+      final Uri? started = Uri.tryParse(url);
+      if (_gecko != null && started != null && isSpotifySignInUri(started)) {
+        spotifySignInRequests.value++;
+        unawaited(_controller.loadRequest(home).catchError((Object _) {}));
+      }
       // A new document counts its taps from zero.
       _adjustSeq = null;
       _homeSeq = null;

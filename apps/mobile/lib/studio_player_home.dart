@@ -2216,7 +2216,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ),
           ),
-          if (_player.loaded && _player.isYouTube && !_miniClosed)
+          if (_player.loaded &&
+              _player.isYouTube &&
+              !_miniClosed &&
+              _musicSource)
+            ..._musicMiniBar(media, screen, padding)
+          else if (_player.loaded && _player.isYouTube && !_miniClosed)
             _miniPlayer(media, screen, padding),
         ],
       );
@@ -2493,6 +2498,149 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         );
       },
     );
+  }
+
+  /// YouTube Music, song shrunk: no small video window (the song's screen
+  /// would show as a tiny picture) but a playback bar, as in the YouTube
+  /// Music app: cover, title, pause and next, just above the bottom bar.
+  /// A tap on it opens the song again. The page keeps playing, kept in the
+  /// tree out of sight.
+  List<Widget> _musicMiniBar(Widget media, Size screen, EdgeInsets padding) {
+    final String title = _player.title;
+    final int dash = title.lastIndexOf(' - ');
+    final String song = dash > 0 ? title.substring(0, dash) : title;
+    final String artist = dash > 0 ? title.substring(dash + 3) : '';
+    final String videoId = _player.youtube?.media.videoId ?? '';
+    // The bottom bar under it: iPhone's glass (46 high, 34 from the edge)
+    // or the flat bar drawn by the app (48).
+    final double barHeight = nativeGlassBar.value ? 46 + 22 : 48;
+    const Color ink = Color(0xFFF1F1F1);
+    return [
+      // The player's page stays alive (it plays the song), out of sight.
+      Positioned(
+        left: 0,
+        top: 0,
+        width: 1,
+        height: 1,
+        child: IgnorePointer(
+          child: Opacity(
+            opacity: 0,
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              minWidth: screen.width,
+              maxWidth: screen.width,
+              minHeight: screen.height,
+              maxHeight: screen.height,
+              child: media,
+            ),
+          ),
+        ),
+      ),
+      // It follows the bottom bar: down to the edge while that bar is away.
+      Positioned.fill(
+        child: ValueListenableBuilder<YouTubeBars?>(
+          valueListenable: pageYouTubeBars,
+          builder: (context, bars, bar) => Stack(
+            children: [
+              AnimatedPositioned(
+                key: const Key('musicMiniBar'),
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                left: 8,
+                right: 8,
+                bottom:
+                    (bars?.hidden == true ? 8 : barHeight + 6) +
+                    (nativeGlassBar.value ? 12 : padding.bottom),
+                height: 58,
+                child: bar!,
+              ),
+            ],
+          ),
+          child: Material(
+            color: Color.lerp(_background, Colors.white, .1),
+            borderRadius: BorderRadius.circular(10),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              // Straight back to the song (no window to grow from).
+              onTap: () => _finishExpandMini(),
+              child: Row(
+                children: [
+                  const SizedBox(width: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: SizedBox(
+                      width: 42,
+                      height: 42,
+                      child: videoId.isEmpty
+                          ? const ColoredBox(color: Color(0xFF272727))
+                          : Image.network(
+                              'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const ColoredBox(color: Color(0xFF272727)),
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          song,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: ink,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (artist.isNotEmpty)
+                          Text(
+                            artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFAAAAAA),
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('musicMiniBarPlay'),
+                    tooltip: _player.playing ? 'Pausar' : 'Reproduzir',
+                    onPressed: () => unawaited(_player.playPause()),
+                    icon: Icon(
+                      _player.playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: ink,
+                      size: 30,
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('musicMiniBarNext'),
+                    tooltip: 'Seguinte',
+                    onPressed: () =>
+                        unawaited(_player.youtube?.musicSkip(forward: true)),
+                    icon: const Icon(
+                      Icons.skip_next_rounded,
+                      color: ink,
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ];
   }
 
   Widget _browserPage(Widget media) {
