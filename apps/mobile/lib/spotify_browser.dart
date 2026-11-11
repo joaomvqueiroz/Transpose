@@ -751,6 +751,23 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     if (platform is AndroidWebViewController) {
       await platform.setMediaPlaybackRequiresUserGesture(false);
     }
+    // iPhone, Safari's engine: WKWebView reports itself as Safari without
+    // the final "Version/… Safari/…" words Safari itself sends, and Spotify
+    // then serves its cut-down page (no player). Add them: it is Safari's
+    // own engine, the one Spotify plays in.
+    if (_gecko == null && defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final String agent = await _controller.getUserAgent() ?? '';
+        final RegExpMatch? os = RegExp(r'OS (\d+)_(\d+)').firstMatch(agent);
+        if (agent.isNotEmpty && os != null && !agent.contains('Safari/')) {
+          await _controller.setUserAgent(
+            '$agent Version/${os.group(1)}.${os.group(2)} Safari/604.1',
+          );
+        }
+      } on Object {
+        // The default one, then.
+      }
+    }
     await _controller.setNavigationDelegate(_navigationDelegate());
     {
       // The finger on the open player, passed on as it moves. On Gecko the
@@ -912,6 +929,9 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
 
     void onError(WebResourceError failure) {
       if (failure.isForMainFrame != true) return;
+      // Safari's engine: a load cancelled or stopped by the app (a link to
+      // the Spotify app, a refused page) is not a lost connection.
+      if (failure.errorCode == -999 || failure.errorCode == 102) return;
       _error = 'Não foi possível carregar o Spotify. Verifique a ligação.';
       _progress = 100;
       _notify();
