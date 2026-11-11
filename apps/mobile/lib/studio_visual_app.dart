@@ -189,6 +189,9 @@ enum StudioTab {
   tuner,
   audioSettings,
   appearanceSettings,
+
+  /// The chord sheet on its own tab ("Cifra"), apart from the tone.
+  chordSheet,
 }
 
 class StudioVisualHome extends StatefulWidget {

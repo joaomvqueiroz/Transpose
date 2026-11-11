@@ -178,7 +178,7 @@ void main() {
           .color,
       Colors.white,
     );
-    await tester.tap(find.byKey(const Key('unifiedSectionchords')));
+    await tester.tap(find.byKey(const Key('unifiedSectionchordSheet')));
     await tester.pumpAndSettle();
     final chooseCard = tester.widget<DecoratedBox>(
       find.byKey(const Key('unifiedChooseChordCard')),
@@ -345,6 +345,11 @@ void main() {
     if (key == 'unifiedSectionsetlist' &&
         find.byKey(Key(key)).evaluate().isEmpty) {
       await tap(tester, 'unifiedSectionappearanceSettings');
+    }
+    // The chord sheet has its own tab ("Cifra"), apart from the tone.
+    if (key == 'unifiedChooseChord' &&
+        find.byKey(Key(key)).evaluate().isEmpty) {
+      await tap(tester, 'unifiedSectionchordSheet');
     }
     await tester.ensureVisible(find.byKey(Key(key)));
     await tester.tap(find.byKey(Key(key)));
@@ -551,10 +556,14 @@ void main() {
     expect(tester.getSize(viewport).height, fullHeight);
     final autoCard = find.byKey(const Key('chordAutoScrollCard'));
     final chooser = find.byKey(const Key('unifiedChooseChord'));
-    final pitchCard = find.byKey(const Key('unifiedPitchCard'));
+    // The tone card lives in "Tom" now; the row keeps the sheet's margins.
+    expect(find.byKey(const Key('unifiedPitchCard')), findsNothing);
     final chooseCard = find.byKey(const Key('unifiedChooseChordCard'));
-    expect(tester.getRect(chooseCard).left, tester.getRect(pitchCard).left);
-    expect(tester.getRect(autoCard).right, tester.getRect(pitchCard).right);
+    final sheetBounds = tester.getRect(
+      find.byKey(const Key('unifiedChordOverlay')),
+    );
+    expect(tester.getRect(chooseCard).left, sheetBounds.left + 16);
+    expect(tester.getRect(autoCard).right, sheetBounds.right - 16);
     expect(
       tester.getRect(chooser).right,
       lessThan(tester.getRect(autoCard).left),
@@ -613,7 +622,8 @@ void main() {
     expect(tester.getSize(backdrop).width, tester.getSize(chordOverlay).width);
     await tester.drag(
       find.byKey(const Key('unifiedChordTextScroll')),
-      const Offset(0, -220),
+      // Less than the header's height: the tabs must still be on screen.
+      const Offset(0, -120),
     );
     await tester.pumpAndSettle();
     expect(

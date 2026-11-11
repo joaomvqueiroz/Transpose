@@ -664,7 +664,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     if (action == 'chord') {
-      _select(StudioTab.chords);
+      _select(StudioTab.chordSheet);
       return;
     }
     if (action == 'loop') {
@@ -769,7 +769,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       if (!mounted ||
           !_mainControlsExpanded ||
           !_chordActive ||
-          _tab != StudioTab.chords && _tab != StudioTab.player ||
+          _tab != StudioTab.chordSheet ||
           _chordTextScroll?.hasClients != true) {
         return;
       }
@@ -812,7 +812,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   void _select(StudioTab tab) {
     _hideAdjustmentChoices();
-    if (tab != StudioTab.chords && tab != StudioTab.player) {
+    if (tab != StudioTab.chordSheet) {
       _stopChordAutoScroll();
     }
     setState(() {
@@ -2338,7 +2338,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     : box.maxWidth * 9 / 16 + 36)
                 .clamp(0.0, box.maxHeight * (_player.isYouTube ? .55 : .65)) +
             16;
-        final chordPanel = _tab == StudioTab.chords || _tab == StudioTab.player;
+        final chordPanel =
+            _tab == StudioTab.chords ||
+            _tab == StudioTab.player ||
+            _tab == StudioTab.chordSheet;
         final videoBottom = _player.isYouTube
             ? (box.maxWidth * 9 / 16 + 48).clamp(0.0, panelTop)
             : panelTop;
@@ -2563,9 +2566,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   static const _visibleTabs = <(StudioTab, String)>[
-    // Tone (with the chord sheet that follows it), practice, sound, and
-    // "more": the setlist and the app's settings.
+    // Tone, the chord sheet on its own, practice, sound, and "more": the
+    // setlist and the app's settings.
     (StudioTab.chords, 'Tom'),
+    (StudioTab.chordSheet, 'Cifra'),
     (StudioTab.practice, 'Treino'),
     (StudioTab.audioSettings, 'Áudio'),
     (StudioTab.appearanceSettings, 'Mais'),
@@ -2700,7 +2704,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         widget.appearance.apple &&
         !_adjustmentsCoverVideo &&
         !_isLandscapePlayer &&
-        (_tab == StudioTab.chords || _tab == StudioTab.player);
+        (_tab == StudioTab.chords ||
+            _tab == StudioTab.player ||
+            _tab == StudioTab.chordSheet);
     return Container(
       margin: EdgeInsets.fromLTRB(16, sheet ? 20 : 8, 16, 8),
       padding: const EdgeInsets.all(4),
@@ -2749,6 +2755,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                           children: [
                             Icon(switch (tab) {
                               StudioTab.chords => Icons.music_note_outlined,
+                              StudioTab.chordSheet =>
+                                Icons.library_music_outlined,
                               StudioTab.practice => Icons.graphic_eq,
                               StudioTab.setlist => Icons.queue_music,
                               StudioTab.audioSettings => Icons.equalizer,
@@ -3238,31 +3246,35 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
           )
         : const SizedBox.shrink();
+    final sheetTab = _tab == StudioTab.chordSheet;
     final controls = Column(
       children: [
         _sectionTabs(),
-        UnifiedPlayerAdjustments(
-          model: _player,
-          youtubeNativeTransport: _player.isYouTube,
-          appearanceMode: widget.appearance.mode,
-          showPracticeControls: false,
-          compactBottom: true,
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-          child: Row(
-            children: [
-              Expanded(flex: _chordActive ? 35 : 1, child: chooseChordButton),
-              if (_chordActive) ...[
-                const SizedBox(width: 6),
-                Expanded(flex: 65, child: autoScrollControls),
-              ],
-            ],
+        // "Tom" holds the tone and speed; "Cifra" holds the chord sheet.
+        if (!sheetTab)
+          UnifiedPlayerAdjustments(
+            model: _player,
+            youtubeNativeTransport: _player.isYouTube,
+            appearanceMode: widget.appearance.mode,
+            showPracticeControls: false,
+            compactBottom: true,
           ),
-        ),
+        if (sheetTab)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Row(
+              children: [
+                Expanded(flex: _chordActive ? 35 : 1, child: chooseChordButton),
+                if (_chordActive) ...[
+                  const SizedBox(width: 6),
+                  Expanded(flex: 65, child: autoScrollControls),
+                ],
+              ],
+            ),
+          ),
       ],
     );
-    if (_chordActive) {
+    if (_chordActive && sheetTab) {
       return NestedScrollView(
         key: const Key('unifiedChordScroll'),
         controller: _scroll,
