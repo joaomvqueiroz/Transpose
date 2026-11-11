@@ -4,7 +4,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   // The adjustments sit on the same colour as the YouTube page behind them
   // (white in its light theme, #0F0F0F in its dark one).
-  Color get _background => studioYouTubeSkin
+  // On YouTube Music it is the colour of the song's own screen, as on
+  // Spotify.
+  Color get _background => studioMusicSource && musicPlayerTint.value != null
+      ? musicPlayerTint.value!
+      : studioYouTubeSkin
       ? youtubeBase
       : studioSpotifySkin
       ? spotifySheetColor
@@ -124,6 +128,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     pageAdjustRequests.addListener(_pageAdjust);
     BackgroundPlayback.listen(_backgroundAction);
     musicSongTabs.addListener(_songTabsChanged);
+    musicPlayerTint.addListener(_musicTintChanged);
     spotifyPlayerOpen.addListener(_spotifyPlayerChanged);
     _homeWidgets = HomeWidgetBridge(onAction: _onWidgetAction);
     // iPhone's own glass for the bottom bar, where the system has it.
@@ -742,6 +747,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     pageAdjustRequests.removeListener(_pageAdjust);
     BackgroundPlayback.unlisten();
     musicSongTabs.removeListener(_songTabsChanged);
+    musicPlayerTint.removeListener(_musicTintChanged);
     unawaited(BackgroundPlayback.stop());
     spotifyPlayerOpen.removeListener(_spotifyPlayerChanged);
     _pull.dispose();
@@ -2731,6 +2737,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   /// YouTube Music: the adjustments' sheet in their own colour from the
   /// top, so they join the song's tabs above them with no dark band.
   Color get _musicPanel => _background.a >= 1 ? _background : _pullSheet;
+
+  void _musicTintChanged() {
+    if (mounted && studioMusicSource) setState(() {});
+  }
 
   /// YouTube Music's song screen closed (its small bar over the other
   /// pages): the tabs and the adjustments go back down with it.

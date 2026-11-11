@@ -998,6 +998,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final SongTabs? tabs = songTabsFromState(state['songTabs']);
       if (!sameSongTabs(tabs, musicSongTabs.value)) musicSongTabs.value = tabs;
     }
+    if (!browseOnly && state.containsKey('musicTint')) {
+      final Color? tint = pageColorFromState(state['musicTint']);
+      if (tint != null) musicPlayerTint.value = tint;
+    }
     if (publishesPageState) {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
@@ -1445,6 +1449,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     pageScrolledDown.value = false;
     if (publishesPageState) pageYouTubeBars.value = null;
     if (!browseOnly) musicSongTabs.value = null;
+    if (!browseOnly) musicPlayerTint.value = null;
     if (!browseOnly) pageUnmutePrompt.value = false;
     _disposed = true;
     _timer?.cancel();

@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter/foundation.dart';
 
 /// The page's text field (the YouTube search bar) has the focus.
@@ -62,6 +64,20 @@ final ValueNotifier<int> pageHomeRequests = ValueNotifier<int>(0);
 typedef SongTabs = ({List<String> labels, List<bool> enabled, int selected});
 
 final ValueNotifier<SongTabs?> musicSongTabs = ValueNotifier<SongTabs?>(null);
+
+/// The colour behind YouTube Music's player, as its page reports it: the
+/// adjustments and the app's other panels over it wear the same colour.
+final ValueNotifier<Color?> musicPlayerTint = ValueNotifier<Color?>(null);
+
+/// "rgb(r, g, b)" or "rgba(r, g, b, a)" from the page, as an opaque colour.
+Color? pageColorFromState(Object? raw) {
+  final match = RegExp(
+    r'rgba?\((\d+),\s*(\d+),\s*(\d+)',
+  ).firstMatch('${raw ?? ''}');
+  if (match == null) return null;
+  int part(int i) => int.parse(match.group(i)!).clamp(0, 255);
+  return Color.fromARGB(255, part(1), part(2), part(3));
+}
 
 SongTabs? songTabsFromState(Object? raw) {
   if (raw is! Map) return null;

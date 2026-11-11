@@ -851,6 +851,28 @@
     }`;
     (document.head || document.documentElement).appendChild(music);
   }
+  // The colour behind YouTube Music's player (the first solid background
+  // from the song's screen outwards): the app's own panels wear it too.
+  function musicTint() {
+    if (!musicYouTube()) return null;
+    try {
+      const page = document.querySelector('ytmusic-player-page');
+      const layers = [
+        page && page.querySelector('#main-panel'),
+        page,
+        document.querySelector('ytmusic-app-layout'),
+        document.querySelector('ytmusic-app'),
+        document.body,
+      ];
+      for (const layer of layers) {
+        if (!layer) continue;
+        const colour = getComputedStyle(layer).backgroundColor || '';
+        const parts = colour.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/);
+        if (parts && (parts[4] === undefined || parseFloat(parts[4]) >= 0.99)) return colour;
+      }
+    } catch (_) {}
+    return null;
+  }
   // The song's tabs on YouTube Music's player: their names and which one
   // is opened (-1: none, the player is showing). The app draws them.
   function songTabs() {
@@ -2266,6 +2288,7 @@
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
       bars: pageBars() || musicBars(),
       songTabs: songTabs(),
+      musicTint: musicTint(),
       // The site's vertical Shorts player is on screen.
       shortsPage: /^\/shorts(\/|$)/.test(window.location.pathname),
       // Counters, not one-shot flags: any snapshot (there are several
