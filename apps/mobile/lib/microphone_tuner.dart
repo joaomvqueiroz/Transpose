@@ -300,10 +300,13 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
               ? const Color(0xFF9B4E00)
               : const Color(0xFFB42332)
         : tunerFeedbackColor(_needleCents, inTune: accurate);
+    final skin = studioSpotifySkin;
     final status = _previewNote != null
         ? 'Nota de referência · piano'
         : !_active
-        ? 'Ative o microfone · botões tocam piano'
+        ? skin
+              ? 'Ative o microfone · toque numa corda para ouvir a nota'
+              : 'Ative o microfone · botões tocam piano'
         : reading == null
         ? 'Toque uma corda de cada vez'
         : accurate
@@ -313,38 +316,51 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
         : 'Alta · afrouxe a corda';
     return Container(
       key: const Key('chromaticTunerCard'),
-      padding: const EdgeInsets.all(12),
-      decoration: studioPanelDecoration(mode: widget.appearance.mode),
+      padding: EdgeInsets.all(skin ? 0 : 12),
+      decoration: skin
+          ? null
+          : studioPanelDecoration(mode: widget.appearance.mode),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(
-                Icons.tune,
-                size: 16,
-                color: light ? lightInk : Colors.white,
-              ),
-              const SizedBox(width: 6),
-              const Expanded(
-                child: Text(
-                  'AFINADOR CROMÁTICO',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1,
+          if (skin)
+            Row(
+              children: [
+                Expanded(child: skinLabel('Afinador cromático')),
+                Text(
+                  'Auto · 440 Hz',
+                  style: TextStyle(fontSize: 13, color: skinSubdued),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Icon(
+                  Icons.tune,
+                  size: 16,
+                  color: light ? lightInk : Colors.white,
+                ),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'AFINADOR CROMÁTICO',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
                   ),
                 ),
-              ),
-              Text(
-                'AUTO · 440 Hz',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: light ? lightMuted : const Color(0xFFBEBEC4),
+                Text(
+                  'AUTO · 440 Hz',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: light ? lightMuted : const Color(0xFFBEBEC4),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           const SizedBox(height: 8),
           SizedBox(
             height: 132,
@@ -357,54 +373,78 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                     inTune: accurate,
                   ),
                 ),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 220),
-                      style: TextStyle(
-                        fontSize: 31,
-                        fontWeight: FontWeight.w900,
-                        color: feedbackColor,
-                        height: 1,
+                if (!skin)
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 220),
+                        style: TextStyle(
+                          fontSize: 31,
+                          fontWeight: FontWeight.w900,
+                          color: feedbackColor,
+                          height: 1,
+                        ),
+                        child: Text(
+                          _previewNote ??
+                              (reading == null
+                                  ? '—'
+                                  : _westernNote(reading.midiNote)),
+                          key: const Key('tunerDetectedNote'),
+                        ),
                       ),
-                      child: Text(
-                        _previewNote ??
-                            (reading == null
-                                ? '—'
-                                : _westernNote(reading.midiNote)),
-                        key: const Key('tunerDetectedNote'),
+                      Text(
+                        _previewNote != null
+                            ? 'PIANO'
+                            : reading == null
+                            ? 'ESCUTA AUTOMÁTICA'
+                            : 'NOTA DETETADA',
+                        style: TextStyle(
+                          fontSize: 9,
+                          letterSpacing: 1,
+                          color: light ? lightMuted : const Color(0xFFA1A1AA),
+                        ),
                       ),
-                    ),
-                    Text(
-                      _previewNote != null
-                          ? 'PIANO'
-                          : reading == null
-                          ? 'ESCUTA AUTOMÁTICA'
-                          : 'NOTA DETETADA',
-                      style: TextStyle(
-                        fontSize: 9,
-                        letterSpacing: 1,
-                        color: light ? lightMuted : const Color(0xFFA1A1AA),
-                      ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            status,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: reading == null
-                  ? (light ? lightMuted : const Color(0xFFBABAC0))
-                  : feedbackColor,
+          // The note under the dial, as on the source's own pages.
+          if (skin)
+            Text(
+              _previewNote ??
+                  (reading == null ? '—' : _westernNote(reading.midiNote)),
+              key: const Key('tunerDetectedNote'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                color: reading == null ? Colors.white : feedbackColor,
+              ),
             ),
-          ),
+          SizedBox(height: skin ? 2 : 8),
+          if (skin)
+            Text(
+              status,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: reading == null ? skinSubdued : feedbackColor,
+              ),
+            )
+          else
+            Text(
+              status,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: reading == null
+                    ? (light ? lightMuted : const Color(0xFFBABAC0))
+                    : feedbackColor,
+              ),
+            ),
           if (reading != null)
             Text(
               '${targetCents! >= 0 ? '+' : ''}${targetCents.round()} cents · ${reading.frequency.toStringAsFixed(1)} Hz',
@@ -422,43 +462,61 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                     child: OutlinedButton(
                       key: Key('tunerString${string.$1}'),
                       onPressed: () => _playReference(string.$1),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        minimumSize: Size.zero,
-                        foregroundColor: light ? lightInk : Colors.white,
-                        backgroundColor: light
-                            ? _previewNote == string.$1
-                                  ? const Color(0xFFDCEBF3)
-                                  : const Color(0xFFE8EEF4)
-                            : _previewNote == string.$1
-                            ? const Color(0xFF38383E)
-                            : const Color(0xFF232326),
-                        side: BorderSide(
-                          color: light
-                              ? _previewNote == string.$1
-                                    ? lightInk
-                                    : const Color(0xFFB7C4D2)
-                              : _previewNote == string.$1
-                              ? const Color(0xFFBEBEC4)
-                              : const Color(0xFF35353A),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                      ),
+                      style: skin
+                          ? OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              minimumSize: Size.zero,
+                              foregroundColor:
+                                  _previewNote == string.$1 && studioYouTubeSkin
+                                  ? skinChipOnInk
+                                  : Colors.white,
+                              backgroundColor: _previewNote == string.$1
+                                  ? studioYouTubeSkin
+                                        ? skinChipOn
+                                        : const Color(0x33FFFFFF)
+                                  : skinChip,
+                              side: BorderSide.none,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            )
+                          : OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              minimumSize: Size.zero,
+                              foregroundColor: light ? lightInk : Colors.white,
+                              backgroundColor: light
+                                  ? _previewNote == string.$1
+                                        ? const Color(0xFFDCEBF3)
+                                        : const Color(0xFFE8EEF4)
+                                  : _previewNote == string.$1
+                                  ? const Color(0xFF38383E)
+                                  : const Color(0xFF232326),
+                              side: BorderSide(
+                                color: light
+                                    ? _previewNote == string.$1
+                                          ? lightInk
+                                          : const Color(0xFFB7C4D2)
+                                    : _previewNote == string.$1
+                                    ? const Color(0xFFBEBEC4)
+                                    : const Color(0xFF35353A),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                            ),
                       child: Column(
                         children: [
                           Text(
                             string.$1,
-                            style: const TextStyle(
-                              fontSize: 10,
+                            style: TextStyle(
+                              fontSize: skin ? 15 : 10,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                           Text(
                             '${string.$2.toStringAsFixed(0)} Hz',
                             style: TextStyle(
-                              fontSize: 7,
+                              fontSize: skin ? 11 : 7,
                               color: light
                                   ? lightMuted
                                   : const Color(0xFFA1A1AA),
@@ -471,36 +529,67 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            key: const Key('tunerMicrophoneToggle'),
-            onPressed: _starting
-                ? null
-                : _active
-                ? _stop
-                : _start,
-            icon: Icon(
-              _active ? Icons.mic_off_outlined : Icons.mic_outlined,
-              size: 17,
-            ),
-            label: Text(
-              _starting
-                  ? 'A iniciar…'
+          SizedBox(height: skin ? 14 : 8),
+          if (skin)
+            FilledButton.icon(
+              key: const Key('tunerMicrophoneToggle'),
+              onPressed: _starting
+                  ? null
                   : _active
-                  ? 'Parar microfone'
-                  : 'Ativar microfone',
-              style: TextStyle(color: light ? Colors.black : null),
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: light ? lightInk : Colors.white,
-              backgroundColor: light ? const Color(0xFFE8EEF4) : null,
-              side: BorderSide(
-                color: light
-                    ? const Color(0xFFB7C4D2)
-                    : const Color(0xFF66666D),
+                  ? _stop
+                  : _start,
+              icon: Icon(
+                _active ? Icons.mic_off_outlined : Icons.mic_none,
+                size: 20,
+              ),
+              label: Text(
+                _starting
+                    ? 'A iniciar…'
+                    : _active
+                    ? 'Parar microfone'
+                    : 'Ativar microfone',
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: skinChipOn,
+                foregroundColor: skinChipOnInk,
+                minimumSize: Size.fromHeight(studioYouTubeSkin ? 44 : 48),
+                shape: const StadiumBorder(),
+                textStyle: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            )
+          else
+            OutlinedButton.icon(
+              key: const Key('tunerMicrophoneToggle'),
+              onPressed: _starting
+                  ? null
+                  : _active
+                  ? _stop
+                  : _start,
+              icon: Icon(
+                _active ? Icons.mic_off_outlined : Icons.mic_outlined,
+                size: 17,
+              ),
+              label: Text(
+                _starting
+                    ? 'A iniciar…'
+                    : _active
+                    ? 'Parar microfone'
+                    : 'Ativar microfone',
+                style: TextStyle(color: light ? Colors.black : null),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: light ? lightInk : Colors.white,
+                backgroundColor: light ? const Color(0xFFE8EEF4) : null,
+                side: BorderSide(
+                  color: light
+                      ? const Color(0xFFB7C4D2)
+                      : const Color(0xFF66666D),
+                ),
               ),
             ),
-          ),
           if (_error != null)
             Text(_error!, key: const Key('tunerMicrophoneError')),
         ],
@@ -550,7 +639,9 @@ class _TunerGaugePainter extends CustomPainter {
     final radius = math.min(size.width * .39, size.height * .75);
     final arc = Rect.fromCircle(center: center, radius: radius);
     final needleColor = cents == null
-        ? tunerFeedbackColor(null, inTune: false)
+        ? (studioSpotifySkin
+              ? Colors.white
+              : tunerFeedbackColor(null, inTune: false))
         : Color.lerp(
             tunerFeedbackColor(cents, inTune: false),
             tunerFeedbackColor(cents, inTune: true),
@@ -599,9 +690,11 @@ class _TunerGaugePainter extends CustomPainter {
       math.pi,
       false,
       Paint()
-        ..color = const Color(0xFF3A3A40)
+        ..color = studioSpotifySkin
+            ? const Color(0x33FFFFFF)
+            : const Color(0xFF3A3A40)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
+        ..strokeWidth = studioSpotifySkin ? 4 : 1.5,
     );
     for (var tick = 0; tick <= 12; tick++) {
       final angle = math.pi + tick * math.pi / 12;
@@ -619,7 +712,13 @@ class _TunerGaugePainter extends CustomPainter {
         outer,
         Paint()
           ..color = tick == 6
-              ? Color.lerp(Colors.white, const Color(0xFF4ADE80), green)!
+              ? studioSpotifySkin
+                    ? (studioYouTubeSkin
+                          ? const Color(0xFFFF0033)
+                          : const Color(0xFF1ED760))
+                    : Color.lerp(Colors.white, const Color(0xFF4ADE80), green)!
+              : studioSpotifySkin
+              ? const Color(0x66FFFFFF)
               : const Color(0xFF77777D)
           ..strokeWidth = tick == 6 ? 2 : 1,
       );

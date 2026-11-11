@@ -229,7 +229,7 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                   child: Text(
                     model.message!,
                     key: const Key('visualPlayerMessage'),
-                    style: const TextStyle(color: studioMuted, fontSize: 13),
+                    style: TextStyle(color: studioMuted, fontSize: 13),
                   ),
                 ),
               ],
@@ -252,7 +252,7 @@ class _MainPlayerPanelState extends State<MainPlayerPanel> {
                     children: [
                       const Icon(Icons.touch_app_outlined, color: studioCyan),
                       const SizedBox(width: 8),
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Toque no vídeo para mostrar os controlos por 2 segundos. Com Cifra ativa, ajuste tom, velocidade e loop na engrenagem dentro do vídeo.',
                           style: TextStyle(color: studioMuted, fontSize: 12),
@@ -550,7 +550,7 @@ class _PlayerControlCardsState extends State<_PlayerControlCards> {
                   ],
                 ),
                 if (model.loaded && !model.canPitch && !model.pitchPending)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
                       'A alteração de tom não está disponível nesta fonte.',
@@ -570,7 +570,7 @@ class _PlayerControlCardsState extends State<_PlayerControlCards> {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    const Icon(Icons.repeat, color: studioMuted, size: 18),
+                    Icon(Icons.repeat, color: studioMuted, size: 18),
                     const SizedBox(width: 8),
                     const Expanded(child: _Label('REPETIÇÃO A–B')),
                     Switch(
@@ -622,7 +622,7 @@ class _PlayerControlCardsState extends State<_PlayerControlCards> {
                     ),
                   ),
                 if (model.loaded && !model.canLoop)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 8),
                     child: Text(
                       'A repetição A–B não está disponível nesta fonte.',
@@ -644,7 +644,7 @@ class _PlayerControlCardsState extends State<_PlayerControlCards> {
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       children: <Widget>[
-                        const Icon(
+                        Icon(
                           Icons.school_outlined,
                           size: 20,
                           color: studioMuted,
@@ -760,7 +760,7 @@ class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 'CONTROLOS',
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -857,7 +857,7 @@ class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
                 ),
               ),
               if (model.loaded && !model.canPitch && !model.pitchPending)
-                const Text(
+                Text(
                   'A alteração de tom não está disponível nesta fonte.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: studioMuted, fontSize: 12),
@@ -867,7 +867,7 @@ class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
               const Divider(color: Colors.white12),
               Row(
                 children: [
-                  const Icon(Icons.repeat, color: studioMuted, size: 18),
+                  Icon(Icons.repeat, color: studioMuted, size: 18),
                   const SizedBox(width: 8),
                   const Expanded(child: Text('Repetir A–B')),
                   Switch(
@@ -916,7 +916,7 @@ class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
                   ),
                 ),
               if (model.loaded && !model.canLoop)
-                const Text(
+                Text(
                   'A repetição A–B não está disponível nesta fonte.',
                   style: TextStyle(color: studioMuted, fontSize: 12),
                 ),
@@ -1060,7 +1060,7 @@ class _VideoSettings extends StatelessWidget {
                       ],
                     ),
                     if (model.loaded && !model.canPitch && !model.pitchPending)
-                      const Text(
+                      Text(
                         'Tom de áudio indisponível nesta fonte.',
                         style: TextStyle(color: studioMuted, fontSize: 12),
                       ),
@@ -1160,6 +1160,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     required this.youtubeNativeTransport,
     this.appearanceMode = StudioAppearanceMode.dark,
     this.showPracticeControls = true,
+    this.compactTone = false,
     this.compactBottom = false,
     super.key,
   });
@@ -1168,6 +1169,9 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
   final bool youtubeNativeTransport;
   final StudioAppearanceMode appearanceMode;
   final bool showPracticeControls;
+
+  /// With the chord sheet open, the tone is one short card.
+  final bool compactTone;
   final bool compactBottom;
 
   static const _keyNames = <String>[
@@ -1226,6 +1230,711 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     };
   }
 
+  /// A YouTube app chip: rounded 8, light when chosen.
+  Widget _youtubeChip(
+    Key key,
+    String label,
+    bool on,
+    VoidCallback? onTap, {
+    bool tight = false,
+  }) => Material(
+    color: on ? skinChipOn : skinChip,
+    shape: skinChipShape,
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      key: key,
+      onTap: onTap,
+      child: Container(
+        height: 36,
+        padding: EdgeInsets.symmetric(horizontal: tight ? 0 : 12),
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: on ? skinChipOnInk : const Color(0xFFF1F1F1),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// The YouTube app's minus|plus pill.
+  Widget _youtubeSegment(
+    Key downKey,
+    Key upKey,
+    VoidCallback? down,
+    VoidCallback? up,
+  ) => Container(
+    height: 40,
+    decoration: BoxDecoration(
+      color: skinChip,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 56,
+          child: IconButton(
+            key: downKey,
+            onPressed: down,
+            icon: const Icon(Icons.remove, size: 20),
+            color: const Color(0xFFF1F1F1),
+          ),
+        ),
+        Container(width: 1, height: 24, color: const Color(0x33FFFFFF)),
+        SizedBox(
+          width: 56,
+          child: IconButton(
+            key: upKey,
+            onPressed: up,
+            icon: const Icon(Icons.add, size: 20),
+            color: const Color(0xFFF1F1F1),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  /// The tone in the YouTube app's look: title, key, the semitones with a
+  /// minus|plus pill, and quick chips around the original.
+  Widget _youtubePitch(bool ready) {
+    final int value = model.pitch.round();
+    final bool can = ready && model.canPitch;
+    void set(int v) => model.changePitch(v.clamp(-12, 12).toDouble());
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          skinLabel('Modulação cromática'),
+          const SizedBox(height: 2),
+          Text(
+            _detectedKeyLabel(),
+            key: const Key('unifiedDetectedKey'),
+            style: const TextStyle(fontSize: 12, color: Color(0xFFAAAAAA)),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Text(
+                value > 0 ? '+$value' : '$value',
+                key: const Key('unifiedPitchHeadline'),
+                style: const TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                  color: Color(0xFFF1F1F1),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'semitons',
+                style: TextStyle(fontSize: 16, color: Color(0xFFAAAAAA)),
+              ),
+              const Spacer(),
+              _youtubeSegment(
+                const Key('unifiedPitchDown'),
+                const Key('unifiedPitchUp'),
+                can && value > -12 ? () => set(value - 1) : null,
+                can && value < 12 ? () => set(value + 1) : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final v in const [-2, -1, 0, 1, 2])
+                _youtubeChip(
+                  Key('youtubePitchQuick$v'),
+                  v == 0 ? 'Original' : (v > 0 ? '+$v' : '$v'),
+                  v == value,
+                  can ? () => set(v) : null,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The tone on Spotify beside the chord sheet: one short card, small
+  /// outlined circles and "0 semitons" with the key under it.
+  Widget _spotifyPitchCompact(bool ready) {
+    final int value = model.pitch.round();
+    final bool can = ready && model.canPitch;
+    Widget circle(Key key, String tip, IconData icon, VoidCallback? onTap) =>
+        Tooltip(
+          message: tip,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: OutlinedButton(
+              key: key,
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                shape: const CircleBorder(),
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(36, 36),
+                side: const BorderSide(color: Color(0x99FFFFFF), width: 1.5),
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+              ),
+              child: Icon(icon, size: 16),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 10),
+      child: Container(
+        key: const Key('unifiedPitchCard'),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0x14FFFFFF),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            circle(
+              const Key('unifiedPitchDown'),
+              'Diminuir tom',
+              Icons.remove,
+              can && value > -12 ? () => model.changePitch(value - 1.0) : null,
+            ),
+            Expanded(
+              child: Column(
+                children: [
+                  Text(
+                    '${value > 0 ? '+$value' : '$value'} semitons',
+                    key: const Key('unifiedPitchHeadline'),
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: value == 0 ? Colors.white : spotifyGreen,
+                    ),
+                  ),
+                  Text(
+                    _detectedKeyLabel(),
+                    key: const Key('unifiedDetectedKey'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xBFFFFFFF),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            circle(
+              const Key('unifiedPitchUp'),
+              'Aumentar tom',
+              Icons.add,
+              can && value < 12 ? () => model.changePitch(value + 1.0) : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The tone on Spotify: a label over a flat card, outlined round buttons
+  /// and the semitones in large type, as in Spotify's own player.
+  Widget _spotifyPitch(bool ready) {
+    final int value = model.pitch.round();
+    Widget round(Key key, String tip, IconData icon, VoidCallback? onTap) =>
+        Tooltip(
+          message: tip,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: OutlinedButton(
+              key: key,
+              onPressed: onTap,
+              style: OutlinedButton.styleFrom(
+                shape: const CircleBorder(),
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(44, 44),
+                side: const BorderSide(color: Color(0x99FFFFFF), width: 1.5),
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+              ),
+              child: Icon(icon, size: 20),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 14, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'MODULAÇÃO CROMÁTICA',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: .96,
+                    color: Color(0xBFFFFFFF),
+                  ),
+                ),
+              ),
+              Text(
+                _detectedKeyLabel(),
+                key: const Key('unifiedDetectedKey'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xBFFFFFFF),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            key: const Key('unifiedPitchCard'),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0x14FFFFFF),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                round(
+                  const Key('unifiedPitchDown'),
+                  'Diminuir tom',
+                  Icons.remove,
+                  ready && model.canPitch && model.pitch > -12
+                      ? () =>
+                            model.changePitch((model.pitch - 1).clamp(-12, 12))
+                      : null,
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      value > 0 ? '+$value' : '$value',
+                      key: const Key('unifiedPitchHeadline'),
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                        letterSpacing: -1,
+                        // Green once the tone moves; white at the original.
+                        color: value == 0 ? Colors.white : spotifyGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'semitons',
+                      style: TextStyle(fontSize: 14, color: Color(0xBFFFFFFF)),
+                    ),
+                  ],
+                ),
+                round(
+                  const Key('unifiedPitchUp'),
+                  'Aumentar tom',
+                  Icons.add,
+                  ready && model.canPitch && model.pitch < 12
+                      ? () =>
+                            model.changePitch((model.pitch + 1).clamp(-12, 12))
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Treino in the YouTube app's look: the speed with a red slider between
+  /// minus and plus, chips, then the A-B stretch under a divider.
+  Widget _youtubePractice(bool ready, List<double> presets) {
+    final bool canSpeed = ready && model.canSpeed;
+    final bool canLoop = ready && model.canLoop;
+    final double min = youtubeNativeTransport ? .25 : .5;
+    final double speed = model.speed.clamp(min, 2.0);
+    void set(double v) =>
+        model.changeSpeed((v.clamp(min, 2.0) * 100).roundToDouble() / 100);
+    Widget round(Key key, IconData icon, VoidCallback? onTap) => Material(
+      color: skinChip,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: key,
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, size: 20, color: const Color(0xFFF1F1F1)),
+        ),
+      ),
+    );
+    Widget marker(
+      Key key,
+      String letter,
+      String text,
+      Duration? value,
+      VoidCallback? onTap,
+    ) => Material(
+      color: skinChip,
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: key,
+        onTap: onTap,
+        child: SizedBox(
+          height: 40,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFFF1F1F1),
+                    width: 1.5,
+                  ),
+                ),
+                child: Text(
+                  letter,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFFF1F1F1),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  value == null ? text : _time(value),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFFF1F1F1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          skinLabel('Velocidade'),
+          const SizedBox(height: 12),
+          Text(
+            '${model.speed.toStringAsFixed(2)}×',
+            key: const Key('youtubeSpeedValue'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFFF1F1F1),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              round(
+                const Key('youtubeSpeedDown'),
+                Icons.remove,
+                canSpeed ? () => set(model.speed - .05) : null,
+              ),
+              Expanded(
+                child: Slider(
+                  key: const Key('unifiedSpeedSlider'),
+                  min: min,
+                  max: 2,
+                  value: speed,
+                  onChanged: canSpeed ? set : null,
+                ),
+              ),
+              round(
+                const Key('youtubeSpeedUp'),
+                Icons.add,
+                canSpeed ? () => set(model.speed + .05) : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // All six on one line, sharing it.
+          Row(
+            children: [
+              for (final double preset in [...presets, 2.0])
+                Expanded(
+                  flex: preset == 1 ? 13 : 10,
+                  child: Padding(
+                    padding: EdgeInsets.only(right: preset == 2 ? 0 : 6),
+                    child: _youtubeChip(
+                      Key('spotifySpeed$preset'),
+                      preset == 1
+                          ? 'Normal'
+                          : '${preset == preset.roundToDouble() ? preset.toStringAsFixed(0) : preset}×',
+                      (model.speed - preset).abs() < .01,
+                      canSpeed ? () => model.changeSpeed(preset) : null,
+                      tight: true,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Divider(height: 1, color: Color(0x1FFFFFFF)),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    skinLabel('Trecho de ensaio (A–B)'),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Marque o início e o fim para repetir',
+                      style: TextStyle(fontSize: 12, color: Color(0xFFAAAAAA)),
+                    ),
+                  ],
+                ),
+              ),
+              const Text(
+                'Repetir',
+                style: TextStyle(fontSize: 14, color: Color(0xFFF1F1F1)),
+              ),
+              const SizedBox(width: 6),
+              Switch(
+                key: const Key('unifiedLoopToggle'),
+                value: model.loopEnabled,
+                onChanged:
+                    canLoop && model.markerA != null && model.markerB != null
+                    ? (_) => model.toggleLoop()
+                    : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: marker(
+                  const Key('unifiedMarkA'),
+                  'A',
+                  'Marcar início',
+                  model.markerA,
+                  canLoop ? model.markA : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: marker(
+                  const Key('unifiedMarkB'),
+                  'B',
+                  'Marcar fim',
+                  model.markerB,
+                  canLoop ? model.markB : null,
+                ),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 24),
+            child: Divider(height: 1, color: Color(0x1FFFFFFF)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Treino on Spotify: speed with its slider and quick choices, then the
+  /// A-B stretch with outlined buttons, no cards, as on Spotify's pages.
+  Widget _spotifyPractice(bool ready) {
+    const List<double> presets = [.5, .75, 1, 1.25, 1.5];
+    final bool canSpeed = ready && model.canSpeed;
+    final bool canLoop = ready && model.canLoop;
+    Widget marker(
+      Key key,
+      String letter,
+      String text,
+      Duration? value,
+      VoidCallback? onTap,
+    ) {
+      return OutlinedButton(
+        key: key,
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          side: const BorderSide(color: Color(0x99FFFFFF), width: 1.5),
+          shape: const StadiumBorder(),
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                letter,
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                value == null ? text : _time(value),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (studioYouTubeSkin) return _youtubePractice(ready, presets);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SpeedControl(
+            model: model,
+            enabled: ready,
+            compact: true,
+            appearanceMode: appearanceMode,
+            minSpeed: youtubeNativeTransport ? .25 : .5,
+            maxSpeed: 2,
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final double preset in presets) ...[
+                  Material(
+                    color: (model.speed - preset).abs() < .01
+                        ? skinChipOn
+                        : skinChip,
+                    shape: const StadiumBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      key: Key('spotifySpeed$preset'),
+                      onTap: canSpeed ? () => model.changeSpeed(preset) : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          '${preset == preset.roundToDouble() ? preset.toStringAsFixed(0) : preset}×',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: (model.speed - preset).abs() < .01
+                                ? Colors.black
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(child: skinLabel('Trecho de ensaio (A–B)')),
+              const Text(
+                'Repetir',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Switch(
+                key: const Key('unifiedLoopToggle'),
+                value: model.loopEnabled,
+                onChanged:
+                    canLoop && model.markerA != null && model.markerB != null
+                    ? (_) => model.toggleLoop()
+                    : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: marker(
+                  const Key('unifiedMarkA'),
+                  'A',
+                  'Marcar início',
+                  model.markerA,
+                  canLoop ? model.markA : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: marker(
+                  const Key('unifiedMarkB'),
+                  'B',
+                  'Marcar fim',
+                  model.markerB,
+                  canLoop ? model.markB : null,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _card({Key? key, required Widget child, EdgeInsets? padding}) =>
       Container(
         key: key,
@@ -1259,126 +1968,138 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                 fullscreen: false,
               ),
             ],
-            _card(
-              key: const Key('unifiedPitchCard'),
-              padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.music_note,
-                        color: appearanceMode == StudioAppearanceMode.light
-                            ? const Color(0xFF182636)
-                            : Colors.white,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 5),
-                      const Expanded(
-                        child: Text(
-                          'MODULAÇÃO CROMÁTICA',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: .7,
+            if (studioSpotifySkin && showPracticeControls)
+              _spotifyPractice(ready)
+            else if (studioYouTubeSkin)
+              _youtubePitch(ready)
+            else if (studioSpotifySkin && compactTone)
+              _spotifyPitchCompact(ready)
+            else if (studioSpotifySkin)
+              _spotifyPitch(ready)
+            else
+              _card(
+                key: const Key('unifiedPitchCard'),
+                padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        // The title starts a little in from the card's edge,
+                        // like "Rolar" in the card under it.
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.music_note,
+                          color: appearanceMode == StudioAppearanceMode.light
+                              ? const Color(0xFF182636)
+                              : Colors.white,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 5),
+                        const Expanded(
+                          child: Text(
+                            'MODULAÇÃO CROMÁTICA',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: .7,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 238),
-                      child: Row(
-                        children: [
-                          IconButton.filledTonal(
-                            key: const Key('unifiedPitchDown'),
-                            tooltip: 'Diminuir tom',
-                            style: IconButton.styleFrom(
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              minimumSize: const Size(32, 32),
-                              maximumSize: const Size(32, 32),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 238),
+                        child: Row(
+                          children: [
+                            IconButton.filledTonal(
+                              key: const Key('unifiedPitchDown'),
+                              tooltip: 'Diminuir tom',
+                              style: IconButton.styleFrom(
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                minimumSize: const Size(32, 32),
+                                maximumSize: const Size(32, 32),
+                              ),
+                              constraints: const BoxConstraints.tightFor(
+                                width: 32,
+                                height: 32,
+                              ),
+                              padding: EdgeInsets.zero,
+                              iconSize: 17,
+                              onPressed:
+                                  ready && model.canPitch && model.pitch > -12
+                                  ? () => model.changePitch(
+                                      (model.pitch - 1).clamp(-12, 12),
+                                    )
+                                  : null,
+                              icon: const Icon(Icons.remove),
                             ),
-                            constraints: const BoxConstraints.tightFor(
-                              width: 32,
-                              height: 32,
-                            ),
-                            padding: EdgeInsets.zero,
-                            iconSize: 17,
-                            onPressed:
-                                ready && model.canPitch && model.pitch > -12
-                                ? () => model.changePitch(
-                                    (model.pitch - 1).clamp(-12, 12),
-                                  )
-                                : null,
-                            icon: const Icon(Icons.remove),
-                          ),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                Text(
-                                  _pitchHeadline(),
-                                  key: const Key('unifiedPitchHeadline'),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  Text(
+                                    _pitchHeadline(),
+                                    key: const Key('unifiedPitchHeadline'),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  _detectedKeyLabel(),
-                                  key: const Key('unifiedDetectedKey'),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 9,
-                                    color: studioMuted,
+                                  Text(
+                                    _detectedKeyLabel(),
+                                    key: const Key('unifiedDetectedKey'),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: studioMuted,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          IconButton.filledTonal(
-                            key: const Key('unifiedPitchUp'),
-                            tooltip: 'Aumentar tom',
-                            style: IconButton.styleFrom(
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              minimumSize: const Size(32, 32),
-                              maximumSize: const Size(32, 32),
+                            IconButton.filledTonal(
+                              key: const Key('unifiedPitchUp'),
+                              tooltip: 'Aumentar tom',
+                              style: IconButton.styleFrom(
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                minimumSize: const Size(32, 32),
+                                maximumSize: const Size(32, 32),
+                              ),
+                              constraints: const BoxConstraints.tightFor(
+                                width: 32,
+                                height: 32,
+                              ),
+                              padding: EdgeInsets.zero,
+                              iconSize: 17,
+                              onPressed:
+                                  ready && model.canPitch && model.pitch < 12
+                                  ? () => model.changePitch(
+                                      (model.pitch + 1).clamp(-12, 12),
+                                    )
+                                  : null,
+                              icon: const Icon(Icons.add),
                             ),
-                            constraints: const BoxConstraints.tightFor(
-                              width: 32,
-                              height: 32,
-                            ),
-                            padding: EdgeInsets.zero,
-                            iconSize: 17,
-                            onPressed:
-                                ready && model.canPitch && model.pitch < 12
-                                ? () => model.changePitch(
-                                    (model.pitch + 1).clamp(-12, 12),
-                                  )
-                                : null,
-                            icon: const Icon(Icons.add),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             if (model.loaded && !model.canPitch)
-              const Text(
+              Text(
                 'Tom indisponível nesta fonte.',
                 style: TextStyle(color: studioMuted),
               ),
-            if (showPracticeControls)
+            if (showPracticeControls && !studioSpotifySkin)
               _card(
                 padding: const EdgeInsets.fromLTRB(10, 5, 10, 5),
                 child: _SpeedControl(
@@ -1390,7 +2111,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                   maxSpeed: 2,
                 ),
               ),
-            if (showPracticeControls)
+            if (showPracticeControls && !studioSpotifySkin)
               _card(
                 child: Column(
                   children: [
@@ -1908,7 +2629,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                                 key: const Key(
                                                   'visualFullscreenMessage',
                                                 ),
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   color: studioMuted,
                                                   fontSize: 13,
                                                 ),
@@ -2056,7 +2777,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                         if (model.loaded &&
                                             !model.canPitch &&
                                             !model.pitchPending)
-                                          const Text(
+                                          Text(
                                             'Tom indisponível nesta fonte.',
                                             style: TextStyle(
                                               color: studioMuted,
@@ -2191,7 +2912,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                           ],
                                         ),
                                         if (model.loaded && !model.canSpeed)
-                                          const Text(
+                                          Text(
                                             'Velocidade indisponível nesta fonte.',
                                             style: TextStyle(
                                               color: studioMuted,
@@ -2293,7 +3014,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                           ],
                                         ),
                                         if (model.loaded && !model.canLoop)
-                                          const Text(
+                                          Text(
                                             'Repetição A–B indisponível nesta fonte.',
                                             style: TextStyle(
                                               color: studioMuted,
@@ -2517,7 +3238,7 @@ class _SeekControlState extends State<_SeekControl> {
                 ),
                 Text(
                   _time(widget.model.duration),
-                  style: const TextStyle(color: studioMuted, fontSize: 12),
+                  style: TextStyle(color: studioMuted, fontSize: 12),
                 ),
               ],
             ),
@@ -2625,8 +3346,10 @@ class _SpeedControlState extends State<_SpeedControl> {
                 value: _positionForSpeed(speed),
                 min: 0,
                 max: 1,
-                activeColor: studioCyan,
-                inactiveColor: const Color(0xFF39393E),
+                activeColor: studioSpotifySkin ? skinAccent : studioCyan,
+                inactiveColor: studioSpotifySkin
+                    ? const Color(0x33FFFFFF)
+                    : const Color(0xFF39393E),
                 semanticFormatterCallback: (position) =>
                     '${_speedForPosition(position).toStringAsFixed(2)} vezes',
                 onChanged: enabled
@@ -2663,20 +3386,17 @@ class _SpeedControlState extends State<_SpeedControl> {
             children: [
               Text(
                 '${widget.minSpeed.toStringAsFixed(2)}×',
-                style: const TextStyle(color: studioMuted, fontSize: 9),
-              ),
-              const Text(
-                '1,00×',
                 style: TextStyle(color: studioMuted, fontSize: 9),
               ),
+              Text('1,00×', style: TextStyle(color: studioMuted, fontSize: 9)),
               Text(
                 '${widget.maxSpeed.toStringAsFixed(2)}×',
-                style: const TextStyle(color: studioMuted, fontSize: 9),
+                style: TextStyle(color: studioMuted, fontSize: 9),
               ),
             ],
           ),
           if (widget.model.loaded && !widget.model.canSpeed)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 6),
               child: Text(
                 'Velocidade indisponível nesta fonte.',
@@ -2758,7 +3478,7 @@ class _SpeedControlState extends State<_SpeedControl> {
           ],
         ),
         if (widget.model.loaded && !widget.model.canSpeed)
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(top: 8),
             child: Text(
               'A velocidade não está disponível nesta fonte.',
@@ -3028,7 +3748,7 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     text,
-    style: const TextStyle(
+    style: TextStyle(
       color: studioMuted,
       fontSize: 11,
       fontWeight: FontWeight.w800,

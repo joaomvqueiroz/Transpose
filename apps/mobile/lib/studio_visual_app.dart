@@ -3,8 +3,9 @@ import 'dart:io';
 import 'dart:ui' show ImageFilter;
 import 'dart:ui' as ui;
 
-import 'package:flutter/gestures.dart' show VelocityTracker;
+import 'package:flutter/gestures.dart' show VelocityTracker, kTouchSlop;
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -34,7 +35,11 @@ import 'home_button_visibility.dart';
 import 'glass_bar.dart';
 import 'picture_in_picture.dart';
 import 'stem_panel.dart';
+import 'adjustments_handle.dart';
+import 'tab_entrance.dart';
 import 'ambient_rhythm_trial.dart';
+import 'background_playback.dart';
+import 'spotify_browser.dart' show SpotifyStudioSession;
 
 part 'studio_player_home.dart';
 part 'youtube_bar_icons.dart';
@@ -81,7 +86,7 @@ class StudioVisualApp extends StatefulWidget {
 
 class _StudioVisualAppState extends State<StudioVisualApp> {
   final StudioAppearanceStore _appearanceStore = StudioAppearanceStore();
-  StudioAppearance _appearance = const StudioAppearance();
+  StudioAppearance _appearance = StudioAppearanceStore.standard;
   Future<void> _appearanceWrites = Future<void>.value();
   bool _appearanceTouched = false;
   late final ValueNotifier<bool> _startupBrowserReady = ValueNotifier(
@@ -151,6 +156,22 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     ),
   );
 
+  StudioAppearance _studioAppearance(bool spotify, {bool music = false}) {
+    studioMusicSource = music;
+    // "Nativo" is each source's own look: the YouTube app's on YouTube,
+    // Spotify's on Spotify. The other themes look the same on both.
+    studioSpotifySource = spotify;
+    studioYouTubeSkin = !spotify && _appearance.native;
+    studioSpotifySkin = _appearance.native;
+    return _appearance.native
+        ? _appearance.copyWith(
+            mode: StudioAppearanceMode.glass,
+            apple: false,
+            darkPanels: false,
+          )
+        : _appearance;
+  }
+
   Widget _studio(
     Key? key,
     String? query,
@@ -172,7 +193,11 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     chordBrowserFactory: widget.chordBrowserFactory,
     openSearchWhenEmpty: widget.openSearchWhenEmpty,
     initialYouTubeQuery: query,
-    appearance: _appearance,
+    // Spotify: its own dark look whatever the app's theme.
+    appearance: _studioAppearance(
+      sessionFactory != null,
+      music: home?.host == 'music.youtube.com',
+    ),
     onAppearanceChanged: _changeAppearance,
     onInitialBrowserReady: () => _startupBrowserReady.value = true,
   );
@@ -246,7 +271,24 @@ class _MainAdjustmentsBar extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: pageDrawsAdjustButton,
+    // The page's own bar opens the adjustments: no wide button over it.
+    builder: (context, inPage, child) =>
+        // On Spotify the adjustments live under the song: no bar at all.
+        // YouTube's look closes with the X beside its title.
+        // On Spotify without its own look, our button opens them.
+        (inPage && !expanded && !(studioSpotifySource && !studioSpotifySkin)) ||
+            (studioSpotifySkin && !studioYouTubeSkin) ||
+            // YouTube Music: they come up from under the player.
+            studioMusicSource ||
+            (studioYouTubeSkin && expanded)
+        ? const SizedBox.shrink()
+        : child!,
+    child: _bar(context),
+  );
+
+  Widget _bar(BuildContext context) => SizedBox(
     height: 52,
     width: double.infinity,
     child: LayoutBuilder(

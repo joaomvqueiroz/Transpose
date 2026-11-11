@@ -250,13 +250,13 @@ class _ChordsPanelState extends State<ChordsPanel> {
               style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Cifras e tempos inseridos por você · sem deteção automática',
               style: TextStyle(color: studioMuted),
             ),
             if (_loading) const LinearProgressIndicator(),
             if (m.message != null)
-              Text(m.message!, style: const TextStyle(color: studioMuted)),
+              Text(m.message!, style: TextStyle(color: studioMuted)),
             if (_error != null) ...[
               Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
               TextButton(
@@ -322,7 +322,7 @@ class _ChordsPanelState extends State<ChordsPanel> {
             ),
             const SizedBox(height: 16),
             if (_cues.isEmpty)
-              const Text(
+              Text(
                 'Adicione marcações como “00:00 C” e “00:08 Am”. Durante a reprodução, o acorde atual acompanha a posição. Toque numa marcação para ir até ela.',
                 style: TextStyle(color: studioMuted),
               ),
@@ -336,7 +336,7 @@ class _ChordsPanelState extends State<ChordsPanel> {
                 ),
                 leading: Text(
                   _stamp(_cues[i].milliseconds),
-                  style: const TextStyle(color: studioMuted),
+                  style: TextStyle(color: studioMuted),
                 ),
                 title: Text(
                   chordAt(i),
@@ -365,7 +365,7 @@ class _ChordsPanelState extends State<ChordsPanel> {
                   : _sheet.notes,
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Gravação e reconhecimento automático ficam para uma etapa posterior. As cifras originais guardadas não são alteradas ao mudar o tom.',
               style: TextStyle(color: studioMuted, fontSize: 12),
             ),
@@ -385,7 +385,7 @@ class _ChordsPanelState extends State<ChordsPanel> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: studioMuted)),
+        Text(label, style: TextStyle(color: studioMuted)),
         Text(
           chord,
           style: const TextStyle(

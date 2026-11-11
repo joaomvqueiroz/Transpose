@@ -8,6 +8,70 @@ ThemeData studioColumnTheme(
   ThemeData base, {
   StudioAppearanceMode mode = StudioAppearanceMode.dark,
 }) {
+  final ThemeData theme = _studioColumnTheme(base, mode: mode);
+  if (!studioSpotifySkin) return theme;
+  // Spotify: its buttons are translucent white pills or outlined circles,
+  // never dark blocks; its chips white when chosen.
+  final Color fill = skinChip;
+  return theme.copyWith(
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        disabledForegroundColor: const Color(0x80FFFFFF),
+        backgroundColor: fill,
+        disabledBackgroundColor: const Color(0x0DFFFFFF),
+        side: BorderSide.none,
+        shape: studioYouTubeSkin
+            ? const StadiumBorder()
+            : const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: fill,
+        shape: const StadiumBorder(),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        foregroundColor: skinChipOnInk,
+        backgroundColor: skinChipOn,
+        disabledBackgroundColor: fill,
+        shape: const StadiumBorder(),
+      ),
+    ),
+    chipTheme: theme.chipTheme.copyWith(
+      backgroundColor: fill,
+      selectedColor: skinChipOn,
+      side: BorderSide.none,
+      shape: skinChipShape,
+      labelStyle: const TextStyle(color: Colors.white),
+      secondaryLabelStyle: const TextStyle(color: Colors.black),
+      checkmarkColor: Colors.black,
+    ),
+    sliderTheme: theme.sliderTheme.copyWith(
+      activeTrackColor: skinAccent,
+      inactiveTrackColor: const Color(0x33FFFFFF),
+      thumbColor: skinAccent,
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: const WidgetStatePropertyAll(Colors.white),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? skinSwitch
+            : const Color(0x4DFFFFFF),
+      ),
+      trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
+  );
+}
+
+ThemeData _studioColumnTheme(
+  ThemeData base, {
+  StudioAppearanceMode mode = StudioAppearanceMode.dark,
+}) {
   if (base.brightness == Brightness.light) {
     const ink = Color(0xFF193244);
     const panel = Color(0xFFFFFFFF);
@@ -63,7 +127,7 @@ ThemeData studioColumnTheme(
   }
   const muted = Color(0xFFA1A1AA);
   final control = mode == StudioAppearanceMode.glass
-      ? const Color(0xAA303841)
+      ? const Color(0x2EFFFFFF)
       : const Color(0xFF2A2A2C);
   const controlBorder = Color(0xFF444447);
   final panel = mode == StudioAppearanceMode.glass

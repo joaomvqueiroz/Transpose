@@ -134,13 +134,13 @@ void main() {
     final gradient =
         (sheet.decoration! as BoxDecoration).gradient! as LinearGradient;
     expect(gradient.colors.every((color) => color.a < 1), isTrue);
-    expect(gradient.colors.first, const Color(0x994F5969));
+    expect(gradient.colors.first, const Color(0xCC1B1F26));
     final textSurface = tester.widget<Container>(
       find.byKey(const Key('playerChordTextSurface')),
     );
     expect(
       (textSurface.decoration! as BoxDecoration).color,
-      const Color(0xAA303B4A),
+      const Color(0x66050608),
     );
   });
 
@@ -265,7 +265,9 @@ void main() {
       await tester.pumpWidget(_app(key, model, store, 'song'));
       await tester.pumpAndSettle();
       expect(displayed(tester), startsWith('D       A/C#'));
-      await tap(tester, 'playerChordPitchReset');
+      // Back to the original with the tone's own − button.
+      await tap(tester, 'playerChordPitchDown');
+      await tap(tester, 'playerChordPitchDown');
       expect(displayed(tester), 'C       G/B\nLetra original');
       expect(model.pitch, 0, reason: 'Reset cifra must not change the audio');
       expect(find.text('Tom da cifra'), findsOneWidget);
@@ -300,7 +302,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(displayed(tester), 'C#  G#/C\nLetra');
-      expect(find.text('Acordes · acompanham o áudio'), findsOneWidget);
+      // The sheet no longer prints where it came from nor this mode.
+      expect(find.text('Acordes · acompanham o áudio'), findsNothing);
 
       await tap(tester, 'playerChordPitchUp');
       expect(model.requested, 1);

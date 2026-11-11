@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
+
 import 'player_chord_sheet.dart';
 import 'studio_native_pages.dart';
 
@@ -123,7 +124,9 @@ class ImportedChord {
       );
     }
     final uri = Uri.tryParse(value['url']);
-    if (uri == null || !isChordPageUri(uri) || !sameChordPage(uri, expectedUrl)) {
+    if (uri == null ||
+        !isChordPageUri(uri) ||
+        !sameChordPage(uri, expectedUrl)) {
       throw const FormatException('A página mudou. Volte a tocar em importar.');
     }
     final text = validatePlayerChordText(value['text']);
@@ -737,96 +740,97 @@ class _ChordSearchPanelState extends State<ChordSearchPanel> {
           ),
         ),
       ),
-      if (!_siteCheck) SingleChildScrollView(
-        key: const Key('chordNativeResults'),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: const Key('chordNativeQuery'),
-                      controller: _query,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: (_) => _search(),
-                      decoration: InputDecoration(
-                        hintText: 'Pesquisar música ou artista',
-                        isDense: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        suffixIcon: IconButton(
-                          key: const Key('chordNativeSearch'),
-                          tooltip: 'Pesquisar cifras',
-                          onPressed: _search,
-                          icon: const Icon(Icons.search),
+      if (!_siteCheck)
+        SingleChildScrollView(
+          key: const Key('chordNativeResults'),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: const Key('chordNativeQuery'),
+                        controller: _query,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) => _search(),
+                        decoration: InputDecoration(
+                          hintText: 'Pesquisar música ou artista',
+                          isDense: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          suffixIcon: IconButton(
+                            key: const Key('chordNativeSearch'),
+                            tooltip: 'Pesquisar cifras',
+                            onPressed: _search,
+                            icon: const Icon(Icons.search),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('chordNativeClose'),
-                    tooltip: 'Fechar pesquisa',
-                    onPressed: widget.onCancel,
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
+                    IconButton(
+                      key: const Key('chordNativeClose'),
+                      tooltip: 'Fechar pesquisa',
+                      onPressed: widget.onCancel,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            if (_loading || _session.progress < 100)
-              const LinearProgressIndicator(),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(_error!, key: const Key('chordNativeError')),
-              ),
-            for (var index = 0; index < _results.length; index++)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                child: Material(
-                  color: const Color(0xFF201F21),
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    key: Key('chordNativeResult$index'),
+              if (_loading || _session.progress < 100)
+                const LinearProgressIndicator(),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(_error!, key: const Key('chordNativeError')),
+                ),
+              for (var index = 0; index < _results.length; index++)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: Material(
+                    color: const Color(0xFF201F21),
                     borderRadius: BorderRadius.circular(12),
-                    onTap: _loading ? null : () => _choose(_results[index]),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 9,
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.library_music_outlined,
-                            size: 18,
-                            color: studioCyan,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _results[index].title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                height: 1.15,
+                    child: InkWell(
+                      key: Key('chordNativeResult$index'),
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: _loading ? null : () => _choose(_results[index]),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.library_music_outlined,
+                              size: 18,
+                              color: studioCyan,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _results[index].title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.15,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 6),
-                          const Icon(Icons.chevron_right, size: 18),
-                        ],
+                            const SizedBox(width: 6),
+                            const Icon(Icons.chevron_right, size: 18),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
       if (_siteCheck)
         Positioned(
           left: 16,
@@ -947,7 +951,9 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 450));
       }
-      if (!mounted || generation != _generation || !sameChordPage(_session.currentUri, uri)) {
+      if (!mounted ||
+          generation != _generation ||
+          !sameChordPage(_session.currentUri, uri)) {
         return;
       }
       try {
@@ -967,7 +973,9 @@ class _ChordBrowserPageState extends State<ChordBrowserPage> {
         // The visible chord block may appear shortly after page load.
       }
     }
-    if (mounted && generation == _generation && sameChordPage(_session.currentUri, uri)) {
+    if (mounted &&
+        generation == _generation &&
+        sameChordPage(_session.currentUri, uri)) {
       setState(() {
         _preparing = false;
         _error = 'Não foi possível ler esta cifra. Abra uma página de música com os acordes visíveis ou tente novamente.';

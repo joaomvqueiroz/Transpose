@@ -146,8 +146,7 @@ class NativeYouTubeAudioFollower {
       } on Object {
         if (_disposed || generation != _generation) return;
         _status = NativeFollowStatus.failed;
-        _message =
-            'Áudio nativo indisponível para este vídeo. A usar o som do YouTube.';
+        _message = 'Áudio nativo indisponível para este vídeo. A usar o som do YouTube.';
       }
       _changed();
     }());

@@ -183,6 +183,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
               pictureInPictureShown,
               pageUnmutePrompt,
               pageYouTubeBars,
+              pageDrawsHomeButton,
             ]),
             builder: (context, child) {
               // On YouTube, before the page's first report, the icon is
@@ -191,6 +192,10 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
               final YouTubeBars? bars = pageYouTubeBars.value;
               final bool hide =
                   hideHomeButton ||
+                  // Spotify: the start-screen button lives only in its own
+                  // top bar; the floating one never shows, not even while
+                  // the page loads.
+                  source == ListeningSource.spotify ||
                   // Once the page reports, it draws the icon itself in
                   // its top bar (it then moves with the bar exactly).
                   (source == ListeningSource.youtube &&
@@ -212,7 +217,11 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
             },
             child: _SourceSwitch(
               inBar: source == ListeningSource.youtube,
-              spotify: source == ListeningSource.spotify,
+              // With the song heard from YouTube the tone works here:
+              // no "YouTube com tom" shortcut then.
+              spotify:
+                  source == ListeningSource.spotify &&
+                  _spotify?.playsFromYouTube != true,
               session: _spotify,
               onHome: () => _choose(null),
               onPlayOnYouTube: _playOnYouTube,

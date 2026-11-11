@@ -56,6 +56,40 @@ final ValueNotifier<bool> pendingPageSearch = ValueNotifier<bool>(false);
 /// ([YouTubeBars.homeInPage]): each one adds one.
 final ValueNotifier<int> pageHomeRequests = ValueNotifier<int>(0);
 
+/// YouTube Music's song tabs (A seguir, Letra, ...) under its player, drawn
+/// by the app: their names, which can be opened, and the opened one (-1:
+/// none, the player shows).
+typedef SongTabs = ({List<String> labels, List<bool> enabled, int selected});
+
+final ValueNotifier<SongTabs?> musicSongTabs = ValueNotifier<SongTabs?>(null);
+
+SongTabs? songTabsFromState(Object? raw) {
+  if (raw is! Map) return null;
+  final Object? labels = raw['labels'];
+  if (labels is! List || labels.isEmpty || labels.length > 8) return null;
+  final List<String> names = [
+    for (final Object? label in labels) label is String ? label : '',
+  ];
+  final Object? enabled = raw['enabled'];
+  final Object? selected = raw['selected'];
+  return (
+    labels: names,
+    enabled: [
+      for (int i = 0; i < names.length; i++)
+        !(enabled is List && i < enabled.length && enabled[i] == false),
+    ],
+    selected: selected is num && selected >= 0 && selected < names.length
+        ? selected.toInt()
+        : -1,
+  );
+}
+
+bool sameSongTabs(SongTabs? a, SongTabs? b) => a == null || b == null
+    ? a == b
+    : a.selected == b.selected &&
+          listEquals(a.labels, b.labels) &&
+          listEquals(a.enabled, b.enabled);
+
 final ValueNotifier<YouTubeBars?> pageYouTubeBars = ValueNotifier<YouTubeBars?>(
   null,
 );
@@ -95,8 +129,33 @@ YouTubeBars? youTubeBarsFromState(Object? raw) {
   );
 }
 
+/// The page itself (Spotify's own bars) carries the button that opens the
+/// adjustments: the app's wide "Abrir ajustes" stays out of the way.
+final ValueNotifier<bool> pageDrawsAdjustButton = ValueNotifier<bool>(false);
+
+/// The page itself shows the start-screen button in its top bar.
+final ValueNotifier<bool> pageDrawsHomeButton = ValueNotifier<bool>(false);
+
+/// Spotify's open player (the song's own screen) is up.
+final ValueNotifier<bool> spotifyPlayerOpen = ValueNotifier<bool>(false);
+
+/// Where Spotify's open player ends on its page, in the screen's own
+/// pixels from the page's top (null without it): below it, down to the
+/// screen's bottom, the page is black.
+final ValueNotifier<double?> spotifyPlayerBottom = ValueNotifier<double?>(null);
+
+/// The finger pulling Spotify's player up to show the adjustments under it:
+/// how far it moved since the last call (positive: up), and when it lets go
+/// its speed (positive: up). Set by the studio; called by the Spotify page.
+void Function(double dy)? spotifyPullDrag;
+void Function(double velocity)? spotifyPullEnd;
+
+/// The page's own adjustments button was tapped (a counter).
+final ValueNotifier<int> pageAdjustRequests = ValueNotifier<int>(0);
+
 /// The floating "back to the start screen" button hides in these cases.
 bool get hideHomeButton =>
+    pageDrawsHomeButton.value ||
     pageInputFocused.value ||
     adjustmentsCoverScreen.value ||
     pictureInPictureShown.value ||

@@ -33,18 +33,22 @@ String youtubeAppearanceScript(StudioAppearanceMode mode) {
       root.toggleAttribute('dark', dark);
       root.style.colorScheme = desired;
       // YouTube keeps its own "Aparência" choice in the PREF cookie (f6, hex
-      // flags: 0x400 dark, 0x80000 light). When it disagrees with the app,
-      // YouTube renders the other theme and the overrides below only repaint
-      // part of it (white panels in dark, unreadable text). Make the cookie
-      // follow the app, and reload once unless a video is playing.
+      // flags: 0x400 dark, 0x80000 light) and only takes it when a page
+      // loads. A page loaded with the other theme keeps that theme's text
+      // colours, and the overrides below only repaint part of it (white
+      // panels in dark, light text on white). So: make the cookie follow the
+      // app, and reload any page that was loaded with the other theme.
       try {
         const found = document.cookie.match(/(?:^|; )PREF=([^;]*)/);
         const parts = found ? found[1].split('&').filter(Boolean) : [];
         let seen = false;
+        let cookieTheme = '';
         const next = parts.map(part => {
           if (part.indexOf('f6=') !== 0) return part;
           seen = true;
           const flags = parseInt(part.slice(3), 16) || 0;
+          cookieTheme = (flags & 0x400) ? 'dark'
+            : (flags & 0x80000) ? 'light' : '';
           const want = dark
             ? ((flags & ~0x80000) | 0x400)
             : ((flags & ~0x400) | 0x80000);
@@ -52,14 +56,54 @@ String youtubeAppearanceScript(StudioAppearanceMode mode) {
         });
         if (!seen) next.unshift('f6=' + (dark ? '400' : '80000'));
         const value = next.join('&');
-        if (!found || found[1] !== value) {
+        // The theme this page was loaded with: YouTube's own record of it,
+        // or else what the cookie said the first time this page was seen
+        // (the other page of the app may have changed the cookie since).
+        let pageTheme = '';
+        try {
+          const context = window.ytcfg && window.ytcfg.get &&
+            window.ytcfg.get('INNERTUBE_CONTEXT');
+          const theme = context && context.client &&
+            context.client.userInterfaceTheme;
+          if (theme === 'USER_INTERFACE_THEME_DARK') pageTheme = 'dark';
+          if (theme === 'USER_INTERFACE_THEME_LIGHT') pageTheme = 'light';
+        } catch (_) {}
+        if (!pageTheme) {
+          if (typeof window.__transponoPageTheme !== 'string') {
+            window.__transponoPageTheme = cookieTheme;
+          }
+          pageTheme = window.__transponoPageTheme;
+        }
+        let ready = !!found && found[1] === value;
+        if (!ready) {
           document.cookie = 'PREF=' + value +
             '; domain=.youtube.com; path=/; max-age=63072000; secure';
           const written = document.cookie.match(/(?:^|; )PREF=([^;]*)/);
-          const video = document.querySelector('video.html5-main-video');
-          const playing = !!video && !video.paused && !video.ended;
-          if (written && written[1] === value && !playing) {
-            location.reload();
+          ready = !!written && written[1] === value;
+        }
+        if (ready && pageTheme !== desired) {
+          // Never a loop: at most two reloads for the same theme.
+          let tries = 0;
+          try {
+            const mark = (sessionStorage.getItem('transponoThemeReload') || '')
+              .split(':');
+            tries = mark[0] === desired ? (parseInt(mark[1], 10) || 0) : 0;
+            sessionStorage.setItem(
+              'transponoThemeReload', desired + ':' + (tries + 1));
+          } catch (_) { tries = window.__transponoThemeTried ? 2 : 0; }
+          window.__transponoThemeTried = true;
+          if (tries < 2) {
+            // A video being watched comes back at the same moment.
+            const video = document.querySelector('video.html5-main-video');
+            const watching = location.pathname === '/watch' && !!video &&
+              video.currentTime > 1 && !video.ended;
+            if (watching) {
+              const url = new URL(location.href);
+              url.searchParams.set('t', Math.floor(video.currentTime) + 's');
+              location.replace(url.href);
+            } else {
+              location.reload();
+            }
             return;
           }
         }
@@ -493,6 +537,14 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// exactly as it is (no scroll back to the top, no reload).
   Future<void> openTab(String name, {bool keepPlace = false}) async {}
 
+  /// YouTube Music's player: opens the song tab [index] (A seguir, Letra,
+  /// ...), or with -1 goes back to the player.
+  /// [top] is where its panel starts on the page (under the app's tabs).
+  Future<void> openSongTab(int index, {double top = 0}) async {}
+
+  /// YouTube Music's next (or previous) song, from the notification.
+  Future<void> musicSkip({required bool forward}) async {}
+
   /// The studio's adjustments opened ([shown]) or closed: on opening, the
   /// page's video list is scrolled back to the player at the top; on
   /// closing, it returns to where the user was.
@@ -554,6 +606,10 @@ Uri _youtubeVideoUri(String videoId) {
 }
 
 class WebViewYouTubeSession extends YouTubeBrowserSession {
+  /// The page's picture is never seen (Spotify's sound): lowest quality.
+  bool lowVideo = false;
+  int _pollTick = 0;
+
   WebViewYouTubeSession({WebViewController? controller}) {
     if (controller != null) {
       this.controller = controller;
@@ -744,6 +800,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     );
     if (_disposed) return;
     _timer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      // A page that only browses (the player is another page) is read
+      // less often: every call to a page costs the phone's main thread.
+      if (browseOnly && _pollTick++ % 3 != 0) return;
       unawaited(refresh());
       unawaited(_checkContentReady());
     });
@@ -935,6 +994,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       return;
     }
     _snapshotRevision = revision.toInt();
+    if (!browseOnly && state.containsKey('songTabs')) {
+      final SongTabs? tabs = songTabsFromState(state['songTabs']);
+      if (!sameSongTabs(tabs, musicSongTabs.value)) musicSongTabs.value = tabs;
+    }
     if (publishesPageState) {
       pageInputFocused.value = state['inputFocused'] == true;
       pageScrolledDown.value = state['pageScroll'] == 'down';
@@ -1058,6 +1121,31 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   }
 
   @override
+  Future<void> musicSkip({required bool forward}) async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(
+        'if (window.__transponoMusicSkip) window.__transponoMusicSkip($forward);',
+      );
+    } on Object {
+      // The page changed meanwhile.
+    }
+  }
+
+  @override
+  Future<void> openSongTab(int index, {double top = 0}) async {
+    if (_disposed) return;
+    try {
+      await controller.runJavaScript(
+        'if (window.__transponoSongTab) '
+        'window.__transponoSongTab($index, ${top.round()});',
+      );
+    } on Object {
+      // The page changed meanwhile.
+    }
+  }
+
+  @override
   Future<void> leaveSearch() async {
     if (_disposed) return;
     try {
@@ -1121,6 +1209,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         '${defaultTargetPlatform == TargetPlatform.iOS};'
         'window.__transponoNativeBar = ${nativeGlassBar.value};'
         'window.__transponoBrowseOnly = $browseOnly;'
+        'window.__transponoLowVideo = $lowVideo;'
         'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'
         'window.__transponoAppMiniSurface = $appMiniSurface;'
@@ -1355,6 +1444,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     pageInputFocused.value = false;
     pageScrolledDown.value = false;
     if (publishesPageState) pageYouTubeBars.value = null;
+    if (!browseOnly) musicSongTabs.value = null;
     if (!browseOnly) pageUnmutePrompt.value = false;
     _disposed = true;
     _timer?.cancel();

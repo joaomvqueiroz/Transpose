@@ -12,44 +12,71 @@ const Color studioCyan = Color(0xFFFFFFFF);
 BoxDecoration studioPanelDecoration({
   double radius = 24,
   StudioAppearanceMode mode = StudioAppearanceMode.dark,
-}) => BoxDecoration(
-  gradient: LinearGradient(
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-    colors: switch (mode) {
-      StudioAppearanceMode.dark => const [
-        Color(0xFF303034),
-        Color(0xFF1C1C1F),
-        Color(0xFF111113),
-      ],
-      StudioAppearanceMode.light => const [
-        Color(0xFFFFFFFF),
-        Color(0xFFF2F4F8),
-        Color(0xFFE3E9F0),
-      ],
-      StudioAppearanceMode.glass => const [
-        Color(0x994F5969),
-        Color(0x88303B4A),
-        Color(0x88202937),
-      ],
-    },
-    stops: [0, .48, 1],
-  ),
-  borderRadius: BorderRadius.circular(radius),
-  border: Border.all(
-    color: mode == StudioAppearanceMode.light
-        ? const Color(0xFFB7C4D2)
-        : mode == StudioAppearanceMode.glass
-        ? const Color(0x88E4F8FF)
-        : const Color(0xFF55555B),
-    width: .8,
-  ),
-  boxShadow: const [
-    BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 7)),
-    BoxShadow(color: Color(0x12FFFFFF), blurRadius: 8, offset: Offset(-2, -2)),
-  ],
-);
-const Color studioMuted = Color(0xFFA1A1AA);
+}) => studioSpotifySkin && mode != StudioAppearanceMode.light
+    // Spotify's cards: flat, translucent white over the sheet, no border.
+    ? BoxDecoration(
+        color: skinCard,
+        borderRadius: BorderRadius.circular(radius.clamp(0, 12).toDouble()),
+      )
+    : BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: switch (mode) {
+            StudioAppearanceMode.dark => const [
+              Color(0xFF303034),
+              Color(0xFF1C1C1F),
+              Color(0xFF111113),
+            ],
+            StudioAppearanceMode.light => const [
+              Color(0xFFFFFFFF),
+              Color(0xFFF2F4F8),
+              Color(0xFFE3E9F0),
+            ],
+            // The mixed themes ("Médio"): dark glass.
+            StudioAppearanceMode.glass when studioGlassDarkPanels => const [
+              Color(0xB32A2F38),
+              Color(0xAD181C23),
+              Color(0xAD0E1116),
+            ],
+            // "Vidro" and "Apple": the same glass, darker still.
+            StudioAppearanceMode.glass => const [
+              Color(0xCC1B1F26),
+              Color(0xC70E1116),
+              Color(0xC707090C),
+            ],
+          },
+          stops: [0, .48, 1],
+        ),
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+          color: mode == StudioAppearanceMode.light
+              ? Color(0xFFB7C4D2)
+              : mode == StudioAppearanceMode.glass
+              ? (studioGlassDarkPanels ? Color(0x55E4F8FF) : Color(0x44E4F8FF))
+              : Color(0xFF55555B),
+          width: .8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 18,
+            offset: Offset(0, 7),
+          ),
+          BoxShadow(
+            color: Color(0x12FFFFFF),
+            blurRadius: 8,
+            offset: Offset(-2, -2),
+          ),
+        ],
+      );
+
+/// Secondary text. On Spotify it is brighter, for contrast on its colours.
+Color get studioMuted => studioYouTubeSkin
+    ? const Color(0xFFAAAAAA)
+    : studioSpotifySkin
+    ? const Color(0xFFE2E2E2)
+    : const Color(0xFFA1A1AA);
 
 /// Resolution-independent recreation of the supplied 390 dp panel designs.
 /// Text, icons, cards and lines are rendered by Flutter, never scaled bitmaps.
@@ -60,9 +87,9 @@ class StudioNativePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (name) {
-    'player' => const _PlayerPanel(),
-    'practice' => const _PracticePanel(),
-    'chords' => const _ChordsPanel(),
+    'player' => _PlayerPanel(),
+    'practice' => _PracticePanel(),
+    'chords' => _ChordsPanel(),
     'stage' => const _StagePanel(),
     _ => const SizedBox.shrink(),
   };
@@ -87,28 +114,28 @@ class StudioNativeHeader extends StatelessWidget {
         color: Color(0xFF0C1927),
         border: Border(bottom: BorderSide(color: Color(0xFF1A2A3A))),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 18),
+      padding: EdgeInsets.symmetric(horizontal: 18),
       child: Row(
         children: <Widget>[
-          const Icon(Icons.menu, size: 24, color: studioMuted),
+          Icon(Icons.menu, size: 24, color: studioMuted),
           Expanded(
             child: Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
           ),
           if (name == 'stage')
-            const _Pill(Icons.lock_outline, 'BLOQUEAR TELA')
+            _Pill(Icons.lock_outline, 'BLOQUEAR TELA')
           else ...<Widget>[
             if (name == 'player') ...<Widget>[
-              const Icon(Icons.search, color: studioMuted),
-              const SizedBox(width: 17),
+              Icon(Icons.search, color: studioMuted),
+              SizedBox(width: 17),
             ],
-            const Icon(Icons.more_horiz, color: studioMuted),
+            Icon(Icons.more_horiz, color: studioMuted),
             if (name != 'player') ...<Widget>[
-              const SizedBox(width: 17),
-              const CircleAvatar(
+              SizedBox(width: 17),
+              CircleAvatar(
                 radius: 15,
                 backgroundColor: Color(0xFFD5FAFF),
                 child: Icon(Icons.person_outline, color: studioBg, size: 19),
@@ -137,7 +164,7 @@ class _PanelCard extends StatelessWidget {
     padding: padding,
     decoration: BoxDecoration(
       color: color,
-      border: Border.all(color: const Color(0xFF203246)),
+      border: Border.all(color: Color(0xFF203246)),
       borderRadius: BorderRadius.circular(15),
     ),
     child: child,
@@ -145,16 +172,16 @@ class _PanelCard extends StatelessWidget {
 }
 
 class _Label extends StatelessWidget {
-  const _Label(this.text, {this.color = studioMuted, this.size = 11});
+  const _Label(this.text, {this.color, this.size = 11});
   final String text;
-  final Color color;
+  final Color? color;
   final double size;
 
   @override
   Widget build(BuildContext context) => Text(
     text,
     style: TextStyle(
-      color: color,
+      color: color ?? studioMuted,
       fontSize: size,
       fontWeight: FontWeight.w800,
       letterSpacing: 0.9,
@@ -270,7 +297,7 @@ class _PlayerPanel extends StatelessWidget {
                   size: 19,
                 ),
                 const SizedBox(width: 9),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Dica: Dê duplo toque para avançar ou voltar…',
                     maxLines: 1,
@@ -278,7 +305,7 @@ class _PlayerPanel extends StatelessWidget {
                     style: TextStyle(color: studioMuted, fontSize: 13),
                   ),
                 ),
-                const Icon(Icons.close, color: studioMuted, size: 17),
+                Icon(Icons.close, color: studioMuted, size: 17),
               ],
             ),
           ),
@@ -286,7 +313,7 @@ class _PlayerPanel extends StatelessWidget {
           _PanelCard(
             child: Column(
               children: <Widget>[
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[_Label('TOM'), _Label('Original: C')],
                 ),
@@ -333,7 +360,7 @@ class _PlayerPanel extends StatelessWidget {
           _PanelCard(
             child: Column(
               children: <Widget>[
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
                     _Label('VELOCIDADE'),
@@ -396,7 +423,7 @@ class _PlayerPanel extends StatelessWidget {
           _PanelCard(
             child: Column(
               children: <Widget>[
-                const Row(
+                Row(
                   children: <Widget>[
                     Icon(Icons.repeat, color: studioMuted, size: 18),
                     SizedBox(width: 8),
@@ -443,7 +470,7 @@ class _PlayerPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          const _PanelCard(
+          _PanelCard(
             padding: EdgeInsets.all(14),
             child: Row(
               children: <Widget>[
@@ -460,7 +487,7 @@ class _PlayerPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             '▥  Ferramentas Áudio Avançado ⌄',
             style: TextStyle(color: studioMuted, fontSize: 13),
           ),
@@ -482,7 +509,7 @@ class _PlayerPanel extends StatelessWidget {
         children: <Widget>[
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: studioMuted,
               fontSize: 10,
               fontWeight: FontWeight.w800,
@@ -506,7 +533,7 @@ class _PracticePanel extends StatelessWidget {
   Widget build(BuildContext context) => ColoredBox(
     color: studioBg,
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 65, 16, 22),
+      padding: EdgeInsets.fromLTRB(16, 65, 16, 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -514,7 +541,7 @@ class _PracticePanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
                     Expanded(
@@ -538,7 +565,7 @@ class _PracticePanel extends StatelessWidget {
                   'Solo Principal',
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
                 ),
-                const Text(
+                Text(
                   '02:13 – 02:37  ·  Duração: 24s',
                   style: TextStyle(
                     color: studioMuted,
@@ -570,7 +597,7 @@ class _PracticePanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Center(
+                Center(
                   child: Text(
                     '━━   ━━   ▬    Repetição 2 de 3',
                     style: TextStyle(color: studioMuted, fontSize: 12),
@@ -584,7 +611,7 @@ class _PracticePanel extends StatelessWidget {
                   backgroundColor: Color(0xFF3A4859),
                 ),
                 const SizedBox(height: 9),
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
                     Expanded(
@@ -642,7 +669,7 @@ class _PracticePanel extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 23),
-                const Row(
+                Row(
                   children: <Widget>[
                     Icon(Icons.tune, color: studioMuted, size: 17),
                     SizedBox(width: 6),
@@ -662,7 +689,7 @@ class _PracticePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 17),
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
               Expanded(
@@ -740,7 +767,7 @@ class _PracticePanel extends StatelessWidget {
                                 ),
                               ),
                               if (title == 'Solo')
-                                const Text(
+                                Text(
                                   '● Tocando agora · Loop Ativo',
                                   style: TextStyle(
                                     color: studioMuted,
@@ -817,14 +844,11 @@ class _PracticePanel extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-              Text(
-                detail,
-                style: const TextStyle(color: studioMuted, fontSize: 10),
-              ),
+              Text(detail, style: TextStyle(color: studioMuted, fontSize: 10)),
             ],
           ),
         ),
-        const Icon(Icons.play_arrow, color: studioMuted),
+        Icon(Icons.play_arrow, color: studioMuted),
       ],
     ),
   );
@@ -837,16 +861,16 @@ class _ChordsPanel extends StatelessWidget {
   Widget build(BuildContext context) => ColoredBox(
     color: studioBg,
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 65, 16, 26),
+      padding: EdgeInsets.fromLTRB(16, 65, 16, 26),
       child: Column(
         children: <Widget>[
           _PanelCard(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(12),
             child: Row(
               children: <Widget>[
-                const Icon(Icons.queue_music, color: studioCyan),
-                const SizedBox(width: 12),
-                const Expanded(
+                Icon(Icons.queue_music, color: studioCyan),
+                SizedBox(width: 12),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
@@ -886,11 +910,11 @@ class _ChordsPanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 15),
+          SizedBox(height: 15),
           _PanelCard(
             child: Column(
               children: <Widget>[
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: <Widget>[
                     Expanded(
@@ -977,7 +1001,7 @@ class _ChordsPanel extends StatelessWidget {
           _PanelCard(
             padding: const EdgeInsets.all(12),
             color: studioCardAlt,
-            child: const Row(
+            child: Row(
               children: <Widget>[
                 Icon(Icons.push_pin, color: studioCyan),
                 SizedBox(width: 10),
@@ -990,7 +1014,7 @@ class _ChordsPanel extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 15),
+          SizedBox(height: 15),
           for (final (IconData icon, String text) in <(IconData, String)>[
             (Icons.grid_on, 'Ver diagrama no braço da guitarra'),
             (Icons.receipt_long, 'Ver progressão harmônica completa'),
@@ -998,27 +1022,27 @@ class _ChordsPanel extends StatelessWidget {
             (Icons.edit_note, 'Notas da música'),
           ]) ...<Widget>[
             _PanelCard(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 15),
               child: Row(
                 children: <Widget>[
                   Icon(icon, color: studioCyan, size: 19),
-                  const SizedBox(width: 11),
+                  SizedBox(width: 11),
                   Expanded(
                     child: Text(
                       text,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
                       ),
                     ),
                   ),
-                  const Icon(Icons.expand_more, color: studioMuted),
+                  Icon(Icons.expand_more, color: studioMuted),
                 ],
               ),
             ),
-            const SizedBox(height: 5),
+            SizedBox(height: 5),
           ],
-          const SizedBox(height: 11),
+          SizedBox(height: 11),
           const _PanelCard(
             padding: EdgeInsets.all(16),
             child: Center(
@@ -1059,9 +1083,9 @@ class _ChordsPanel extends StatelessWidget {
             height: 1.1,
           ),
         ),
-        Text(type, style: const TextStyle(color: studioMuted, fontSize: 12)),
-        const SizedBox(height: 22),
-        Text(fret, style: const TextStyle(fontSize: 12, color: studioMuted)),
+        Text(type, style: TextStyle(color: studioMuted, fontSize: 12)),
+        SizedBox(height: 22),
+        Text(fret, style: TextStyle(fontSize: 12, color: studioMuted)),
       ],
     ),
   );
@@ -1074,10 +1098,10 @@ class _StagePanel extends StatelessWidget {
   Widget build(BuildContext context) => ColoredBox(
     color: studioBg,
     child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 69, 16, 26),
+      padding: EdgeInsets.fromLTRB(16, 69, 16, 26),
       child: Column(
         children: <Widget>[
-          const Row(
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
               Expanded(
@@ -1096,16 +1120,16 @@ class _StagePanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          const _Label('MÚSICA EM ANDAMENTO', color: studioCyan),
-          const SizedBox(height: 7),
-          const Text(
+          SizedBox(height: 24),
+          _Label('MÚSICA EM ANDAMENTO', color: studioCyan),
+          SizedBox(height: 7),
+          Text(
             'GRAVITY (LIVE)',
             style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 20),
           _PanelCard(
-            padding: const EdgeInsets.symmetric(vertical: 22),
+            padding: EdgeInsets.symmetric(vertical: 22),
             child: Column(
               children: <Widget>[
                 const _Label('TOM ATUAL DA BANDA'),
@@ -1172,7 +1196,7 @@ class _StagePanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          const _PanelCard(
+          _PanelCard(
             child: Row(
               children: <Widget>[
                 Icon(Icons.tune, color: studioCyan),
@@ -1236,7 +1260,7 @@ class StudioNativeSidebar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Row(
+            Row(
               children: <Widget>[
                 CircleAvatar(
                   radius: 18,
@@ -1264,11 +1288,11 @@ class StudioNativeSidebar extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             _PanelCard(
-              padding: const EdgeInsets.all(11),
+              padding: EdgeInsets.all(11),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  const Row(
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: <Widget>[
                       _Label('AGORA A TOCAR', size: 9),
@@ -1287,8 +1311,8 @@ class StudioNativeSidebar extends StatelessWidget {
                           fit: BoxFit.cover,
                         ),
                       ),
-                      const SizedBox(width: 9),
-                      const Expanded(
+                      SizedBox(width: 9),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
@@ -1311,17 +1335,17 @@ class StudioNativeSidebar extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
+                  SizedBox(height: 8),
+                  Text(
                     'Tom: B♭      Loop A–B       03:42 / 05:48',
                     style: TextStyle(color: studioMuted, fontSize: 10),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 18),
-            const _Label('NAVEGAÇÃO & ESTUDO', size: 10),
-            const SizedBox(height: 7),
+            SizedBox(height: 18),
+            _Label('NAVEGAÇÃO & ESTUDO', size: 10),
+            SizedBox(height: 7),
             for (final (IconData icon, String title, String trailing)
                 in <(IconData, String, String)>[
                   (Icons.play_circle_outline, 'Agora a Tocar', '●'),
@@ -1334,7 +1358,7 @@ class StudioNativeSidebar extends StatelessWidget {
                   (Icons.show_chart, 'Progresso e Prática', '14.2h'),
                 ])
               _sidebarRow(icon, title, trailing),
-            const Divider(color: Color(0xFF263849), height: 28),
+            Divider(color: Color(0xFF263849), height: 28),
             const _Label('SISTEMA & AJUSTES', size: 10),
             const SizedBox(height: 8),
             _sidebarRow(
@@ -1372,7 +1396,7 @@ class StudioNativeSidebar extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Icon(Icons.logout, size: 17, color: studioMuted),
+                  Icon(Icons.logout, size: 17, color: studioMuted),
                 ],
               ),
             ),
@@ -1406,10 +1430,7 @@ class StudioNativeSidebar extends StatelessWidget {
                 ),
               ),
             ),
-            Text(
-              trailing,
-              style: const TextStyle(color: studioMuted, fontSize: 10),
-            ),
+            Text(trailing, style: TextStyle(color: studioMuted, fontSize: 10)),
           ],
         ),
       );

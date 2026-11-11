@@ -58,12 +58,7 @@ void main() {
       findsNothing,
     );
     expect(find.byKey(const Key('visualCloseAdjustments')), findsOneWidget);
-    expect(
-      tester
-          .widget<IconButton>(find.byKey(const Key('visualMainAdjustments')))
-          .tooltip,
-      'Expandir ou fechar ajustes',
-    );
+    expect(find.byKey(const Key('adjustmentsHandle')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
   testWidgets('recovery warning does not cover the video', (tester) async {
@@ -216,7 +211,10 @@ void main() {
       expect(session.viewMounts, 1);
       expect(session.viewDisposals, 0);
     }
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, 80),
+    );
     await tester.pumpAndSettle();
     expect(tester.getSize(surface).height, closedHeight);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);

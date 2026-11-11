@@ -1,12 +1,18 @@
 part of 'studio_visual_app.dart';
 
 class _StudioVisualHomeState extends State<StudioVisualHome>
-    with WidgetsBindingObserver {
-  Color get _background => widget.appearance.mode == StudioAppearanceMode.light
-      ? const Color(0xFFF4F7FB)
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  // The adjustments sit on the same colour as the YouTube page behind them
+  // (white in its light theme, #0F0F0F in its dark one).
+  Color get _background => studioYouTubeSkin
+      ? youtubeBase
+      : studioSpotifySkin
+      ? spotifySheetColor
+      : widget.appearance.mode == StudioAppearanceMode.light
+      ? Colors.white
       : widget.appearance.mode == StudioAppearanceMode.glass
       ? const Color(0x77080809)
-      : studioBg;
+      : const Color(0xFF0F0F0F);
   late final MainPlayerController _player =
       widget.playerController ??
       MainPlayerController(
@@ -23,9 +29,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final GlobalKey _mediaKey = GlobalKey(debugLabel: 'shared-player-surface');
   final GlobalKey<PlayerChordSheetState> _unifiedChordKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
-  final GlobalKey _adjustmentButtonAnchorKey = GlobalKey();
-  OverlayEntry? _adjustmentChoicesOverlay;
-  Size _adjustmentButtonSize = const Size(40, 40);
   ScrollController? _chordTextScroll;
   Timer? _chordAutoTimer;
   bool _chordAutoScroll = false;
@@ -35,11 +38,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool _chordActive = false;
   bool _mainControlsExpanded = false;
   bool _adjustmentsCoverVideo = false;
-  bool _adjustmentChoicesVisible = false;
   bool _landscapeColumnsVisible = false;
   bool _immersiveLandscape = false;
   Orientation? _lastOrientation;
-  double _adjustmentsDrag = 0;
   double? _seekPreviewMs;
   String? _practiceTool;
   bool _chordSearching = false;
@@ -120,6 +121,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    pageAdjustRequests.addListener(_pageAdjust);
+    BackgroundPlayback.listen(_backgroundAction);
+    musicSongTabs.addListener(_songTabsChanged);
+    spotifyPlayerOpen.addListener(_spotifyPlayerChanged);
     _homeWidgets = HomeWidgetBridge(onAction: _onWidgetAction);
     // iPhone's own glass for the bottom bar, where the system has it.
     unawaited(
@@ -191,7 +196,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _lastOrientation = orientation;
     _landscapeColumnsVisible = false;
     _adjustmentsCoverVideo = false;
-    _hideAdjustmentChoices();
     _syncSystemUi();
   }
 
@@ -340,7 +344,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     _minimizeWhenReleased = false;
-    _hideAdjustmentChoices();
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(true));
     setState(() {
@@ -422,6 +425,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool get _playerBarShown =>
       _twoPages &&
       !_browsing &&
+      // The big player (YouTube Music, Spotify): no bar under it; the
+      // adjustments come up from under the player.
+      !_spotifyScroll &&
       !_isLandscapePlayer &&
       !_mainControlsExpanded &&
       _player.loaded &&
@@ -479,11 +485,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 
   void _changed() {
     _syncPageRoles();
+    // Spotify goes on in the background with its notification, like its own
+    // app; a YouTube video goes to the small window.
     unawaited(
       PictureInPicture.setVideoPlaying(
-        _player.isYouTube && _player.loaded && _player.playing,
+        _player.isYouTube &&
+            _player.loaded &&
+            _player.playing &&
+            !studioSpotifySource &&
+            // YouTube Music goes on in the background like Spotify.
+            !studioMusicSource,
       ),
     );
+    _updateBackground();
     final startupSession = _player.youtube;
     if (startupSession != null) {
       unawaited(startupSession.setAppearanceMode(widget.appearance.mode));
@@ -492,7 +506,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _reportInitialBrowserReady();
     }
     if (_chordSource != _player.sourceKey) {
-      _hideAdjustmentChoices();
       _chordSource = _player.sourceKey;
       _widgetCues = const [];
       _widgetChordTitle = '';
@@ -726,8 +739,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   @override
   void dispose() {
     adjustmentsCoverScreen.value = false;
-    _adjustmentChoicesOverlay?.remove();
-    _adjustmentChoicesOverlay?.dispose();
+    pageAdjustRequests.removeListener(_pageAdjust);
+    BackgroundPlayback.unlisten();
+    musicSongTabs.removeListener(_songTabsChanged);
+    unawaited(BackgroundPlayback.stop());
+    spotifyPlayerOpen.removeListener(_spotifyPlayerChanged);
+    _pull.dispose();
     if (_immersiveLandscape) {
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
@@ -810,12 +827,49 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
+  // Where the selection came from, for the tabs' pill to slide from there,
+  // and which way the new content comes in.
+  StudioTab? _previousTab;
+  int _tabDirection = 0;
+  // The frame around the tabs differs between the tone tab and the others:
+  // that change is applied at once, not animated.
+  bool _tabJump = false;
+
+  static int _tabOrder(StudioTab tab) => switch (tab) {
+    StudioTab.player || StudioTab.chords => 0,
+    StudioTab.practice => 1,
+    StudioTab.audioSettings => 2,
+    StudioTab.setlist => 3,
+    _ => 4,
+  };
+
+  /// A tab's content, coming in when the tab is chosen.
+  Widget _enter(Widget child) => TabEntrance(
+    key: ValueKey('tabEntrance${_tabOrder(_tab)}'),
+    direction: _tabDirection,
+    child: child,
+  );
+
   void _select(StudioTab tab) {
-    _hideAdjustmentChoices();
     if (tab != StudioTab.chords && tab != StudioTab.player) {
       _stopChordAutoScroll();
     }
+    _panelAtTop = true;
+    // A new tab starts at its top: its bar shows again.
+    _handleScroll.value = 0;
+    final bool wasTone = _tab == StudioTab.chords || _tab == StudioTab.player;
+    final bool toTone =
+        tab == StudioTab.chords ||
+        tab == StudioTab.player ||
+        tab == StudioTab.stage ||
+        tab == StudioTab.instruments;
+    if (_mainControlsExpanded && wasTone != toTone) {
+      _tabJump = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tabJump = false);
+    }
     setState(() {
+      _previousTab = _tab;
+      _tabDirection = (_tabOrder(tab) - _tabOrder(_tab)).sign;
       _tab = tab == StudioTab.stage || tab == StudioTab.instruments
           ? StudioTab.chords
           : tab == StudioTab.metronome
@@ -825,7 +879,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           : tab;
       _browsing = false;
       _mainControlsExpanded = true;
-      _adjustmentChoicesVisible = false;
     });
     if (tab == StudioTab.tuner) unawaited(_player.pause());
   }
@@ -838,15 +891,72 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   // card (the tone), with the video and most of the page in sight.
   bool _sheetLow = false;
 
+  /// The page's own adjustments button (Spotify's bottom bar) was tapped.
+  void _updateBackground() {
+    if (!Platform.isAndroid) return;
+    if (!(studioSpotifySource || studioMusicSource) || !_player.loaded) {
+      unawaited(BackgroundPlayback.stop());
+      return;
+    }
+    final String title = _player.title;
+    final int dash = title.lastIndexOf(' - ');
+    unawaited(
+      BackgroundPlayback.update(
+        title: dash > 0 ? title.substring(0, dash) : title,
+        artist: dash > 0 ? title.substring(dash + 3) : '',
+        playing: _player.playing,
+        position: _player.position,
+        duration: _player.duration,
+      ),
+    );
+  }
+
+  /// A tap on the notification or the lock screen.
+  void _backgroundAction(String action) {
+    if (!mounted) return;
+    final session = _player.youtube;
+    switch (action) {
+      case 'play':
+        if (!_player.playing) unawaited(_player.playPause());
+      case 'pause':
+        if (_player.playing) unawaited(_player.playPause());
+      case 'next':
+        if (session is SpotifyStudioSession) {
+          unawaited(session.next());
+        } else if (studioMusicSource) {
+          unawaited(session?.musicSkip(forward: true));
+        }
+      case 'previous':
+        if (session is SpotifyStudioSession) {
+          unawaited(session.previous());
+        } else if (studioMusicSource) {
+          unawaited(session?.musicSkip(forward: false));
+        }
+      default:
+        if (action.startsWith('seek:')) {
+          final int? ms = int.tryParse(action.substring(5));
+          if (ms != null) unawaited(_player.seek(Duration(milliseconds: ms)));
+        }
+    }
+  }
+
+  void _pageAdjust() {
+    if (mounted) _toggleMainAdjustments();
+  }
+
   void _toggleMainAdjustments() {
-    _hideAdjustmentChoices();
+    if (_spotifyScroll) {
+      unawaited(
+        _pull.animateTo(_pull.value > .5 ? 0 : 1, curve: Curves.easeOutCubic),
+      );
+      return;
+    }
     if (_mainControlsExpanded) _stopChordAutoScroll();
     setState(() {
       _closeCompact = false;
       _sheetLow = false;
       _mainControlsExpanded = !_mainControlsExpanded;
       _adjustmentsCoverVideo = false;
-      _adjustmentChoicesVisible = false;
       _seekPreviewMs = null;
     });
     // "Abrir ajustes" brings the page's video list back up to the player;
@@ -863,6 +973,35 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _adjustmentsCoverVideo = true;
       _sheetLow = false;
     });
+  }
+
+  // How far the finger has dragged the adjustments' bar (null: no drag).
+  double? _sheetDrag;
+
+  /// The finger let go of the bar: settle on the nearest height.
+  void _endSheetDrag(double velocity) {
+    final double moved = _sheetDrag ?? 0;
+    setState(() => _sheetDrag = null);
+    final bool up = moved < -40 || (moved <= 0 && velocity < -500);
+    final bool down = moved > 40 || (moved >= 0 && velocity > 500);
+    // The floating sheet has one more height, the low one, between the
+    // medium height and closed.
+    final bool floating = _floatingSheet;
+    if (up) {
+      if (floating && _sheetLow) {
+        setState(() => _sheetLow = false);
+      } else {
+        _coverVideoWithAdjustments();
+      }
+    } else if (down && floating && !_sheetLow) {
+      setState(() => _sheetLow = true);
+    } else if (down) {
+      // From the top a long pull goes straight to closed.
+      final bool farDown =
+          _adjustmentsCoverVideo && moved > _lastScreen.height * .6;
+      _lowerAdjustments();
+      if (farDown && _mainControlsExpanded) _lowerAdjustments();
+    }
   }
 
   void _lowerAdjustments() {
@@ -890,93 +1029,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _landscapeColumnsVisible = true;
       _adjustmentsCoverVideo = false;
     });
-  }
-
-  void _chooseAdjustmentDirection(bool expand) {
-    _hideAdjustmentChoices();
-    setState(() {});
-    if (expand) {
-      _coverVideoWithAdjustments();
-    } else {
-      _lowerAdjustments();
-    }
-  }
-
-  void _hideAdjustmentChoices() {
-    final entry = _adjustmentChoicesOverlay;
-    _adjustmentChoicesOverlay = null;
-    entry?.remove();
-    entry?.dispose();
-    _adjustmentChoicesVisible = false;
-  }
-
-  void _showAdjustmentDirections() {
-    final button =
-        _adjustmentButtonAnchorKey.currentContext?.findRenderObject()
-            as RenderBox?;
-    final overlay = Overlay.of(context);
-    final overlayBox = overlay.context.findRenderObject() as RenderBox?;
-    if (button == null || overlayBox == null) return;
-    final center = button.localToGlobal(
-      button.size.center(Offset.zero),
-      ancestor: overlayBox,
-    );
-    _adjustmentButtonSize = button.size;
-    final left = (center.dx - 18).clamp(0.0, overlayBox.size.width - 36);
-    final top = (center.dy - 45).clamp(0.0, overlayBox.size.height - 90);
-
-    _adjustmentChoicesOverlay = OverlayEntry(
-      builder: (_) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              key: const Key('adjustmentDirectionDismiss'),
-              behavior: HitTestBehavior.translucent,
-              onTap: () {
-                _hideAdjustmentChoices();
-                if (mounted) setState(() {});
-              },
-            ),
-          ),
-          Positioned(
-            left: left,
-            top: top,
-            child: Semantics(
-              label: 'Cobrir vídeo com ajustes',
-              button: true,
-              child: GestureDetector(
-                key: const Key('adjustmentsExpandVideo'),
-                onTap: () => _chooseAdjustmentDirection(true),
-                child: const CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Color(0xFF303034),
-                  child: Icon(Icons.keyboard_arrow_up, color: Colors.white),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: left,
-            top: top + 54,
-            child: Semantics(
-              label: 'Baixar ou fechar ajustes',
-              button: true,
-              child: GestureDetector(
-                key: const Key('adjustmentsClose'),
-                onTap: () => _chooseAdjustmentDirection(false),
-                child: const CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Color(0xFF303034),
-                  child: Icon(Icons.keyboard_arrow_down, color: Colors.white),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    overlay.insert(_adjustmentChoicesOverlay!);
-    setState(() => _adjustmentChoicesVisible = true);
   }
 
   Future<void> _openYouTubeSearch() async {
@@ -1155,7 +1207,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     const SizedBox(height: 12),
                     Text(
                       _player.loaded ? 'Áudio local' : 'Escolha a sua música',
-                      style: const TextStyle(color: studioMuted),
+                      style: TextStyle(color: studioMuted),
                     ),
                   ],
                 ),
@@ -1457,77 +1509,272 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     'B',
   ];
 
-  Widget _appearanceSettingsContent() => Container(
-    key: const Key('appearanceSettings'),
-    decoration: studioPanelDecoration(mode: widget.appearance.mode),
-    padding: const EdgeInsets.all(16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('APARÊNCIA', style: TextStyle(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+  /// A Spotify filter pill: white with a tick when chosen.
+  Widget _spotifyPill({
+    required Key key,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    Color? dot,
+  }) => Material(
+    color: selected ? skinChipOn : skinChip,
+    shape: skinChipShape,
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      key: key,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            for (final (mode, label) in const [
-              (StudioAppearanceMode.dark, 'Escuro'),
-              (StudioAppearanceMode.light, 'Claro'),
-              (StudioAppearanceMode.glass, 'Vidro'),
-            ])
-              ChoiceChip(
-                key: Key('appearanceMode${mode.name}'),
-                label: Text(label),
-                selected:
-                    widget.appearance.mode == mode && !widget.appearance.apple,
-                onSelected: (_) => widget.onAppearanceChanged?.call(
-                  widget.appearance.copyWith(mode: mode, apple: false),
-                ),
+            if (selected) ...[
+              Icon(Icons.check, size: 18, color: skinChipOnInk),
+              const SizedBox(width: 6),
+            ],
+            if (dot != null) ...[
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
               ),
-            // The Apple design: glass colours plus the floating sheet.
-            ChoiceChip(
-              key: const Key('appearanceModeapple'),
-              label: const Text('Apple'),
-              selected: widget.appearance.apple,
-              onSelected: (_) => widget.onAppearanceChanged?.call(
-                widget.appearance.copyWith(
-                  mode: StudioAppearanceMode.glass,
-                  apple: true,
-                ),
+              const SizedBox(width: 8),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: selected ? skinChipOnInk : Colors.white,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 20),
-        const Text(
-          'CORES DAS NOTAS',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        const Text('Toque numa nota para escolher a sua cor nas cifras.'),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (var index = 0; index < _noteNames.length; index++)
-              ActionChip(
-                key: Key('appearanceNote$index'),
-                tooltip: 'Alterar cor da nota ${_noteNames[index]}',
-                label: Text(
-                  _noteNames[index],
-                  style: TextStyle(
-                    color: playerChordDisplayColor(index, widget.appearance),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                onPressed: () => _chooseNoteColor(index),
-              ),
-          ],
-        ),
-      ],
+      ),
     ),
   );
+
+  /// "Mais" on Spotify: theme pills, then the note colours as dotted pills.
+  Widget _spotifyAppearanceSettings() {
+    final a = widget.appearance;
+    void pick(StudioAppearanceMode mode, bool apple, bool dark) =>
+        widget.onAppearanceChanged?.call(
+          a.copyWith(mode: mode, apple: apple, darkPanels: dark, native: false),
+        );
+    final glass = StudioAppearanceMode.glass;
+    final bool n = a.native;
+    final themes = [
+      (
+        'native',
+        'Nativo',
+        n,
+        () => widget.onAppearanceChanged?.call(
+          a.copyWith(
+            mode: glass,
+            apple: false,
+            darkPanels: false,
+            native: true,
+          ),
+        ),
+      ),
+      (
+        'glass',
+        'Escuro',
+        !n && a.mode == glass && !a.apple && !a.darkPanels,
+        () => pick(glass, false, false),
+      ),
+      (
+        'light',
+        'Claro',
+        !n && a.mode == StudioAppearanceMode.light,
+        () => pick(StudioAppearanceMode.light, false, false),
+      ),
+      (
+        'apple',
+        'Apple',
+        !n && a.mode == glass && a.apple && !a.darkPanels,
+        () => pick(glass, true, false),
+      ),
+      ('misto1', 'Médio', !n && a.darkPanels, () => pick(glass, false, true)),
+    ];
+    return Padding(
+      key: const Key('appearanceSettings'),
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          skinLabel('Aparência'),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (name, label, selected, onTap) in themes)
+                _spotifyPill(
+                  key: Key('appearanceMode$name'),
+                  label: label,
+                  selected: selected,
+                  onTap: onTap,
+                ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          skinLabel('Cores das notas'),
+          const SizedBox(height: 4),
+          Text(
+            'Toque numa nota para escolher a sua cor nas cifras.',
+            style: TextStyle(fontSize: 13, color: skinSubdued),
+          ),
+          const SizedBox(height: 14),
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 8,
+            childAspectRatio: 1.9,
+            children: [
+              for (var index = 0; index < _noteNames.length; index++)
+                Tooltip(
+                  message: 'Alterar cor da nota ${_noteNames[index]}',
+                  child: _spotifyPill(
+                    key: Key('appearanceNote$index'),
+                    label: _noteNames[index],
+                    selected: false,
+                    dot: playerChordDisplayColor(index, a),
+                    onTap: () => _chooseNoteColor(index),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _appearanceSettingsContent() => studioSpotifySkin
+      ? _spotifyAppearanceSettings()
+      : Container(
+          key: const Key('appearanceSettings'),
+          decoration: studioPanelDecoration(mode: widget.appearance.mode),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'APARÊNCIA',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  // "Nativo": the YouTube app's own look on YouTube.
+                  ChoiceChip(
+                    key: const Key('appearanceModenative'),
+                    label: const Text('Nativo'),
+                    selected: widget.appearance.native,
+                    onSelected: (_) => widget.onAppearanceChanged?.call(
+                      widget.appearance.copyWith(
+                        mode: StudioAppearanceMode.glass,
+                        apple: false,
+                        darkPanels: false,
+                        native: true,
+                      ),
+                    ),
+                  ),
+                  // "Escuro" is the dark glass; the old opaque dark theme is gone.
+                  for (final (mode, label) in const [
+                    (StudioAppearanceMode.glass, 'Escuro'),
+                    (StudioAppearanceMode.light, 'Claro'),
+                  ])
+                    ChoiceChip(
+                      key: Key('appearanceMode${mode.name}'),
+                      label: Text(label),
+                      selected:
+                          !widget.appearance.native &&
+                          widget.appearance.mode == mode &&
+                          !widget.appearance.apple &&
+                          !widget.appearance.darkPanels,
+                      onSelected: (_) => widget.onAppearanceChanged?.call(
+                        widget.appearance.copyWith(
+                          mode: mode,
+                          apple: false,
+                          darkPanels: false,
+                          native: false,
+                        ),
+                      ),
+                    ),
+                  // The Apple design: glass colours plus the floating sheet.
+                  ChoiceChip(
+                    key: const Key('appearanceModeapple'),
+                    label: const Text('Apple'),
+                    selected:
+                        !widget.appearance.native &&
+                        widget.appearance.apple &&
+                        !widget.appearance.darkPanels,
+                    onSelected: (_) => widget.onAppearanceChanged?.call(
+                      widget.appearance.copyWith(
+                        mode: StudioAppearanceMode.glass,
+                        apple: true,
+                        darkPanels: false,
+                        native: false,
+                      ),
+                    ),
+                  ),
+                  // The mixed themes: the same backgrounds, darker cards.
+                  ChoiceChip(
+                    key: const Key('appearanceModemisto1'),
+                    label: const Text('Médio'),
+                    selected:
+                        !widget.appearance.native &&
+                        widget.appearance.darkPanels,
+                    onSelected: (_) => widget.onAppearanceChanged?.call(
+                      widget.appearance.copyWith(
+                        mode: StudioAppearanceMode.glass,
+                        apple: false,
+                        darkPanels: true,
+                        native: false,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'CORES DAS NOTAS',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              const Text('Toque numa nota para escolher a sua cor nas cifras.'),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var index = 0; index < _noteNames.length; index++)
+                    ActionChip(
+                      key: Key('appearanceNote$index'),
+                      tooltip: 'Alterar cor da nota ${_noteNames[index]}',
+                      label: Text(
+                        _noteNames[index],
+                        style: TextStyle(
+                          color: playerChordDisplayColor(
+                            index,
+                            widget.appearance,
+                          ),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      onPressed: () => _chooseNoteColor(index),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
 
   Widget _audioSettingsContent({VoidCallback? onClose}) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -1548,19 +1795,47 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         child: MicrophoneTunerTool(appearance: widget.appearance),
       ),
       Container(
-        decoration: studioPanelDecoration(mode: widget.appearance.mode),
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: studioSpotifySkin
+            ? null
+            : studioPanelDecoration(mode: widget.appearance.mode),
+        padding: studioSpotifySkin
+            ? const EdgeInsets.only(top: 14)
+            : const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '▥  EQUALIZADOR',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: .7,
+            if (studioSpotifySkin)
+              Row(
+                children: [
+                  Expanded(child: skinLabel('Equalizador')),
+                  IconButton(
+                    key: const Key('audioEqualizerReset'),
+                    tooltip: 'Repor o equalizador',
+                    onPressed: _player.isYouTube && _player.loaded
+                        ? () {
+                            for (final name in const [
+                              'gain',
+                              'bass',
+                              'mid',
+                              'treble',
+                            ]) {
+                              _setAudioControl(name, 0);
+                            }
+                          }
+                        : null,
+                    icon: const Icon(Icons.restart_alt, color: Colors.white),
+                  ),
+                ],
+              )
+            else
+              const Text(
+                '▥  EQUALIZADOR',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: .7,
+                ),
               ),
-            ),
             const SizedBox(height: 6),
             _audioControlRow(
               'Ganho',
@@ -1599,7 +1874,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               (value) => _setAudioControl('treble', value),
             ),
             if (!_player.isYouTube || !_player.loaded)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 5),
                 child: Text(
                   'Ajustes disponíveis num vídeo compatível do YouTube.',
@@ -1611,19 +1886,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       ),
       const SizedBox(height: 12),
       Container(
-        decoration: studioPanelDecoration(mode: widget.appearance.mode),
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: studioSpotifySkin
+            ? null
+            : studioPanelDecoration(mode: widget.appearance.mode),
+        padding: studioSpotifySkin
+            ? EdgeInsets.zero
+            : const EdgeInsets.fromLTRB(12, 12, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'EFEITOS EM TEMPO REAL',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: .7,
+            if (studioSpotifySkin)
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: skinLabel('Efeitos em tempo real'),
+              )
+            else
+              const Text(
+                'EFEITOS EM TEMPO REAL',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: .7,
+                ),
               ),
-            ),
             const SizedBox(height: 6),
             _audioControlRow(
               'Chorus',
@@ -1664,72 +1949,129 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           ],
         ),
       ),
-      const SizedBox(height: 12),
-      Container(
-        decoration: studioPanelDecoration(mode: widget.appearance.mode),
-        padding: const EdgeInsets.all(12),
-        child: const Row(
+      if (studioSpotifySkin) ...[
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Divider(height: 1, color: Color(0x1FFFFFFF)),
+        ),
+        Row(
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Isolador de Voz / Playback',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                  ),
-                  SizedBox(height: 4),
+                  skinLabel('Isolador de voz / playback'),
+                  const SizedBox(height: 2),
                   Text(
                     'Indisponível no YouTube. Não é aplicado ao vídeo.',
-                    style: TextStyle(fontSize: 10, color: studioMuted),
+                    style: TextStyle(fontSize: 12, color: skinSubdued),
                   ),
                 ],
               ),
             ),
-            Switch.adaptive(value: false, onChanged: null),
+            const Switch(value: false, onChanged: null),
           ],
         ),
-      ),
-      const SizedBox(height: 12),
-      Card(
-        key: const Key('audioResetProcessingCard'),
-        child: ListTile(
-          leading: const Icon(Icons.restore),
-          title: const Text(
-            'Repor tom, velocidade e loop',
-            style: TextStyle(fontSize: 13),
-          ),
-          subtitle: const Text(
-            '0 st · 1,00× · sem A/B',
-            style: TextStyle(fontSize: 10),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          enabled: _player.loaded,
+        const Padding(
+          padding: EdgeInsets.only(top: 16, bottom: 4),
+          child: Divider(height: 1, color: Color(0x1FFFFFFF)),
+        ),
+        _spotifyToolRow(
+          key: const Key('audioResetProcessingCard'),
+          icon: Icons.restore,
+          title: 'Repor tom, velocidade e loop',
+          subtitle: '0 st · 1,00× · sem A/B',
           onTap: _player.loaded
               ? () {
                   onClose?.call();
                   unawaited(_player.resetProcessing());
                 }
-              : null,
+              : () {},
         ),
-      ),
-      const Text(
-        'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
-        style: TextStyle(color: studioMuted, fontSize: 12),
-      ),
-      Card(
-        key: const Key('audioOpenLocalFileCard'),
-        child: ListTile(
+        _spotifyToolRow(
           key: const Key('audioOpenLocalFile'),
+          icon: Icons.folder_open,
+          title: 'Abrir ficheiro local',
           onTap: _pickFile,
-          leading: const Icon(Icons.folder_open),
-          title: const Text(
-            'Abrir ficheiro local',
-            style: TextStyle(fontSize: 13),
-          ),
-          trailing: const Icon(Icons.chevron_right),
         ),
-      ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
+            style: TextStyle(color: skinSubdued, fontSize: 12),
+          ),
+        ),
+      ] else ...[
+        const SizedBox(height: 12),
+        Container(
+          decoration: studioPanelDecoration(mode: widget.appearance.mode),
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Isolador de Voz / Playback',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Indisponível no YouTube. Não é aplicado ao vídeo.',
+                      style: TextStyle(fontSize: 10, color: studioMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(value: false, onChanged: null),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          key: const Key('audioResetProcessingCard'),
+          child: ListTile(
+            leading: const Icon(Icons.restore),
+            title: const Text(
+              'Repor tom, velocidade e loop',
+              style: TextStyle(fontSize: 13),
+            ),
+            subtitle: const Text(
+              '0 st · 1,00× · sem A/B',
+              style: TextStyle(fontSize: 10),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: _player.loaded,
+            onTap: _player.loaded
+                ? () {
+                    onClose?.call();
+                    unawaited(_player.resetProcessing());
+                  }
+                : null,
+          ),
+        ),
+        Text(
+          'No YouTube, o tom é experimental e o loop é aproximado. Ficheiros de vídeo locais ainda não suportam alteração de tom.',
+          style: TextStyle(color: studioMuted, fontSize: 12),
+        ),
+        Card(
+          key: const Key('audioOpenLocalFileCard'),
+          child: ListTile(
+            key: const Key('audioOpenLocalFile'),
+            onTap: _pickFile,
+            leading: const Icon(Icons.folder_open),
+            title: const Text(
+              'Abrir ficheiro local',
+              style: TextStyle(fontSize: 13),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+          ),
+        ),
+      ],
       if (onClose != null) ...[
         const SizedBox(height: 12),
         SizedBox(
@@ -1754,6 +2096,52 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   ) {
     final enabled = _player.isYouTube && _player.loaded;
     final isDecibels = min < 0;
+    if (studioSpotifySkin) {
+      final shown = isDecibels
+          ? '${value > 0 ? '+' : ''}${value.toStringAsFixed(0)} dB'
+          : '${(value * 100).round()}%';
+      return SizedBox(
+        height: 44,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 72,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Slider(
+                key: Key(key),
+                min: min,
+                max: max,
+                divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
+                value: value,
+                onChanged: enabled
+                    ? (next) => setState(() => preview(next))
+                    : null,
+                onChangeEnd: enabled ? apply : null,
+              ),
+            ),
+            SizedBox(
+              width: 56,
+              child: Text(
+                shown,
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13, color: Color(0xBFFFFFFF)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return SizedBox(
       height: 34,
       child: Row(
@@ -2316,9 +2704,636 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
   }
 
+  // Spotify: the adjustments live under the song's screen. 0 is closed, 1 is
+  // fully up; the finger moves it in between.
+  late final AnimationController _pull = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  )..addListener(_pullMoved);
+  double _pullMax = 600;
+  bool _spotifyWasOpen = false;
+
+  bool get _spotifyScroll =>
+      ((studioSpotifySkin && !studioYouTubeSkin) || studioMusicSource) &&
+      !_isLandscapePlayer;
+
+  /// The colour under the scrolled player: Spotify's own, or on YouTube
+  /// Music its page's (black in the dark themes, white in the light one).
+  Color get _pullSheet => studioMusicSource
+      ? (widget.appearance.mode == StudioAppearanceMode.light
+            ? Colors.white
+            : const Color(0xFF030303))
+      : spotifySheetColor;
+
+  /// YouTube Music: the adjustments' sheet in their own colour from the
+  /// top, so they join the song's tabs above them with no dark band.
+  Color get _musicPanel => _background.a >= 1 ? _background : _pullSheet;
+
+  /// YouTube Music's song screen closed (its small bar over the other
+  /// pages): the tabs and the adjustments go back down with it.
+  void _songTabsChanged() {
+    if (!mounted || !studioMusicSource || musicSongTabs.value != null) return;
+    if (_pull.value > 0) {
+      unawaited(_pull.animateTo(0, curve: Curves.easeOutCubic));
+    }
+  }
+
+  void _pullMoved() {
+    // An opened song tab (Letra, ...) dragged down: back to the player.
+    final SongTabs? song = musicSongTabs.value;
+    if (song != null &&
+        song.selected >= 0 &&
+        !_songOpening &&
+        _pull.value < .85) {
+      musicSongTabs.value = (
+        labels: song.labels,
+        enabled: song.enabled,
+        selected: -1,
+      );
+      unawaited(_player.youtube?.openSongTab(-1));
+      scheduleMicrotask(() {
+        if (!mounted) return;
+        _pull.stop();
+        _pull.value = 0;
+      });
+    }
+    final bool expanded = _pull.value > .001;
+    if (expanded != _mainControlsExpanded && mounted) {
+      setState(() => _mainControlsExpanded = expanded);
+    }
+  }
+
+  // One finger on the song's screen: whether it moves the adjustments.
+  int? _pullPointer;
+  Offset _pullStart = Offset.zero;
+  bool? _pulling;
+  VelocityTracker? _pullVelocity;
+
+  void _pullPointerDown(PointerDownEvent event) {
+    if (_pullPointer != null) {
+      _pulling = false;
+      return;
+    }
+    _pullPointer = event.pointer;
+    _pullStart = event.position;
+    // YouTube Music with a song tab open (Letra, ...): the finger scrolls
+    // that panel, it never pulls the adjustments.
+    final bool songOpen = (musicSongTabs.value?.selected ?? -1) >= 0;
+    // YouTube Music with only its small bar (its other pages): the finger
+    // scrolls the page.
+    final bool musicAway = studioMusicSource && musicSongTabs.value == null;
+    _pulling =
+        !songOpen &&
+            !musicAway &&
+            (spotifyPlayerOpen.value || studioMusicSource || _pull.value > 0)
+        ? null
+        : false;
+    _pullVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+  }
+
+  void _pullPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _pullPointer || _pulling == false) return;
+    _pullVelocity?.addPosition(event.timeStamp, event.position);
+    if (_pulling == null) {
+      final Offset moved = event.position - _pullStart;
+      if (moved.distance < 6) return;
+      // Clearly vertical: the progress bar and the buttons keep sideways
+      // drags and taps.
+      _pulling = moved.dy.abs() > moved.dx.abs() * 1.4;
+      if (_pulling != true) return;
+      _pull.stop();
+    }
+    _pullBy(-event.delta.dy);
+  }
+
+  // Whether the adjustments' own list is at its top (a drag down there
+  // lowers the adjustments instead).
+  bool _panelAtTop = true;
+
+  // How far the adjustments' list is scrolled (up to 60): their bar on top
+  // goes up and fades with it.
+  final ValueNotifier<double> _handleScroll = ValueNotifier<double>(0);
+
+  bool _panelScrolled(ScrollNotification note) {
+    if (note.metrics.axis == Axis.vertical && note.depth == 0) {
+      _panelAtTop = note.metrics.pixels <= note.metrics.minScrollExtent + .5;
+    }
+    return false;
+  }
+
+  /// A finger anywhere on the adjustments: while they are not all the way
+  /// up it moves them; all the way up, their list scrolls, and a drag down
+  /// from its top brings them down again.
+  void _panelPointerDown(PointerDownEvent event) {
+    if (_pullPointer != null) return;
+    _pullPointer = event.pointer;
+    _pullStart = event.position;
+    _pulling = null;
+    _pullVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+  }
+
+  void _panelPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _pullPointer || _pulling == false) return;
+    _pullVelocity?.addPosition(event.timeStamp, event.position);
+    if (_pulling == null) {
+      final Offset moved = event.position - _pullStart;
+      // A tap that shakes a little stays a tap (on the tabs above them).
+      if (moved.distance < kTouchSlop) return;
+      final bool vertical = moved.dy.abs() > moved.dx.abs() * 1.4;
+      _pulling =
+          vertical && (_pull.value < .999 || (moved.dy > 0 && _panelAtTop));
+      if (_pulling != true) return;
+      _pull.stop();
+    }
+    _pullBy(-event.delta.dy);
+  }
+
+  void _pullPointerUp(PointerUpEvent? event) {
+    if (event != null && event.pointer != _pullPointer) return;
+    if (_pulling == true) {
+      final double vy = _pullVelocity?.getVelocity().pixelsPerSecond.dy ?? 0;
+      _settlePull(-vy);
+    }
+    _pullPointer = null;
+    _pulling = null;
+    _pullVelocity = null;
+  }
+
+  void _pullBy(double dy) {
+    if (!mounted || !_spotifyScroll) return;
+    _pull.stop();
+    _pull.value = (_pull.value + dy / _pullMax).clamp(0.0, 1.0);
+  }
+
+  /// Let go, the adjustments stay where the finger left them; a flick
+  /// carries them on a little and slows down, like any scroll.
+  void _settlePull(double velocity) {
+    if (!mounted || velocity.abs() < 60 || _pullMax <= 0) return;
+    unawaited(
+      _pull.animateWith(
+        FrictionSimulation(.05, _pull.value, velocity / _pullMax),
+      ),
+    );
+  }
+
+  void _spotifyPlayerChanged() {
+    final bool open = spotifyPlayerOpen.value;
+    // The song's screen was closed with the adjustments up: they go too.
+    if (_spotifyWasOpen && !open && _pull.value > 0) {
+      unawaited(_pull.animateTo(0, curve: Curves.easeOutCubic));
+    }
+    _spotifyWasOpen = open;
+  }
+
+  /// Spotify: the song's screen moves up with the finger and the
+  /// adjustments come in under it, like the rest of Spotify's player.
+  Widget _spotifyPanel(BoxConstraints box, Widget media) {
+    // The page ends above Android's own button bar (the black band under
+    // it): the adjustments start right where the page's colour ends.
+    final double pageEnd =
+        box.maxHeight - MediaQuery.viewPaddingOf(context).bottom;
+    // All the way up they stop right under the mini player, never over it.
+    final double miniHeight = (150 * MediaQuery.textScalerOf(context).scale(1))
+        .clamp(150, 260)
+        .toDouble();
+    // YouTube Music: the app's tabs and the song's tabs, one block on top
+    // of the adjustments, hidden under the player until the finger pulls
+    // it up.
+    final double header = studioMusicSource ? _musicHeaderHeight : 0;
+    final double maxPull = (pageEnd - miniHeight).clamp(200, box.maxHeight);
+    _songTop = pageEnd - maxPull + header;
+    _pullMax = maxPull;
+    // Built once per layout, not per frame: while the finger moves, only
+    // their positions change, so the scroll stays light and smooth.
+    final Widget page = RepaintBoundary(
+      child: MainPlayerFullscreen(
+        model: _player,
+        media: media,
+        mainMode: true,
+        showHeader: false,
+        controlsOpen: false,
+        onExit: () {},
+        onTool: _tool,
+        youtubeNativeTransport: _player.isYouTube,
+        onNativeMediaTouch: null,
+      ),
+    );
+    final Widget content = RepaintBoundary(
+      child: _sectionContent(media, viewportHeight: maxPull - 8),
+    );
+    // Built once per layout too: dragging only moves it.
+    final Widget block = header > 0
+        ? RepaintBoundary(child: _musicTabsBlock())
+        : const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: _pull,
+      builder: (context, _) {
+        final double pull = _pull.value * maxPull;
+        // A song tab open (Letra, ...): the tabs go up like the adjustments
+        // and the page's own panel for it shows under them (the page stays
+        // put and leaves that room at its top).
+        final bool songOpen =
+            header > 0 && (musicSongTabs.value?.selected ?? -1) >= 0;
+        final double pageShift = songOpen ? 0 : pull;
+        return Stack(
+          children: [
+            // Under the page's edge, in the adjustments' colour: no band
+            // shows between the song and them while they move.
+            Positioned.fill(child: ColoredBox(color: _pullSheet)),
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _pullPointerDown,
+              onPointerMove: _pullPointerMove,
+              onPointerUp: _pullPointerUp,
+              onPointerCancel: (_) => _pullPointerUp(null),
+              child: SizedBox(
+                key: const Key('visualMainMediaViewport'),
+                height: box.maxHeight,
+                width: double.infinity,
+                child: ClipRect(
+                  child: Transform.translate(
+                    offset: Offset(0, -pageShift),
+                    child: page,
+                  ),
+                ),
+              ),
+            ),
+            // Below Spotify's own player its page is black: that strip is
+            // covered in the player's last colour, moving with the page.
+            ValueListenableBuilder<double?>(
+              valueListenable: spotifyPlayerBottom,
+              builder: (context, physical, _) {
+                // The page's pixels are not the app's (its own zoom).
+                final double? bottom = physical == null
+                    ? null
+                    : physical / MediaQuery.devicePixelRatioOf(context);
+                return bottom == null || bottom >= box.maxHeight - 1
+                    ? const SizedBox.shrink()
+                    : Positioned(
+                        left: 0,
+                        right: 0,
+                        // From 2 px above: Spotify's thin dotted edge too.
+                        top: bottom - 2 - pull,
+                        height: box.maxHeight - bottom + 2,
+                        child: IgnorePointer(
+                          child: ColoredBox(color: spotifySheetColor),
+                        ),
+                      );
+              },
+            ),
+            // Always built (below the screen while closed): opening them
+            // never waits for their first build.
+            Positioned(
+              key: const Key('spotifyAdjustments'),
+              left: 0,
+              right: 0,
+              top: pageEnd - pull,
+              height: songOpen ? header : maxPull + box.maxHeight - pageEnd,
+              // Closed, they are kept but not drawn: nothing of them peeks
+              // under Android's buttons.
+              child: Offstage(
+                offstage: pull <= .5,
+                child: Listener(
+                  onPointerDown: _panelPointerDown,
+                  onPointerMove: _panelPointerMove,
+                  onPointerUp: _pullPointerUp,
+                  onPointerCancel: (_) => _pullPointerUp(null),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _panelScrolled,
+                    // Not all the way up: the finger moves the adjustments,
+                    // not their list.
+                    child: ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(context).copyWith(
+                        physics: _pull.value < .999
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
+                      ),
+                      child: Theme(
+                        data: studioColumnTheme(
+                          Theme.of(context),
+                          mode: widget.appearance.mode,
+                        ),
+                        child: DecoratedBox(
+                          // It goes on from where Spotify's own gradient ends.
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: studioMusicSource
+                                  ? [_musicPanel, _musicPanel]
+                                  : [spotifySheetColor, Color(0xFF161213)],
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                top: header > 0 ? header : 8,
+                                // Down, only the tabs show: nothing of the
+                                // adjustments under Android's buttons.
+                                child: Offstage(
+                                  offstage: header > 0 && pull <= header,
+                                  child: content,
+                                ),
+                              ),
+                              if (header > 0)
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: header,
+                                  child: block,
+                                ),
+                              // "Fechar ajustes", over a fade into the sheet
+                              // (not on YouTube Music: its tabs do that).
+                              if (header == 0)
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  child: IgnorePointer(
+                                    ignoring: _pull.value < .98,
+                                    child: Opacity(
+                                      opacity: ((_pull.value - .85) / .15)
+                                          .clamp(0, 1),
+                                      child: Container(
+                                        padding: EdgeInsets.fromLTRB(
+                                          0,
+                                          40,
+                                          0,
+                                          20 +
+                                              MediaQuery.viewPaddingOf(context)
+                                                  .bottom,
+                                        ),
+                                        decoration: const BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Color(0x00161213),
+                                              Color(0xFF161213),
+                                            ],
+                                            stops: [0, .5],
+                                          ),
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: FilledButton.icon(
+                                          key: const Key(
+                                            'spotifyCloseAdjustments',
+                                          ),
+                                          onPressed: () => unawaited(
+                                            _pull.animateTo(
+                                              0,
+                                              curve: Curves.easeOutCubic,
+                                            ),
+                                          ),
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: Colors.white,
+                                            foregroundColor: Colors.black,
+                                            minimumSize: const Size(0, 48),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 24,
+                                            ),
+                                            shape: const StadiumBorder(),
+                                            textStyle: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          icon: const Icon(
+                                            Icons.keyboard_arrow_down,
+                                            size: 22,
+                                          ),
+                                          label: const Text('Fechar ajustes'),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (header == 0)
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Center(
+                                    child: AdjustmentsHandle(
+                                      gestureKey: const Key(
+                                        'spotifyPullHandle',
+                                      ),
+                                      bar: false,
+                                      alwaysVisible: true,
+                                      light: false,
+                                      onDragStart: _pull.stop,
+                                      onDragUpdate: (dy) => _pullBy(-dy),
+                                      onDragEnd: (velocity) =>
+                                          _settlePull(-velocity),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Up: the song as Spotify shows it when its page is scrolled, a
+            // bar with the player's title and a mini player.
+            // Only near the top, sliding down quickly: it never sits half
+            // see-through over the song's own title.
+            if (_pull.value > .82)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                height: pageEnd - maxPull,
+                child: Builder(
+                  builder: (context) {
+                    final double shown = ((_pull.value - .82) / .18).clamp(
+                      0.0,
+                      1.0,
+                    );
+                    return Transform.translate(
+                      offset: Offset(0, -(1 - shown) * 40),
+                      child: Opacity(
+                        opacity: shown,
+                        child: _spotifyMiniPlayer(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _spotifyMiniPlayer() {
+    final String title = _player.title;
+    final int dash = title.lastIndexOf(' - ');
+    final String song = dash > 0 ? title.substring(0, dash) : title;
+    final String artist = dash > 0 ? title.substring(dash + 3) : '';
+    final int total = _player.duration.inMilliseconds;
+    final double done = total > 0
+        ? (_player.position.inMilliseconds / total).clamp(0, 1)
+        : 0;
+    return GestureDetector(
+      // A drag down here brings the song back too.
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragStart: (_) => _pull.stop(),
+      onVerticalDragUpdate: (details) => _pullBy(-details.delta.dy),
+      onVerticalDragEnd: (details) =>
+          _settlePull(-(details.primaryVelocity ?? 0)),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              studioMusicSource
+                  ? _pullSheet
+                  : Color.lerp(spotifyTint, spotifySheetColor, .35) ??
+                        spotifySheetColor,
+              _pullSheet,
+            ],
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Fechar ajustes',
+                  onPressed: () =>
+                      unawaited(_pull.animateTo(0, curve: Curves.easeOutCubic)),
+                  icon: const Icon(
+                    Icons.keyboard_arrow_down,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                const Expanded(
+                  child: Text(
+                    'Ajustes',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 48),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFFFFFF),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0x33000000),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Icon(
+                          Icons.music_note,
+                          color: Color(0x99FFFFFF),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              song,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (artist.isNotEmpty)
+                              Text(
+                                artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xBFFFFFFF),
+                                  fontSize: 13,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: IconButton.filled(
+                          tooltip: _player.playing ? 'Pausar' : 'Reproduzir',
+                          onPressed: () => unawaited(_player.playPause()),
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: EdgeInsets.zero,
+                          ),
+                          icon: Icon(
+                            _player.playing ? Icons.pause : Icons.play_arrow,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: -8,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(1),
+                      child: LinearProgressIndicator(
+                        value: done,
+                        minHeight: 2,
+                        backgroundColor: const Color(0x40FFFFFF),
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _mainPanel(Widget media) {
     return LayoutBuilder(
       builder: (_, box) {
+        if (_spotifyScroll) return _spotifyPanel(box, media);
         final landscapePlayer = _isLandscapePlayer;
         final open = landscapePlayer
             ? _landscapeColumnsVisible
@@ -2368,6 +3383,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         final double sheetTop = sheet && _sheetLow
             ? (box.maxHeight - 204).clamp(overlayTop, box.maxHeight)
             : overlayTop;
+        // Where the adjustments' top is right now, drag included.
+        final double shownTop = (sheetTop + (_sheetDrag ?? 0)).clamp(
+          0.0,
+          (box.maxHeight - 72).clamp(0.0, box.maxHeight),
+        );
+        // Only on the way to closed: from over the video the pull goes to
+        // the middle height, where the adjustments stay in full.
+        final double pulledDown =
+            _adjustmentsCoverVideo || (sheet && !_sheetLow)
+            ? 0
+            : (_sheetDrag ?? 0).clamp(0.0, double.infinity);
+        final double sheetFade =
+            (1 - pulledDown / ((box.maxHeight - sheetTop) * .6).clamp(1.0, 1e9))
+                .clamp(0.0, 1.0);
         return Stack(
           children: [
             SizedBox(
@@ -2390,169 +3419,223 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
             if (open)
               AnimatedPositioned(
-                duration: const Duration(milliseconds: 240),
+                // While the bar is dragged the adjustments follow the finger
+                // at once; let go, and they glide to where they settle.
+                // Between the tone tab and the others only the frame
+                // changes, not what is seen: no glide there either.
+                duration: _sheetDrag == null && !_tabJump
+                    ? const Duration(milliseconds: 240)
+                    : Duration.zero,
                 curve: Curves.easeOutCubic,
-                top: sheetTop,
+                top: shownTop,
                 left: sheetSide,
                 right: sheetSide,
                 bottom: sheetBottom,
-                child: Theme(
-                  data: studioColumnTheme(
-                    Theme.of(context),
-                    mode: widget.appearance.mode,
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: ClipRRect(
-                          key: const Key('unifiedAdjustmentsBlurBounds'),
-                          // The chord tab leaves the page showing above its
-                          // own rounded backdrop: only the bottom is clipped.
-                          borderRadius: sheet && chordPanel
-                              ? const BorderRadius.vertical(
-                                  bottom: Radius.circular(34),
-                                )
-                              : sheetRadius,
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(
-                              sigmaX: sheet && !chordPanel
-                                  ? 22
-                                  : widget.appearance.mode ==
-                                            StudioAppearanceMode.glass &&
-                                        !chordPanel
-                                  ? 10
-                                  : 0,
-                              sigmaY: sheet && !chordPanel
-                                  ? 22
-                                  : widget.appearance.mode ==
-                                            StudioAppearanceMode.glass &&
-                                        !chordPanel
-                                  ? 10
-                                  : 0,
-                            ),
-                            child: _adjustmentsCoverVideo
-                                ? Material(
-                                    color: _background,
-                                    child: Column(
-                                      children: [
-                                        _coveredVideoTransport(box.maxHeight),
-                                        Expanded(
-                                          child: _sectionContent(
-                                            media,
-                                            viewportHeight: box.maxHeight,
-                                          ),
+                child: AnimatedOpacity(
+                  // Pulled down towards closed, the adjustments fade away
+                  // with the finger; let go short of it and they come back.
+                  opacity: sheetFade,
+                  duration: _sheetDrag == null
+                      ? const Duration(milliseconds: 240)
+                      : Duration.zero,
+                  child: Theme(
+                    data: studioColumnTheme(
+                      Theme.of(context),
+                      mode: widget.appearance.mode,
+                    ),
+                    child: NotificationListener<ScrollNotification>(
+                      // How far the adjustments are scrolled: their bar
+                      // goes up with them instead of staying put.
+                      onNotification: (note) {
+                        if (note.metrics.axis == Axis.vertical &&
+                            note.depth == 0) {
+                          _handleScroll.value = note.metrics.pixels.clamp(
+                            0.0,
+                            60.0,
+                          );
+                        }
+                        return false;
+                      },
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ClipRRect(
+                              key: const Key('unifiedAdjustmentsBlurBounds'),
+                              // The chord tab leaves the page showing above its
+                              // own rounded backdrop: only the bottom is clipped.
+                              // Every tab has the tone tab's rounded top (the
+                              // tone tab draws its own, under the page's strip).
+                              borderRadius: sheet && chordPanel
+                                  ? const BorderRadius.vertical(
+                                      bottom: Radius.circular(34),
+                                    )
+                                  : !sheet &&
+                                        !chordPanel &&
+                                        !_adjustmentsCoverVideo &&
+                                        !landscapePlayer
+                                  ? const BorderRadius.vertical(
+                                      top: Radius.circular(34),
+                                    )
+                                  : sheetRadius,
+                              child: BackdropFilter(
+                                // Off where there is nothing to blur (the tone
+                                // tab blurs its own backdrop): a zero blur
+                                // here would hide the page from that one.
+                                enabled:
+                                    !chordPanel &&
+                                    !studioSpotifySkin &&
+                                    (sheet ||
+                                        widget.appearance.mode ==
+                                            StudioAppearanceMode.glass),
+                                filter: ImageFilter.blur(
+                                  sigmaX: sheet && !chordPanel
+                                      ? 22
+                                      : widget.appearance.mode ==
+                                                StudioAppearanceMode.glass &&
+                                            !chordPanel
+                                      ? 10
+                                      : 0,
+                                  sigmaY: sheet && !chordPanel
+                                      ? 22
+                                      : widget.appearance.mode ==
+                                                StudioAppearanceMode.glass &&
+                                            !chordPanel
+                                      ? 10
+                                      : 0,
+                                ),
+                                child: _adjustmentsCoverVideo
+                                    ? Material(
+                                        color: _background,
+                                        child: Column(
+                                          children: [
+                                            // Room for the bar above the
+                                            // transport, clear of it.
+                                            const SizedBox(height: 12),
+                                            _coveredVideoTransport(
+                                              box.maxHeight,
+                                            ),
+                                            Expanded(
+                                              child: _sectionContent(
+                                                media,
+                                                viewportHeight: box.maxHeight,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ],
-                                    ),
-                                  )
-                                : chordPanel
-                                ? ClipRRect(
-                                    key: const Key('unifiedChordOverlay'),
-                                    borderRadius: const BorderRadius.vertical(
-                                      top: Radius.circular(26),
-                                    ),
-                                    child: _sectionContent(
-                                      media,
-                                      topGap: chordTopGap,
-                                      viewportHeight:
-                                          box.maxHeight -
-                                          sheetTop -
-                                          sheetBottom,
-                                    ),
-                                  )
-                                : ColoredBox(
-                                    color: sheet
-                                        ? (light
-                                              ? const Color(0xB8F4F7FB)
-                                              : const Color(0x8C17191E))
-                                        : _background,
-                                    // Nothing scrolls under the grabber's
-                                    // band.
-                                    child: Padding(
-                                      padding: EdgeInsets.only(
-                                        top: sheet ? 14 : 0,
+                                      )
+                                    : chordPanel
+                                    ? ClipRRect(
+                                        key: const Key('unifiedChordOverlay'),
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                              top: Radius.circular(26),
+                                            ),
+                                        child: _sectionContent(
+                                          media,
+                                          topGap: chordTopGap,
+                                          viewportHeight:
+                                              box.maxHeight -
+                                              shownTop -
+                                              sheetBottom,
+                                        ),
+                                      )
+                                    : ColoredBox(
+                                        color: sheet
+                                            ? (light
+                                                  ? const Color(0xB8F4F7FB)
+                                                  : const Color(0x8C17191E))
+                                            : _background,
+                                        // Nothing scrolls under the grabber's
+                                        // band.
+                                        child: Padding(
+                                          padding: EdgeInsets.only(
+                                            top: sheet ? 14 : 0,
+                                          ),
+                                          child: _sectionContent(media),
+                                        ),
                                       ),
-                                      child: _sectionContent(media),
+                              ),
+                            ),
+                          ),
+                          if (!sheet)
+                            // The bar that raises, lowers or closes the
+                            // adjustments. Drawn over them: it moves nothing.
+                            Positioned(
+                              top: chordPanel && !_adjustmentsCoverVideo
+                                  ? chordTopGap
+                                  : 0,
+                              left: 0,
+                              right: 0,
+                              child: ValueListenableBuilder<double>(
+                                valueListenable: _handleScroll,
+                                builder: (context, scrolled, child) =>
+                                    Transform.translate(
+                                      offset: Offset(0, -scrolled),
+                                      child: Opacity(
+                                        opacity: (1 - scrolled / 30).clamp(
+                                          0,
+                                          1,
+                                        ),
+                                        child: child,
+                                      ),
+                                    ),
+                                child: Center(
+                                  child: AdjustmentsHandle(
+                                    light: light,
+                                    onDragStart: () =>
+                                        setState(() => _sheetDrag = 0),
+                                    onDragUpdate: (dy) => setState(
+                                      () => _sheetDrag = (_sheetDrag ?? 0) + dy,
+                                    ),
+                                    onDragEnd: _endSheetDrag,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (sheet) ...[
+                            // The glass's light rim (in the chord tab, around
+                            // the backdrop that starts under the page's strip).
+                            Positioned.fill(
+                              top: chordPanel ? chordTopGap : 0,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius: sheetRadius,
+                                    border: Border.all(
+                                      color: light
+                                          ? const Color(0x33000000)
+                                          : const Color(0x38FFFFFF),
                                     ),
                                   ),
-                          ),
-                        ),
+                                ),
+                              ),
+                            ),
+                            // The bar of the floating sheet: always in sight,
+                            // and the sheet follows the finger on it (low,
+                            // medium, over the video; pulled down from low, it
+                            // closes).
+                            Positioned(
+                              top: chordPanel ? chordTopGap : 0,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: AdjustmentsHandle(
+                                  gestureKey: const Key('adjustmentsGrabber'),
+                                  alwaysVisible: true,
+                                  light: light,
+                                  onDragStart: () =>
+                                      setState(() => _sheetDrag = 0),
+                                  onDragUpdate: (dy) => setState(
+                                    () => _sheetDrag = (_sheetDrag ?? 0) + dy,
+                                  ),
+                                  onDragEnd: _endSheetDrag,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                      if (sheet) ...[
-                        // The glass's light rim (in the chord tab, around
-                        // the backdrop that starts under the page's strip).
-                        Positioned.fill(
-                          top: chordPanel ? chordTopGap : 0,
-                          child: IgnorePointer(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                borderRadius: sheetRadius,
-                                border: Border.all(
-                                  color: light
-                                      ? const Color(0x33000000)
-                                      : const Color(0x38FFFFFF),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // The grabber: drag it down (or tap it) to close.
-                        Positioned(
-                          top: chordPanel ? chordTopGap : 0,
-                          left: 0,
-                          right: 0,
-                          child: Center(
-                            // Dragging down anywhere on the band closes;
-                            // a tap closes only on the grabber itself, so
-                            // controls scrolled under the band still work.
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              // Down: medium → low → closed (a hard flick
-                              // closes at once). Up: low → medium → high.
-                              onVerticalDragEnd: (details) {
-                                final double speed =
-                                    details.primaryVelocity ?? 0;
-                                if (speed > 1400 ||
-                                    (speed > 120 && _sheetLow)) {
-                                  _toggleMainAdjustments();
-                                } else if (speed > 120) {
-                                  setState(() => _sheetLow = true);
-                                } else if (speed < -120 && _sheetLow) {
-                                  setState(() => _sheetLow = false);
-                                } else if (speed < -120) {
-                                  _coverVideoWithAdjustments();
-                                }
-                              },
-                              child: Container(
-                                width: double.infinity,
-                                height: 20,
-                                alignment: Alignment.center,
-                                child: GestureDetector(
-                                  key: const Key('adjustmentsGrabber'),
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: _toggleMainAdjustments,
-                                  child: Container(
-                                    width: 96,
-                                    height: 20,
-                                    alignment: Alignment.center,
-                                    child: Container(
-                                      width: 36,
-                                      height: 5,
-                                      decoration: BoxDecoration(
-                                        color: light
-                                            ? const Color(0x66000000)
-                                            : const Color(0x80FFFFFF),
-                                        borderRadius: BorderRadius.circular(3),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -2563,12 +3646,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   static const _visibleTabs = <(StudioTab, String)>[
-    // Tone (with the chord sheet that follows it), practice, sound, and
-    // "more": the setlist and the app's settings.
+    // Tone (with the chord sheet that follows it), practice, sound and the
+    // setlist. The app's settings ("Mais") are the gear at the strip's end.
     (StudioTab.chords, 'Tom'),
     (StudioTab.practice, 'Treino'),
     (StudioTab.audioSettings, 'Áudio'),
-    (StudioTab.appearanceSettings, 'Mais'),
+    (StudioTab.setlist, 'Setlist'),
   ];
 
   Widget _coveredVideoTransport(double availableHeight) {
@@ -2687,12 +3770,358 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
+  /// Spotify's filter chips: separate pills, the chosen one white with black
+  /// text, the settings a round chip with the gear.
+  /// The YouTube app's tabs: text tabs underlined in red, the gear last
+  /// for the settings ("Mais").
+  static const double _musicHeaderHeight = 98;
+
+  /// Where the song tab's panel starts on the page: under the tabs block
+  /// all the way up.
+  double _songTop = 0;
+
+  /// The tabs block is going up to open a song tab: it is not a drag down.
+  bool _songOpening = false;
+
+  /// YouTube Music: one block of two rows, the app's tabs (Tom, Treino,
+  /// Audio, Setlist) over the song's (A seguir, Letra, Comentarios,
+  /// Relacionados), in the same look; only one of them is chosen at a time.
+  /// A tab on top brings the adjustments up; one below opens the site's own
+  /// panel for it, with the adjustments down.
+  Widget _musicTabsBlock() => ValueListenableBuilder<SongTabs?>(
+    valueListenable: musicSongTabs,
+    builder: (context, song, _) {
+      final bool light = _musicPanel.computeLuminance() > .5;
+      final Color on = light
+          ? const Color(0xFF0F0F0F)
+          : const Color(0xFFF1F1F1);
+      final Color off = light
+          ? const Color(0xFF606060)
+          : const Color(0xFFAAAAAA);
+      final Color line = light
+          ? const Color(0x1F000000)
+          : const Color(0x1FFFFFFF);
+      final int songOpen = song?.selected ?? -1;
+      final StudioTab appTab = _tab == StudioTab.player
+          ? StudioTab.chords
+          : _tab;
+      Widget cell({
+        required Key key,
+        required bool chosen,
+        required VoidCallback? onTap,
+        required Widget Function(Color ink) body,
+        int flex = 10,
+      }) {
+        final Color ink = onTap == null
+            ? off.withValues(alpha: .4)
+            : chosen
+            ? on
+            : off;
+        return Expanded(
+          flex: flex,
+          child: InkWell(
+            key: key,
+            onTap: onTap,
+            child: SizedBox(
+              height: 48,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  body(ink),
+                  Positioned(
+                    left: 10,
+                    right: 10,
+                    bottom: 0,
+                    child: AnimatedOpacity(
+                      opacity: chosen ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Container(
+                        height: 3,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFF0033),
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      Widget label(String text, Color ink) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            text,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: ink,
+            ),
+          ),
+        ),
+      );
+
+      Widget row(List<Widget> cells) => DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: line)),
+        ),
+        child: Row(children: cells),
+      );
+
+      return ColoredBox(
+        key: const Key('musicTabsBlock'),
+        color: _musicPanel,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            row([
+              for (final (value, text) in _visibleTabs)
+                cell(
+                  key: Key('unifiedSection${value.name}'),
+                  chosen: songOpen < 0 && appTab == value,
+                  onTap: () => _musicAppTab(value),
+                  body: (ink) => label(text, ink),
+                ),
+              cell(
+                key: const Key('unifiedSectionappearanceSettings'),
+                flex: 7,
+                chosen: songOpen < 0 && appTab == StudioTab.appearanceSettings,
+                onTap: () => _musicAppTab(StudioTab.appearanceSettings),
+                body: (ink) =>
+                    Icon(Icons.settings_outlined, size: 22, color: ink),
+              ),
+            ]),
+            row([
+              if (song == null)
+                const Expanded(child: SizedBox(height: 48))
+              else
+                // Only the tabs this song has (no greyed-out Comentários),
+                // each as wide as its name needs.
+                for (int i = 0; i < song.labels.length; i++)
+                  if (song.enabled[i])
+                    cell(
+                      key: Key('musicSongTab$i'),
+                      flex: song.labels[i].length + 4,
+                      chosen: songOpen == i,
+                      onTap: () => _musicSongTab(i),
+                      body: (ink) => label(song.labels[i], ink),
+                    ),
+            ]),
+          ],
+        ),
+      );
+    },
+  );
+
+  /// One of the app's tabs in the YouTube Music block: the song's panel (if
+  /// open) closes and the adjustments come up on that tab; the chosen tab
+  /// again with them up takes them down.
+  void _musicAppTab(StudioTab tab) {
+    final SongTabs? song = musicSongTabs.value;
+    final bool songOpen = (song?.selected ?? -1) >= 0;
+    if (song != null && songOpen) {
+      musicSongTabs.value = (
+        labels: song.labels,
+        enabled: song.enabled,
+        selected: -1,
+      );
+      unawaited(_player.youtube?.openSongTab(-1));
+    }
+    final StudioTab shown = _tab == StudioTab.player ? StudioTab.chords : _tab;
+    if (!songOpen && shown == tab && _pull.value > .5) {
+      unawaited(_pull.animateTo(0, curve: Curves.easeOutCubic));
+      return;
+    }
+    if (shown != tab) _select(tab);
+    unawaited(_pull.animateTo(1, curve: Curves.easeOutCubic));
+  }
+
+  /// One of the song's tabs: its panel opens under the tabs, as the
+  /// adjustments do; the opened one again goes back to the player.
+  void _musicSongTab(int index) {
+    final SongTabs? song = musicSongTabs.value;
+    if (song == null) return;
+    final bool again = song.selected == index;
+    // Shown at once, before the page answers.
+    musicSongTabs.value = (
+      labels: song.labels,
+      enabled: song.enabled,
+      selected: again ? -1 : index,
+    );
+    // Opened: the tabs go up and the song's panel opens down under them.
+    // Closed again: they go back under the player.
+    unawaited(_player.youtube?.openSongTab(again ? -1 : index, top: _songTop));
+    if (again) {
+      unawaited(_pull.animateTo(0, curve: Curves.easeOutCubic));
+    } else {
+      _songOpening = true;
+      _pull
+          .animateTo(1, curve: Curves.easeOutCubic)
+          .whenCompleteOrCancel(() => _songOpening = false);
+    }
+  }
+
+  Widget _youtubeTabs(StudioTab selected) {
+    Widget tab(StudioTab value, String label, {bool gear = false}) {
+      final bool on = selected == value;
+      final Color ink = on ? const Color(0xFFF1F1F1) : const Color(0xFFAAAAAA);
+      final Widget body = gear
+          ? Icon(Icons.settings_outlined, size: 22, color: ink)
+          : Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: ink,
+              ),
+            );
+      return Expanded(
+        flex: gear ? 7 : 10,
+        child: InkWell(
+          key: Key('unifiedSection${value.name}'),
+          onTap: () => _select(value),
+          child: SizedBox(
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Tooltip(message: label, child: body),
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 0,
+                  child: AnimatedOpacity(
+                    opacity: on ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      height: 3,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFF0033),
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      key: const Key('unifiedSectionStrip'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0x1FFFFFFF))),
+          ),
+          child: Row(
+            children: [
+              for (final (value, label) in _visibleTabs) tab(value, label),
+              tab(StudioTab.appearanceSettings, 'Mais', gear: true),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _spotifyChips(StudioTab selected) {
+    Widget chip(StudioTab tab, Widget child, {bool round = false}) {
+      final bool on = selected == tab;
+      return Material(
+        color: on ? spotifyGreen : const Color(0x1AFFFFFF),
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: Key('unifiedSection${tab.name}'),
+          onTap: () => _select(tab),
+          child: SizedBox(
+            height: 36,
+            width: round ? 36 : null,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: round ? 0 : 16),
+              child: Center(
+                child: IconTheme(
+                  data: IconThemeData(
+                    color: on ? Colors.black : Colors.white,
+                    size: 18,
+                  ),
+                  child: DefaultTextStyle(
+                    style: TextStyle(
+                      color: on ? Colors.black : Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    child: child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 2),
+      child: SingleChildScrollView(
+        key: const Key('unifiedSectionStrip'),
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final (tab, label) in _visibleTabs) ...[
+              chip(tab, Text(label)),
+              const SizedBox(width: 8),
+            ],
+            chip(
+              StudioTab.appearanceSettings,
+              const Icon(Icons.settings_outlined),
+              round: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _sectionTabs() {
-    final selected = _tab == StudioTab.player
-        ? StudioTab.chords
-        : _tab == StudioTab.setlist
-        ? StudioTab.appearanceSettings
-        : _tab;
+    // YouTube Music: they sit in the block above, with the song's tabs.
+    if (studioMusicSource && _spotifyScroll) return const SizedBox.shrink();
+    final selected = _tab == StudioTab.player ? StudioTab.chords : _tab;
+    if (studioYouTubeSkin) return _youtubeTabs(selected);
+    if (studioSpotifySkin) return _spotifyChips(selected);
+    final light = widget.appearance.mode == StudioAppearanceMode.light;
+    // Spotify's chips: the chosen one green with black text.
+    final selectedFill = studioSpotifySkin
+        ? spotifyGreen
+        : light
+        ? const Color(0xFF163E51)
+        : Colors.white;
+    final selectedInk = studioSpotifySkin
+        ? Colors.black
+        : light
+        ? Colors.white
+        : const Color(0xFF161618);
+    final idleInk = studioSpotifySkin
+        ? Colors.white
+        : light
+        ? const Color(0xFF344054)
+        : const Color(0xFFC4C4C8);
+    final settings = selected == StudioTab.appearanceSettings;
     // The floating sheet keeps a band at its top for the grabber.
     // The chord tab scrolls as one piece, so its tabs make the room; the
     // other tabs get it from the sheet itself.
@@ -2702,122 +4131,141 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         !_isLandscapePlayer &&
         (_tab == StudioTab.chords || _tab == StudioTab.player);
     return Container(
-      margin: EdgeInsets.fromLTRB(16, sheet ? 20 : 8, 16, 8),
-      padding: const EdgeInsets.all(4),
+      // Under the bar that drags the adjustments, with a small gap.
+      margin: EdgeInsets.fromLTRB(
+        16,
+        sheet
+            ? 20
+            : _adjustmentsCoverVideo
+            ? 8
+            : 16,
+        16,
+        8,
+      ),
+      // No padding: the band is exactly as tall as its buttons.
       decoration: studioPanelDecoration(
-        radius: 26,
+        radius: 18,
         mode: widget.appearance.mode,
       ),
       child: Row(
         children: [
           Expanded(
-            child: Row(
-              key: const Key('unifiedSectionStrip'),
-              children: [
-                for (final (tab, label) in _visibleTabs)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 1),
-                      child: OutlinedButton(
-                        key: Key('unifiedSection${tab.name}'),
-                        onPressed: () => _select(tab),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: selected == tab
-                              ? widget.appearance.mode ==
-                                        StudioAppearanceMode.light
-                                    ? Colors.white
-                                    : const Color(0xFF161618)
-                              : widget.appearance.mode ==
-                                    StudioAppearanceMode.light
-                              ? const Color(0xFF344054)
-                              : const Color(0xFFC4C4C8),
-                          side: BorderSide.none,
-                          backgroundColor: selected == tab
-                              ? widget.appearance.mode ==
-                                        StudioAppearanceMode.light
-                                    ? const Color(0xFF163E51)
-                                    : Colors.white
-                              : Colors.transparent,
-                          minimumSize: const Size(0, 36),
-                          padding: const EdgeInsets.symmetric(horizontal: 1),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(19),
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final int index = _visibleTabs.indexWhere(
+                  (entry) => entry.$1 == selected,
+                );
+                final int from = _visibleTabs.indexWhere(
+                  (entry) =>
+                      entry.$1 ==
+                      (_previousTab == StudioTab.player
+                          ? StudioTab.chords
+                          : _previousTab),
+                );
+                final double width = box.maxWidth / _visibleTabs.length;
+                return Stack(
+                  children: [
+                    // The selected tab's pill slides from the tab it left.
+                    if (index >= 0)
+                      Positioned.fill(
+                        child: TweenAnimationBuilder<double>(
+                          key: ValueKey('unifiedSectionPill$index'),
+                          tween: Tween<double>(
+                            begin: (from >= 0 ? from : index).toDouble(),
+                            end: index.toDouble(),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(switch (tab) {
-                              StudioTab.chords => Icons.music_note_outlined,
-                              StudioTab.practice => Icons.graphic_eq,
-                              StudioTab.setlist => Icons.queue_music,
-                              StudioTab.audioSettings => Icons.equalizer,
-                              StudioTab.appearanceSettings => Icons.more_horiz,
-                              _ => Icons.music_note_outlined,
-                            }, size: 12),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeOutCubic,
+                          onEnd: () => _previousTab = _tab,
+                          builder: (context, value, _) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: Transform.translate(
+                              offset: Offset(value * width, 0),
+                              child: Container(
+                                key: const Key('unifiedSectionPill'),
+                                width: width,
+                                decoration: BoxDecoration(
+                                  color: selectedFill,
+                                  borderRadius: BorderRadius.circular(18),
                                 ),
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
+                    Row(
+                      key: const Key('unifiedSectionStrip'),
+                      children: [
+                        for (final (tab, label) in _visibleTabs)
+                          Expanded(
+                            child: OutlinedButton(
+                              key: Key('unifiedSection${tab.name}'),
+                              onPressed: () => _select(tab),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: selected == tab
+                                    ? selectedInk
+                                    : idleInk,
+                                side: BorderSide.none,
+                                backgroundColor: Colors.transparent,
+                                minimumSize: const Size(0, 36),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.standard,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(switch (tab) {
+                                    StudioTab.chords =>
+                                      Icons.music_note_outlined,
+                                    StudioTab.practice => Icons.graphic_eq,
+                                    StudioTab.setlist => Icons.queue_music,
+                                    StudioTab.audioSettings => Icons.equalizer,
+                                    _ => Icons.music_note_outlined,
+                                  }, size: 14),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
-          if (_adjustmentChoicesVisible)
-            SizedBox(
-              key: const Key('adjustmentDirectionChoices'),
-              width: _adjustmentButtonSize.width,
-              height: _adjustmentButtonSize.height,
-            )
-          else
-            SizedBox(
-              key: _adjustmentButtonAnchorKey,
-              child: GestureDetector(
-                onVerticalDragStart: (_) => _adjustmentsDrag = 0,
-                onVerticalDragUpdate: (details) =>
-                    _adjustmentsDrag += details.delta.dy,
-                onVerticalDragEnd: (details) {
-                  final direction = _adjustmentsDrag.abs() >= 20
-                      ? _adjustmentsDrag
-                      : details.primaryVelocity ?? 0;
-                  if (direction < -20) {
-                    _coverVideoWithAdjustments();
-                  } else if (direction > 20) {
-                    _lowerAdjustments();
-                  }
-                },
-                child: IconButton(
-                  key: const Key('visualMainAdjustments'),
-                  tooltip: 'Expandir ou fechar ajustes',
-                  onPressed: _showAdjustmentDirections,
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF303034),
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(34, 34),
-                    padding: EdgeInsets.zero,
-                  ),
-                  icon: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.keyboard_arrow_up, size: 15),
-                      Icon(Icons.keyboard_arrow_down, size: 15),
-                    ],
-                  ),
-                ),
-              ),
+          // The app's settings ("Mais"): a gear, icon only.
+          IconButton(
+            key: const Key('unifiedSectionappearanceSettings'),
+            tooltip: 'Configurações',
+            onPressed: () => _select(StudioTab.appearanceSettings),
+            style: IconButton.styleFrom(
+              backgroundColor: settings ? selectedFill : Colors.transparent,
+              foregroundColor: settings ? selectedInk : idleInk,
+              minimumSize: const Size(40, 36),
+              maximumSize: const Size(40, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: EdgeInsets.zero,
             ),
+            icon: const Icon(Icons.settings_outlined, size: 19),
+          ),
         ],
       ),
     );
@@ -2831,65 +4279,314 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     bool expanded = false,
     Widget? trailing,
     Widget? content,
-  }) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Material(
-      color: switch (widget.appearance.mode) {
-        StudioAppearanceMode.light => const Color(0xFFF7F9FC),
-        StudioAppearanceMode.glass => const Color(0x99303943),
-        StudioAppearanceMode.dark => const Color(0xFF202023),
-      },
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(
-          color: widget.appearance.mode == StudioAppearanceMode.light
-              ? const Color(0xFFB7C4D2)
-              : const Color(0xFF4A4A50),
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          InkWell(
-            key: key,
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(icon, size: 16),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
+    String? subtitle,
+  }) => studioSpotifySkin
+      ? _spotifyToolRow(
+          key: key,
+          icon: icon,
+          title: title,
+          subtitle: subtitle,
+          onTap: onTap,
+          expanded: expanded,
+          trailing: trailing,
+          content: content,
+        )
+      : Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
+            color: switch (widget.appearance.mode) {
+              StudioAppearanceMode.light => const Color(0xFFF7F9FC),
+              StudioAppearanceMode.glass => studioGlassToolFill(),
+              StudioAppearanceMode.dark => const Color(0xFF202023),
+            },
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                width: .8,
+                color: switch (widget.appearance.mode) {
+                  StudioAppearanceMode.light => const Color(0xFFB7C4D2),
+                  StudioAppearanceMode.glass => studioGlassToolBorder(),
+                  StudioAppearanceMode.dark => const Color(0xFF4A4A50),
+                },
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                InkWell(
+                  key: key,
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(icon, size: 16),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        trailing ??
+                            Icon(
+                              expanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              size: 20,
+                              color: studioMuted,
+                            ),
+                      ],
                     ),
                   ),
-                  trailing ??
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        size: 20,
-                        color: studioMuted,
-                      ),
-                ],
+                ),
+                if (content != null)
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: expanded ? content : const SizedBox.shrink(),
+                  ),
+              ],
+            ),
+          ),
+        );
+
+  /// "Rolar" on Spotify: one translucent pill with the speed and a white
+  /// play button, as in the design.
+  Widget _spotifyAutoScroll() {
+    Widget small(Key key, String tip, IconData icon, VoidCallback? onTap) =>
+        IconButton(
+          key: key,
+          tooltip: tip,
+          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          padding: EdgeInsets.zero,
+          onPressed: onTap,
+          icon: Icon(icon, size: 18, color: Colors.white),
+        );
+    return Container(
+      key: const Key('chordAutoScrollCard'),
+      height: 44,
+      padding: const EdgeInsets.only(left: 14, right: 4),
+      decoration: BoxDecoration(
+        color: const Color(0x1AFFFFFF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'Rolar',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
               ),
             ),
           ),
-          if (content != null)
-            AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: expanded ? content : const SizedBox.shrink(),
+          small(
+            const Key('chordAutoScrollSlower'),
+            'Rolar cifra mais devagar',
+            Icons.remove,
+            _chordScrollSpeed > .5
+                ? () => setState(
+                    () => _chordScrollSpeed = (_chordScrollSpeed - .25).clamp(
+                      .5,
+                      2,
+                    ),
+                  )
+                : null,
+          ),
+          Text(
+            '${_chordScrollSpeed.toStringAsFixed(2)}×',
+            key: const Key('chordAutoScrollSpeed'),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
             ),
+          ),
+          small(
+            const Key('chordAutoScrollFaster'),
+            'Rolar cifra mais depressa',
+            Icons.add,
+            _chordScrollSpeed < 2
+                ? () => setState(
+                    () => _chordScrollSpeed = (_chordScrollSpeed + .25).clamp(
+                      .5,
+                      2,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 2),
+          Material(
+            color: Colors.white,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: const Key('chordAutoScrollToggle'),
+              onTap: _toggleChordAutoScroll,
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: Icon(
+                  _chordAutoScroll ? Icons.pause : Icons.play_arrow,
+                  size: 20,
+                  color: Colors.black,
+                  semanticLabel: _chordAutoScroll
+                      ? 'Pausar rolagem da cifra'
+                      : 'Iniciar rolagem da cifra',
+                ),
+              ),
+            ),
+          ),
         ],
       ),
-    ),
+    );
+  }
+
+  /// A practice tool on Spotify: a list row like its own (square tile,
+  /// title, a line under it, an arrow), opening its tool beneath.
+  Widget _spotifyToolRow({
+    required Key key,
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    String? subtitle,
+    bool expanded = false,
+    Widget? trailing,
+    Widget? content,
+  }) => Column(
+    children: [
+      Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: key,
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            height: 64,
+            child: Row(
+              children: [
+                if (studioYouTubeSkin)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Icon(icon, size: 24, color: const Color(0xFFF1F1F1)),
+                  )
+                else ...[
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: const Color(0x1AFFFFFF),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Icon(icon, size: 22, color: Colors.white),
+                  ),
+                  const SizedBox(width: 14),
+                ],
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      if (subtitle != null)
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xBFFFFFFF),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                ?trailing,
+                AnimatedRotation(
+                  turns: expanded ? .25 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(
+                    Icons.chevron_right,
+                    color: Color(0xBFFFFFFF),
+                    size: 22,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      if (content != null)
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: expanded ? content : const SizedBox.shrink(),
+        ),
+    ],
   );
+
+  // The tone tab draws its own backdrop (it starts under the page's strip
+  // and scrolls with the content), so it repeats here what the other tabs
+  // get from the frame around them: the same fill and the same blur.
+  bool get _floatingSheet =>
+      widget.appearance.apple && !_adjustmentsCoverVideo && !_isLandscapePlayer;
+
+  Color get _toneFill => _floatingSheet
+      ? (widget.appearance.mode == StudioAppearanceMode.light
+            ? const Color(0xB8F4F7FB)
+            : const Color(0x8C17191E))
+      : _background;
+
+  // The pieces of the tone tab no longer blur one by one (two blurs met in
+  // a visible seam): [_toneBackdrop] blurs once for the whole tab.
+  Widget _toneGlass({required bool rounded, required Widget child}) => child;
+
+  Widget _toneBackdrop(double topGap, Widget child) {
+    final double blur = studioSpotifySkin
+        ? 0
+        : _floatingSheet
+        ? 22
+        : widget.appearance.mode == StudioAppearanceMode.glass
+        ? 10
+        : 0;
+    if (blur == 0) return child;
+    return AnimatedBuilder(
+      animation: _scroll,
+      child: child,
+      builder: (context, content) {
+        // The backdrop starts under the page's strip and rises with the
+        // scroll until it reaches the top.
+        final double scrolled = _scroll.hasClients ? _scroll.offset : 0;
+        return ClipPath(
+          clipper: TopInsetClipper((topGap - scrolled).clamp(0.0, topGap)),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+            child: content,
+          ),
+        );
+      },
+    );
+  }
 
   Widget _sectionContent(
     Widget media, {
@@ -2922,26 +4619,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         children: [
           _sectionTabs(),
           Expanded(
-            child: PlayerCollectionsPage(
-              appearance: widget.appearance,
-              key: const Key('unifiedSetlist'),
-              store: _presets,
-              setlist: true,
-              embedded: true,
-              onAdd: () => _save(setlist: true),
-              onPrevious: () => _moveSetlist(-1),
-              onNext: () => _moveSetlist(1),
-              onApply: (preset) async {
-                final restored = await _applyPreset(
-                  preset,
-                  returnToPlayer: true,
-                );
-                if (!restored) {
-                  throw StateError(
-                    _player.message ?? 'Não foi possível preparar esta música.',
+            child: _enter(
+              PlayerCollectionsPage(
+                appearance: widget.appearance,
+                key: const Key('unifiedSetlist'),
+                store: _presets,
+                setlist: true,
+                embedded: true,
+                onAdd: () => _save(setlist: true),
+                onPrevious: () => _moveSetlist(-1),
+                onNext: () => _moveSetlist(1),
+                onApply: (preset) async {
+                  final restored = await _applyPreset(
+                    preset,
+                    returnToPlayer: true,
                   );
-                }
-              },
+                  if (!restored) {
+                    throw StateError(
+                      _player.message ??
+                          'Não foi possível preparar esta música.',
+                    );
+                  }
+                },
+              ),
             ),
           ),
         ],
@@ -2956,11 +4656,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             _sectionTabs(),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: _audioSettingsContent(),
+              child: _enter(_audioSettingsContent()),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: StemPanel(onBeforePreview: _player.pause),
+              child: _enter(StemPanel(onBeforePreview: _player.pause)),
             ),
           ],
         ),
@@ -2975,44 +4675,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           child: Column(
             children: [
               _sectionTabs(),
-              // "More" opens with the way into the setlist.
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: OutlinedButton(
-                    key: const Key('unifiedSectionsetlist'),
-                    onPressed: () => _select(StudioTab.setlist),
-                    style: OutlinedButton.styleFrom(
-                      alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(26),
-                      ),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.queue_music, size: 20),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Setlist',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Icon(Icons.chevron_right, size: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: _appearanceSettingsContent(),
+                child: _enter(_appearanceSettingsContent()),
               ),
             ],
           ),
@@ -3026,81 +4691,105 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         child: Column(
           children: [
             _sectionTabs(),
-            UnifiedPlayerAdjustments(
-              model: _player,
-              youtubeNativeTransport: _player.isYouTube,
-              appearanceMode: widget.appearance.mode,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
+            _enter(
+              Column(
                 children: [
-                  _practiceToolRow(
-                    key: const Key('practiceSavedLoops'),
-                    icon: Icons.bookmarks_outlined,
-                    title: 'Trechos guardados',
-                    onTap: _saved,
-                    trailing: IconButton(
-                      key: const Key('visualPracticeSaveLoop'),
-                      tooltip: 'Guardar trecho atual',
-                      onPressed:
-                          _player.loaded &&
-                              _player.markerA != null &&
-                              _player.markerB != null
-                          ? () => _save()
-                          : null,
-                      icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                  UnifiedPlayerAdjustments(
+                    model: _player,
+                    youtubeNativeTransport: _player.isYouTube,
+                    appearanceMode: widget.appearance.mode,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Column(
+                      children: [
+                        _practiceToolRow(
+                          key: const Key('practiceSavedLoops'),
+                          icon: Icons.bookmarks_outlined,
+                          title: 'Trechos guardados',
+                          subtitle: studioSpotifySkin
+                              ? (studioYouTubeSkin
+                                    ? 'Trechos A–B guardados'
+                                    : 'Os seus trechos A–B')
+                              : null,
+                          onTap: _saved,
+                          trailing: IconButton(
+                            key: const Key('visualPracticeSaveLoop'),
+                            tooltip: 'Guardar trecho atual',
+                            onPressed:
+                                _player.loaded &&
+                                    _player.markerA != null &&
+                                    _player.markerB != null
+                                ? () => _save()
+                                : null,
+                            icon: const Icon(
+                              Icons.bookmark_add_outlined,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        _practiceToolRow(
+                          key: const Key('practiceMetronome'),
+                          icon: Icons.timer_outlined,
+                          title: 'Metrônomo inteligente',
+                          subtitle: studioSpotifySkin && !studioYouTubeSkin
+                              ? 'Compasso e andamento'
+                              : null,
+                          onTap: () => setState(
+                            () => _practiceTool = _practiceTool == 'metronome'
+                                ? null
+                                : 'metronome',
+                          ),
+                          expanded: _practiceTool == 'metronome',
+                          content: Padding(
+                            key: const Key('practiceMetronomeContent'),
+                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                            child: embeddedStudyTool(
+                              'metronome',
+                              beforePreview: _player.pause,
+                              bandSession: _bandSession,
+                              onApprovedRhythm: Platform.isAndroid
+                                  ? _player.loadApprovedRhythmPreview
+                                  : null,
+                              onStopRhythm: Platform.isAndroid
+                                  ? _player.stopRhythmPreview
+                                  : null,
+                              rhythmPlaying:
+                                  _player.isRhythmPreview && _player.playing,
+                            ),
+                          ),
+                        ),
+                        _practiceToolRow(
+                          key: const Key('practiceProgression'),
+                          icon: Icons.trending_up,
+                          title: 'Progressão de velocidade',
+                          subtitle: studioSpotifySkin && !studioYouTubeSkin
+                              ? 'Acelere aos poucos'
+                              : null,
+                          onTap: () => setState(
+                            () => _practiceTool = _practiceTool == 'progression'
+                                ? null
+                                : 'progression',
+                          ),
+                          expanded: _practiceTool == 'progression',
+                          content: Padding(
+                            key: const Key('practiceProgressionContent'),
+                            padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                            child: PracticeProgressionCard(
+                              controller: _practice,
+                              embedded: true,
+                            ),
+                          ),
+                        ),
+                        if (const bool.fromEnvironment(
+                          'TRANSPONO_PERSONAL_RHYTHM',
+                        ))
+                          AmbientRhythmTrial(
+                            appearanceMode: widget.appearance.mode,
+                          ),
+                      ],
                     ),
                   ),
-                  _practiceToolRow(
-                    key: const Key('practiceMetronome'),
-                    icon: Icons.timer_outlined,
-                    title: 'Metrônomo inteligente',
-                    onTap: () => setState(
-                      () => _practiceTool = _practiceTool == 'metronome'
-                          ? null
-                          : 'metronome',
-                    ),
-                    expanded: _practiceTool == 'metronome',
-                    content: Padding(
-                      key: const Key('practiceMetronomeContent'),
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                      child: embeddedStudyTool(
-                        'metronome',
-                        beforePreview: _player.pause,
-                        bandSession: _bandSession,
-                        onApprovedRhythm: Platform.isAndroid
-                            ? _player.loadApprovedRhythmPreview
-                            : null,
-                        onStopRhythm: Platform.isAndroid
-                            ? _player.stopRhythmPreview
-                            : null,
-                        rhythmPlaying:
-                            _player.isRhythmPreview && _player.playing,
-                      ),
-                    ),
-                  ),
-                  _practiceToolRow(
-                    key: const Key('practiceProgression'),
-                    icon: Icons.trending_up,
-                    title: 'Progressão de velocidade',
-                    onTap: () => setState(
-                      () => _practiceTool = _practiceTool == 'progression'
-                          ? null
-                          : 'progression',
-                    ),
-                    expanded: _practiceTool == 'progression',
-                    content: Padding(
-                      key: const Key('practiceProgressionContent'),
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-                      child: PracticeProgressionCard(
-                        controller: _practice,
-                        embedded: true,
-                      ),
-                    ),
-                  ),
-                  if (const bool.fromEnvironment('TRANSPONO_PERSONAL_RHYTHM'))
-                    AmbientRhythmTrial(appearanceMode: widget.appearance.mode),
                 ],
               ),
             ),
@@ -3108,60 +4797,153 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         ),
       );
     }
-    final chooseChordButton = DecoratedBox(
-      key: const Key('unifiedChooseChordCard'),
-      decoration: studioPanelDecoration(mode: widget.appearance.mode),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          key: const Key('unifiedChooseChord'),
-          onTap: _chordActive ? _searchChord : _toggleChord,
-          borderRadius: BorderRadius.circular(24),
-          child: SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                children: [
-                  Icon(
-                    _chordActive
-                        ? Icons.library_music_outlined
-                        : Icons.queue_music,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      _chordActive ? 'Trocar cifra' : 'Escolher cifra',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+    final Widget chooseChordButton = studioSpotifySkin && !_chordActive
+        ? Material(
+            key: const Key('unifiedChooseChordCard'),
+            type: MaterialType.transparency,
+            child: InkWell(
+              key: const Key('unifiedChooseChord'),
+              onTap: _toggleChord,
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: 64,
+                child: Row(
+                  children: [
+                    if (studioYouTubeSkin)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 20),
+                        child: Icon(
+                          Icons.queue_music,
+                          color: Color(0xFFF1F1F1),
+                          size: 24,
+                        ),
+                      )
+                    else ...[
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: const Color(0x1AFFFFFF),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Icon(
+                          Icons.queue_music,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                    ],
+                    const Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Escolher cifra',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Acordes e letra sincronizados com o tom',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Color(0xBFFFFFFF),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                  if (!_chordActive)
                     const Icon(
                       Icons.chevron_right,
-                      size: 18,
-                      color: studioMuted,
+                      color: Color(0xBFFFFFFF),
+                      size: 22,
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-    final autoScrollControls = _chordActive
+          )
+        : DecoratedBox(
+            key: const Key('unifiedChooseChordCard'),
+            decoration: studioSpotifySkin
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: const Color(0x99FFFFFF),
+                      width: 1.5,
+                    ),
+                  )
+                : studioPanelDecoration(mode: widget.appearance.mode),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const Key('unifiedChooseChord'),
+                onTap: _chordActive ? _searchChord : _toggleChord,
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  height: 48,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Row(
+                      // "Trocar cifra" sits in the middle of its short button; the
+                      // wide "Escolher cifra" keeps its label left and its arrow
+                      // right.
+                      mainAxisAlignment: _chordActive
+                          ? MainAxisAlignment.center
+                          : MainAxisAlignment.start,
+                      children: [
+                        Icon(
+                          _chordActive
+                              ? (studioSpotifySkin
+                                    ? Icons.swap_horiz
+                                    : Icons.library_music_outlined)
+                              : Icons.queue_music,
+                          size: studioSpotifySkin ? 18 : 17,
+                        ),
+                        SizedBox(width: studioSpotifySkin ? 8 : 6),
+                        Flexible(
+                          fit: _chordActive ? FlexFit.loose : FlexFit.tight,
+                          child: Text(
+                            _chordActive ? 'Trocar cifra' : 'Escolher cifra',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: studioSpotifySkin ? 15 : 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (!_chordActive)
+                          Icon(
+                            Icons.chevron_right,
+                            size: 18,
+                            color: studioMuted,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+    final autoScrollControls = _chordActive && studioSpotifySkin
+        ? _spotifyAutoScroll()
+        : _chordActive
         ? DecoratedBox(
             key: const Key('chordAutoScrollCard'),
             decoration: studioPanelDecoration(mode: widget.appearance.mode),
             child: SizedBox(
               height: 48,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5),
+                // "Rolar" starts a little in from the card's edge.
+                padding: const EdgeInsets.only(left: 18, right: 5),
                 child: Row(
                   children: [
                     const Icon(Icons.auto_mode, size: 15),
@@ -3241,142 +5023,174 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     final controls = Column(
       children: [
         _sectionTabs(),
-        UnifiedPlayerAdjustments(
-          model: _player,
-          youtubeNativeTransport: _player.isYouTube,
-          appearanceMode: widget.appearance.mode,
-          showPracticeControls: false,
-          compactBottom: true,
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-          child: Row(
+        _enter(
+          Column(
             children: [
-              Expanded(flex: _chordActive ? 35 : 1, child: chooseChordButton),
-              if (_chordActive) ...[
-                const SizedBox(width: 6),
-                Expanded(flex: 65, child: autoScrollControls),
-              ],
+              UnifiedPlayerAdjustments(
+                model: _player,
+                youtubeNativeTransport: _player.isYouTube,
+                appearanceMode: widget.appearance.mode,
+                showPracticeControls: false,
+                compactBottom: true,
+                compactTone: _chordActive,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: _chordActive ? 35 : 1,
+                      child: chooseChordButton,
+                    ),
+                    if (_chordActive) ...[
+                      const SizedBox(width: 6),
+                      Expanded(flex: 65, child: autoScrollControls),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         ),
       ],
     );
     if (_chordActive) {
-      return NestedScrollView(
-        key: const Key('unifiedChordScroll'),
-        controller: _scroll,
-        headerSliverBuilder: (context, innerScrolled) => [
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                if (topGap > 0) SizedBox(height: topGap),
-                DecoratedBox(
-                  key: const Key('unifiedChordControlsBackdrop'),
-                  decoration: BoxDecoration(
-                    color: _background,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(34),
-                    ),
-                  ),
-                  child: Column(
-                    children: [controls, const SizedBox(height: 4)],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        body: Builder(
-          builder: (innerContext) {
-            _chordTextScroll = PrimaryScrollController.of(innerContext);
-            return ColoredBox(
-              key: const Key('unifiedChordBackdrop'),
-              color: _background,
-              child: Padding(
-                key: const Key('unifiedChordFrame'),
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                child: Container(
-                  key: const Key('unifiedChordFixedBackground'),
-                  decoration:
-                      studioPanelDecoration(
-                        radius: 26,
-                        mode: widget.appearance.mode,
-                      ).copyWith(
-                        gradient:
-                            widget.appearance.mode == StudioAppearanceMode.dark
-                            ? playerChordDarkGradient
-                            : null,
-                      ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: NotificationListener<ScrollStartNotification>(
-                          onNotification: (notification) {
-                            if (notification.dragDetails != null &&
-                                _chordAutoScroll) {
-                              setState(_stopChordAutoScroll);
-                            }
-                            return false;
-                          },
-                          child: SingleChildScrollView(
-                            key: const Key('unifiedChordTextScroll'),
-                            primary: true,
-                            child: PlayerChordSheet(
-                              key: _unifiedChordKey,
-                              model: _player,
-                              sourceKey: _player.sourceKey,
-                              store: _chords,
-                              onSearch: _searchChord,
-                              onHide: _toggleChord,
-                              fixedDarkBackground: true,
-                              revision: _chordRevision,
-                              appearance: widget.appearance,
-                            ),
-                          ),
+      return _toneBackdrop(
+        topGap,
+        NestedScrollView(
+          key: const Key('unifiedChordScroll'),
+          controller: _scroll,
+          headerSliverBuilder: (context, innerScrolled) => [
+            SliverToBoxAdapter(
+              child: Column(
+                children: [
+                  if (topGap > 0) SizedBox(height: topGap),
+                  _toneGlass(
+                    rounded: true,
+                    child: DecoratedBox(
+                      key: const Key('unifiedChordControlsBackdrop'),
+                      decoration: BoxDecoration(
+                        color: _toneFill,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(studioSpotifySkin ? 0 : 34),
                         ),
                       ),
-                    ],
+                      child: Column(
+                        children: [controls, const SizedBox(height: 4)],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          body: Builder(
+            builder: (innerContext) {
+              _chordTextScroll = PrimaryScrollController.of(innerContext);
+              return _toneGlass(
+                rounded: false,
+                child: ColoredBox(
+                  key: const Key('unifiedChordBackdrop'),
+                  color: _toneFill,
+                  child: Padding(
+                    key: const Key('unifiedChordFrame'),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    child: Container(
+                      key: const Key('unifiedChordFixedBackground'),
+                      decoration:
+                          studioPanelDecoration(
+                            radius: 26,
+                            mode: widget.appearance.mode,
+                          ).copyWith(
+                            gradient:
+                                widget.appearance.mode ==
+                                    StudioAppearanceMode.dark
+                                ? playerChordDarkGradient
+                                : null,
+                          ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child:
+                                NotificationListener<ScrollStartNotification>(
+                                  onNotification: (notification) {
+                                    if (notification.dragDetails != null &&
+                                        _chordAutoScroll) {
+                                      setState(_stopChordAutoScroll);
+                                    }
+                                    return false;
+                                  },
+                                  child: SingleChildScrollView(
+                                    key: const Key('unifiedChordTextScroll'),
+                                    primary: true,
+                                    child: PlayerChordSheet(
+                                      key: _unifiedChordKey,
+                                      model: _player,
+                                      sourceKey: _player.sourceKey,
+                                      store: _chords,
+                                      onSearch: _searchChord,
+                                      onHide: _toggleChord,
+                                      fixedDarkBackground: true,
+                                      revision: _chordRevision,
+                                      appearance: widget.appearance,
+                                    ),
+                                  ),
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       );
     }
-    return SingleChildScrollView(
-      key: const Key('unifiedChordScroll'),
-      controller: _scroll,
-      child: Column(
-        children: [
-          if (topGap > 0) SizedBox(height: topGap),
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: (viewportHeight - topGap).clamp(0, double.infinity),
-            ),
-            child: DecoratedBox(
-              key: const Key('unifiedChordControlsBackdrop'),
-              decoration: BoxDecoration(
-                color: _background,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(34),
+    return _toneBackdrop(
+      topGap,
+      SingleChildScrollView(
+        key: const Key('unifiedChordScroll'),
+        controller: _scroll,
+        child: Column(
+          children: [
+            if (topGap > 0) SizedBox(height: topGap),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: (viewportHeight - topGap).clamp(0, double.infinity),
+              ),
+              child: _toneGlass(
+                rounded: true,
+                child: DecoratedBox(
+                  key: const Key('unifiedChordControlsBackdrop'),
+                  decoration: BoxDecoration(
+                    color: _toneFill,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(studioSpotifySkin ? 0 : 34),
+                    ),
+                  ),
+                  // Room under the last control so it scrolls clear of the
+                  // floating "Fechar ajustes". Inside the backdrop: as padding
+                  // of the scroll view it stayed transparent and showed the
+                  // page.
+                  child: Column(
+                    children: [controls, const SizedBox(height: 88)],
+                  ),
                 ),
               ),
-              // Room under the last control so it scrolls clear of the
-              // floating "Fechar ajustes". Inside the backdrop: as padding of
-              // the scroll view it stayed transparent and showed the page.
-              child: Column(children: [controls, const SizedBox(height: 88)]),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Before any card is built: the mixed themes draw them darker.
+    studioGlassDarkPanels = widget.appearance.darkPanels;
     final media = _mediaSurface();
     if (inPictureInPicture.value && _player.loaded && _player.isYouTube) {
       return _pipView(media);
@@ -3472,6 +5286,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       ),
                       // The Apple design closes with its grabber instead.
                       if (!widget.appearance.apple &&
+                          !studioYouTubeSkin &&
                           !landscapePlayer &&
                           _mainControlsExpanded &&
                           !_adjustmentsCoverVideo)
@@ -4095,7 +5910,17 @@ class _CompactCloseAdjustments extends StatelessWidget {
   final bool open;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: pageDrawsAdjustButton,
+    builder: (context, inPage, child) =>
+        (inPage && open && !(studioSpotifySource && !studioSpotifySkin)) ||
+            (studioSpotifySkin && !studioYouTubeSkin)
+        ? const SizedBox.shrink()
+        : child!,
+    child: _button(context),
+  );
+
+  Widget _button(BuildContext context) => SizedBox(
     width: 46,
     height: 46,
     // Hollow: transparent with a white outline, so it hides little of the

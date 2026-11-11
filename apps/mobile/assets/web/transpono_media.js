@@ -597,6 +597,27 @@
       // Quality stays as the site chose it.
     }
   }
+  // The YouTube page that only lends its sound to Spotify: its picture is
+  // never seen, so it plays at the lowest quality (far less to decode).
+  function shadowQuality() {
+    try {
+      if (!window.__transponoLowVideo || window.location.pathname !== '/watch') return;
+      const now = Date.now();
+      if (now - (window.__transponoLowAt || 0) < 5000) return;
+      window.__transponoLowAt = now;
+      const element = document.querySelector('#movie_player');
+      const player = element && (element.wrappedJSObject || element);
+      if (!player || typeof player.setPlaybackQualityRange !== 'function') return;
+      const levels = typeof player.getAvailableQualityLevels === 'function'
+        ? Array.from(player.getAvailableQualityLevels() || []).filter(l => l !== 'auto') : [];
+      const lowest = levels.length ? levels[levels.length - 1] : 'tiny';
+      if (typeof player.getPlaybackQuality === 'function' &&
+          player.getPlaybackQuality() === lowest) return;
+      player.setPlaybackQualityRange(lowest, lowest);
+    } catch (_) {
+      // Quality stays as the site chose it.
+    }
+  }
   // Leaving the site's search. Its back arrow steps back in the page's
   // history; when the search is the only entry there (the page was loaded
   // again while searching) that does nothing and the search could not be
@@ -775,6 +796,18 @@
   const musicYouTube = () => /^music\.youtube\.com$/i.test(window.location.hostname);
   if (musicYouTube() && !window.__transponoMusicBars) {
     window.__transponoMusicBars = true;
+    // The song goes on with the app in the background, like Spotify: the
+    // page always believes it is on screen.
+    try {
+      const proto = Document.prototype;
+      Object.defineProperty(proto, 'hidden', {configurable: true, get: () => false});
+      Object.defineProperty(proto, 'visibilityState', {configurable: true, get: () => 'visible'});
+      Object.defineProperty(proto, 'webkitVisibilityState', {configurable: true, get: () => 'visible'});
+      for (const type of ['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'freeze']) {
+        window.addEventListener(type, event => event.stopImmediatePropagation(), true);
+        document.addEventListener(type, event => event.stopImmediatePropagation(), true);
+      }
+    } catch (_) {}
     const music = document.createElement('style');
     music.id = 'transpono-music-style';
     music.textContent = `
@@ -783,9 +816,148 @@
       html.transpono-bars-away ytmusic-nav-bar,
       html.transpono-bars-away #nav-bar-background {
         transform: translateY(-80px) !important;
-      }`;
+      }
+      /* The song's tabs (A seguir, Letra, Comentarios, Relacionados) are
+         drawn by the app, in one block with its own tabs: the site's row
+         stays hidden. Opened, their panel has the app's #0F0F0F and leaves
+         room at the bottom for that block. */
+      ytmusic-player-page tp-yt-paper-tabs.tab-header-container {
+        display: none !important;
+      }
+      ytmusic-player-page #side-panel {
+        background: #0f0f0f !important;
+      }
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #side-panel {
+        background: transparent !important;
+        border-radius: 0 !important;
+      }
+      /* Without the site's tab row the player sits lower: no empty band
+         under its buttons. */
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #music-player-wrapper,
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #player-controls {
+        transform: translateY(var(--tp-player-drop, 0px)) !important;
+      }
+      /* "Abrir no app YouTube Music": never shown. */
+      .tp-app-prompt,
+      ytmusic-guide-entry-renderer.tp-app-entry {
+        display: none !important;
+      }
+      /* Opened, the song tab's panel starts under the app's tabs (which
+         sit where the site's own row was, a little lower). */
+      ytmusic-player-page[player-page-ui-state="TABS_VIEW"] #side-panel {
+        padding-top: var(--tp-song-pad, 0px) !important;
+        box-sizing: border-box !important;
+      }
+    }`;
     (document.head || document.documentElement).appendChild(music);
   }
+  // The song's tabs on YouTube Music's player: their names and which one
+  // is opened (-1: none, the player is showing). The app draws them.
+  function songTabs() {
+    if (!musicYouTube()) return null;
+    const page = document.querySelector('ytmusic-player-page');
+    // Only with the song's own screen open (not the site's small player
+    // bar over its other pages).
+    const ui = page && page.getAttribute('player-ui-state');
+    if (ui !== 'PLAYER_PAGE_OPEN' && ui !== 'MINIPLAYER_IN_PLAYER_PAGE') return null;
+    dropPlayer(page);
+    const tabs = [...page.querySelectorAll('tp-yt-paper-tab.tab-header')];
+    if (!tabs.length) return null;
+    const open = page.getAttribute('player-page-ui-state') === 'TABS_VIEW';
+    if (open && window.__transponoSongTop > 0) {
+      const panel = page.querySelector('#side-panel');
+      const root = document.documentElement;
+      const pad = panel
+        ? Math.max(0, Math.round(window.__transponoSongTop - panel.getBoundingClientRect().top))
+        : 0;
+      if (root.style.getPropertyValue('--tp-song-pad') !== pad + 'px') {
+        root.style.setProperty('--tp-song-pad', pad + 'px');
+      }
+    }
+    return {
+      labels: tabs.map(tab => (tab.textContent || '').trim()),
+      enabled: tabs.map(tab => tab.getAttribute('aria-disabled') !== 'true'),
+      selected: open ? tabs.findIndex(tab => tab.classList.contains('iron-selected')) : -1,
+    };
+  }
+  // The player goes down by part of the empty band under its buttons.
+  // Measured only when the screen or the player's state changes (or every
+  // few seconds), never on every snapshot: a layout read costs a frame.
+  let dropKey = '';
+  let dropAt = 0;
+  function dropPlayer(page) {
+    const state = page.getAttribute('player-page-ui-state');
+    const key = window.innerHeight + '|' + window.innerWidth + '|' + state;
+    const at = Date.now();
+    if (key === dropKey && at - dropAt < 4000) return;
+    dropKey = key;
+    dropAt = at;
+    const root = document.documentElement;
+    const now = parseFloat(root.style.getPropertyValue('--tp-player-drop')) || 0;
+    const controls = state === 'FULL_PLAYER_VIEW'
+      ? page.querySelector('#player-controls') : null;
+    if (!controls || controls.offsetHeight <= 0) return;
+    const gap = window.innerHeight - (controls.getBoundingClientRect().bottom - now);
+    const drop = Math.max(0, Math.min(120, Math.round(gap - 40)));
+    if (Math.abs(drop - now) > 1) root.style.setProperty('--tp-player-drop', drop + 'px');
+  }
+  // The site's "open in the YouTube Music app" dialog and menu entry stay
+  // hidden; the dialog is also answered "not now" (musicBars).
+  if (musicYouTube() && !window.__transponoNoAppPrompt) {
+    window.__transponoNoAppPrompt = true;
+    // A light check a few times a second (the site changes its page on
+    // every frame while playing; watching every change made it sluggish).
+    let entries = -1;
+    const hideAppPrompts = () => {
+      for (const dialog of document.querySelectorAll('ytmusic-popup-container tp-yt-paper-dialog')) {
+        const shown = dialog.opened || dialog.classList.contains('tp-app-prompt');
+        if (!shown) continue;
+        const app = /app YouTube Music/i.test(dialog.textContent || '');
+        dialog.classList.toggle('tp-app-prompt', app && !!dialog.opened);
+        if (app && dialog.opened && typeof dialog.close === 'function') {
+          try { dialog.close(); } catch (_) {}
+        }
+      }
+      const guide = document.querySelectorAll('ytmusic-guide-entry-renderer');
+      if (guide.length !== entries) {
+        entries = guide.length;
+        for (const entry of guide) {
+          entry.classList.toggle('tp-app-entry',
+            /^\s*(abrir o app|open (the )?app)\s*$/i.test(entry.textContent || ''));
+        }
+      }
+    };
+    setInterval(hideAppPrompts, 1000);
+    hideAppPrompts();
+  }
+  // The notification's next / previous on YouTube Music.
+  window.__transponoMusicSkip = forward => {
+    const bar = document.querySelector('ytmusic-player-bar');
+    const button = bar && bar.querySelector(forward ? '.next-button' : '.previous-button');
+    if (button) button.click();
+  };
+  // The app's song tab was tapped: opens that tab's panel, or with -1 goes
+  // back to the player.
+  window.__transponoSongTab = (index, top) => {
+    if (top > 0) {
+      window.__transponoSongTop = top;
+      // Right away, before the next measure: the panel opens at its place.
+      document.documentElement.style.setProperty(
+        '--tp-song-pad', Math.max(0, Math.round(top - 64)) + 'px');
+    }
+    const page = document.querySelector('ytmusic-player-page');
+    if (!page) return;
+    const open = page.getAttribute('player-page-ui-state') === 'TABS_VIEW';
+    if (index < 0) {
+      if (!open) return;
+      const bar = page.querySelector('#top-player-bar .middle-controls') ||
+        page.querySelector('#top-player-bar');
+      if (bar) bar.click();
+      return;
+    }
+    const tab = page.querySelectorAll('tp-yt-paper-tab.tab-header')[index];
+    if (tab && !(open && tab.classList.contains('iron-selected'))) tab.click();
+  };
   function musicBars() {
     if (!musicYouTube()) return null;
     try {
@@ -863,6 +1035,7 @@
       ensureTopTabs();
       dressLibraryPage();
       shortsQuality();
+      shadowQuality();
       syncBarsAway();
       const bar = document.querySelector('ytm-pivot-bar-renderer');
       const shorts = bar
@@ -2092,6 +2265,7 @@
       })(),
       pageScroll: window.__transponoScrollDir === 'down' ? 'down' : 'up',
       bars: pageBars() || musicBars(),
+      songTabs: songTabs(),
       // The site's vertical Shorts player is on screen.
       shortsPage: /^\/shorts(\/|$)/.test(window.location.pathname),
       // Counters, not one-shot flags: any snapshot (there are several

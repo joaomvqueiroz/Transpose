@@ -97,7 +97,7 @@ class _PracticePanelState extends State<PracticePanel> {
               widget.practiceController == null
                   ? 'Treino manual · marque o trecho, repita e aumente a velocidade quando estiver confortável.'
                   : 'Marque o trecho e escolha um plano progressivo ou ajuste a velocidade manualmente.',
-              style: const TextStyle(color: studioMuted),
+              style: TextStyle(color: studioMuted),
             ),
             if (!model.loaded) ...<Widget>[
               const SizedBox(height: 12),
@@ -138,7 +138,7 @@ class _PracticePanelState extends State<PracticePanel> {
                   const SizedBox(height: 6),
                   Text(
                     'Posição: ${_time(Duration(milliseconds: position.round()))} / ${_time(model.duration)}',
-                    style: const TextStyle(color: studioMuted),
+                    style: TextStyle(color: studioMuted),
                   ),
                   Slider(
                     key: const Key('practiceSeek'),
@@ -328,7 +328,7 @@ class _PracticePanelState extends State<PracticePanel> {
                     widget.practiceController == null
                         ? 'A velocidade só muda quando você a ajusta. Não contamos repetições nem avaliamos a sua execução automaticamente.'
                         : 'Um ajuste manual pausa a progressão. As voltas contam reprodução do trecho, não avaliam a sua execução.',
-                    style: const TextStyle(color: studioMuted, fontSize: 12),
+                    style: TextStyle(color: studioMuted, fontSize: 12),
                   ),
                 ],
               ),
@@ -340,7 +340,7 @@ class _PracticePanelState extends State<PracticePanel> {
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Guarde cada trecho com um nome, como Intro, Refrão ou Solo. Os tempos e ajustes ficam no seu dispositivo.',
                   style: TextStyle(color: studioMuted),
                 ),

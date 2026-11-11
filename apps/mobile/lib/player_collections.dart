@@ -211,6 +211,236 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
     );
   }
 
+  static const List<Color> _spotifyTiles = [
+    Color(0xFF3B3F5C),
+    Color(0xFF2F5552),
+    Color(0xFF5C4430),
+    Color(0xFF4F3550),
+    Color(0xFF34495E),
+  ];
+
+  /// The song's picture: the video's thumbnail (square on Spotify, 16:9 on
+  /// YouTube), or a coloured tile while offline or without one.
+  Widget _spotifyThumbnail(PlayerPreset item, int index) {
+    final double width = studioYouTubeSkin ? 80 : 48;
+    final double height = studioYouTubeSkin ? 45 : 48;
+    final double radius = studioYouTubeSkin ? 8 : 4;
+    final Widget tile = Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: _spotifyTiles[index % _spotifyTiles.length],
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: const Icon(
+        Icons.music_note_outlined,
+        color: Color(0xBFFFFFFF),
+        size: 22,
+      ),
+    );
+    final videoId = item.locator;
+    if (!RegExp(r'^[\w-]{11}$').hasMatch(videoId)) return tile;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Image.network(
+        'https://i.ytimg.com/vi/$videoId/mqdefault.jpg',
+        key: ValueKey('setlistThumbnail-${item.id}'),
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => tile,
+      ),
+    );
+  }
+
+  /// A Spotify list row: square tile, title, a line under it, the menu.
+  Widget _spotifyRow(int index) {
+    final item = _items[index];
+    final pitch =
+        '${item.pitch > 0 ? '+' : ''}${item.pitch.toStringAsFixed(item.pitch % 1 == 0 ? 0 : 1)} st';
+    return Material(
+      key: ValueKey('collection-${item.id}'),
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: ValueKey('collectionOpen-${item.id}'),
+        onTap: _busy ? null : () => _apply(item),
+        onLongPress: _busy ? null : () => _setlistOptions(item, index),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              _spotifyThumbnail(item, index),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    Text(
+                      '${item.youtube ? 'YouTube' : 'Ficheiro'} · $pitch · '
+                      '${item.speed.toStringAsFixed(2)}×',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xBFFFFFFF),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                key: ValueKey('collectionMenu-${item.id}'),
+                tooltip: 'Ordenar ou remover da setlist',
+                onPressed: _busy ? null : () => _setlistOptions(item, index),
+                icon: const Icon(Icons.more_vert, color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The setlist inside the Spotify adjustments, laid out like its pages.
+  Widget _spotifySetlist() {
+    Widget icon(Key? key, String tip, IconData data, VoidCallback? onTap) =>
+        IconButton(
+          key: key,
+          tooltip: tip,
+          onPressed: _busy ? null : onTap,
+          icon: Icon(data, color: Colors.white, size: 26),
+        );
+    final count = _items.length;
+    return ListView(
+      key: const Key('setlistHeader'),
+      padding: const EdgeInsets.only(bottom: 16),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Minha setlist',
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '$count ${count == 1 ? 'música' : 'músicas'} · abre com os ajustes guardados',
+                style: const TextStyle(fontSize: 13, color: Color(0xBFFFFFFF)),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            children: [
+              if (widget.onAdd != null)
+                icon(
+                  const Key('collectionAddCurrent'),
+                  'Adicionar música atual',
+                  Icons.add_circle_outline,
+                  _addCurrent,
+                ),
+              icon(null, 'Atualizar coleção', Icons.refresh, _load),
+              const Spacer(),
+              if (widget.onPrevious != null)
+                icon(
+                  const Key('setlistPrevious'),
+                  'Anterior da setlist',
+                  Icons.skip_previous,
+                  widget.onPrevious,
+                ),
+              if (widget.onNext != null)
+                icon(
+                  const Key('setlistNext'),
+                  'Próxima da setlist',
+                  Icons.skip_next,
+                  widget.onNext,
+                ),
+            ],
+          ),
+        ),
+        if (_busy) const LinearProgressIndicator(),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(_error!, key: const Key('collectionError')),
+          ),
+        if (widget.onAdd != null)
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: _busy ? null : _addCurrent,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: const Color(0x1AFFFFFF),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(Icons.add, color: Colors.white),
+                    ),
+                    const SizedBox(width: 14),
+                    const Text(
+                      'Adicionar à setlist',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else
+          for (var index = 0; index < count; index++) _spotifyRow(index),
+        if (count > 0)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              'Mantenha pressionado para ordenar ou remover.',
+              style: TextStyle(fontSize: 12, color: Color(0xBFFFFFFF)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _addCurrent() async {
+    await widget.onAdd!();
+    if (mounted) await _load();
+  }
+
   Widget _row(int index) {
     final item = _items[index];
     if (widget.setlist) {
@@ -290,6 +520,9 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (studioSpotifySkin && widget.embedded && widget.setlist) {
+      return _spotifySetlist();
+    }
     final content = Column(
       children: [
         if (_busy) const LinearProgressIndicator(),

@@ -5,7 +5,6 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:transpose_mobile/chord_sheet.dart';
 import 'package:transpose_mobile/studio_appearance.dart';
 import 'package:transpose_mobile/player_presets.dart';
-import 'package:transpose_mobile/studio_native_pages.dart';
 import 'package:transpose_mobile/studio_visual_app.dart';
 import 'package:transpose_mobile/youtube_browser.dart';
 
@@ -31,7 +30,8 @@ void main() {
     final settingsTab = find.byKey(
       const Key('unifiedSectionappearanceSettings'),
     );
-    expect(tester.getRect(settingsTab).right, lessThanOrEqualTo(strip.right));
+    // The settings are the gear at the end of the band, after the tabs.
+    expect(tester.getRect(settingsTab).left, greaterThanOrEqualTo(strip.right));
     expect(tester.takeException(), isNull);
     await tester.tap(settingsTab);
     await tester.pumpAndSettle();
@@ -271,46 +271,76 @@ void main() {
     expect(openButton.style?.shape?.resolve({}), isA<StadiumBorder>());
     await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
-    final close = tester.getRect(
-      find.byKey(const Key('visualMainAdjustments')),
-    );
-    expect(close.center.dx, greaterThan(screenWidth / 2));
+    // Open: no arrows button in the tabs; the bar at the top does it.
+    expect(find.byKey(const Key('visualMainAdjustments')), findsNothing);
+    final handle = tester.getRect(find.byKey(const Key('adjustmentsHandle')));
+    expect((handle.center.dx - screenWidth / 2).abs(), lessThan(1));
     await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
-    expect(find.byKey(const Key('visualMainAdjustments')), findsOneWidget);
+    expect(find.byKey(const Key('adjustmentsHandle')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('direções substituem o botão por duas opções separadas', (
+  testWidgets('a barrinha aparece, esvanece e não mexe em nada', (
     tester,
   ) async {
     await tester.pumpWidget(const StudioVisualApp());
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('visualMainAdjustments')));
     await tester.pumpAndSettle();
-    final tabsBefore = tester.getRect(
-      find.byKey(const Key('unifiedSectionchords')),
-    );
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
+    final tabs = find.byKey(const Key('unifiedSectionchords'));
+    final tabsBefore = tester.getRect(tabs);
+    double opacity() => tester
+        .widget<AnimatedOpacity>(find.byKey(const Key('adjustmentsHandleBar')))
+        .opacity;
 
-    expect(find.byKey(const Key('visualMainAdjustments')), findsNothing);
-    expect(
-      tester.getRect(find.byKey(const Key('unifiedSectionchords'))),
-      tabsBefore,
-      reason: 'Abrir as duas direções não deve aumentar a barra das colunas.',
-    );
-    final upper = tester.getRect(
-      find.byKey(const Key('adjustmentsExpandVideo')),
-    );
-    final lower = tester.getRect(find.byKey(const Key('adjustmentsClose')));
-    expect(upper.bottom, lessThan(lower.top));
-    expect(lower.top - upper.bottom, greaterThanOrEqualTo(16));
-
-    await tester.tap(find.byKey(const Key('adjustmentsClose')));
+    // Shown for 3.5 s, and only then starts to fade.
+    expect(opacity(), 1);
+    await tester.pump(const Duration(milliseconds: 3000));
+    expect(opacity(), 1);
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(opacity(), 0);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('adjustmentDirectionChoices')), findsNothing);
+    expect(tester.getRect(tabs), tabsBefore);
+
+    // Back every 10 s, still without pushing anything.
+    await tester.pump(const Duration(milliseconds: 6500));
+    expect(opacity(), 1);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(tabs), tabsBefore);
+
+    // Dragged, the adjustments follow the finger and the bar grows; a short
+    // drag lets them glide back.
+    double pillWidth() =>
+        tester.getSize(find.byKey(const Key('adjustmentsHandlePill'))).width;
+    expect(pillWidth(), 40);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('adjustmentsHandle'))),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(pillWidth(), 56);
+    await gesture.moveBy(const Offset(0, -25));
+    await gesture.moveBy(const Offset(0, -10));
+    await tester.pump();
+    expect(tester.getRect(tabs).top, lessThan(tabsBefore.top - 5));
+    expect(find.byKey(const Key('coveredVideoTransport')), findsNothing);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(tabs), tabsBefore);
+    expect(pillWidth(), 40);
+
+    // A tap on the band reaches the tab under it.
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('unifiedPracticeScroll')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, 80),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Abrir ajustes'), findsOneWidget);
   });
 
@@ -341,19 +371,19 @@ void main() {
       await tester.tap(find.byKey(const Key('visualMainAdjustments')));
       await tester.pumpAndSettle();
     }
-    // The setlist is reached through the "Mais" tab.
-    if (key == 'unifiedSectionsetlist' &&
-        find.byKey(Key(key)).evaluate().isEmpty) {
-      await tap(tester, 'unifiedSectionappearanceSettings');
+    // With the adjustments open, the bar at their top lowers or closes them.
+    if (key == 'visualMainAdjustments' &&
+        find.byKey(const Key('adjustmentsHandle')).evaluate().isNotEmpty) {
+      await tester.drag(
+        find.byKey(const Key('adjustmentsHandle')),
+        const Offset(0, 80),
+      );
+      await tester.pumpAndSettle();
+      return;
     }
     await tester.ensureVisible(find.byKey(Key(key)));
     await tester.tap(find.byKey(Key(key)));
     await tester.pumpAndSettle();
-    if (key == 'visualMainAdjustments' &&
-        find.byKey(const Key('adjustmentsClose')).evaluate().isNotEmpty) {
-      await tester.tap(find.byKey(const Key('adjustmentsClose')));
-      await tester.pumpAndSettle();
-    }
   }
 
   Future<void> openSearch(WidgetTester tester) async {
@@ -438,7 +468,6 @@ void main() {
     expect(find.byKey(const Key('unifiedPitchUp')), findsOneWidget);
     for (final name in ['practice', 'chords', 'setlist']) {
       await tap(tester, 'unifiedSection$name');
-      // The setlist has no tab of its own: it opens from "Mais".
       expect(
         find.byKey(
           Key(name == 'setlist' ? 'unifiedSetlist' : 'unifiedSection$name'),
@@ -580,7 +609,8 @@ void main() {
       (tester.widget<DecoratedBox>(controlsBackdrop).decoration
               as BoxDecoration)
           .color,
-      studioBg,
+      // The default theme, "Escuro", is dark glass over the page.
+      const Color(0x77080809),
     );
     expect(
       tester.getRect(chordFrame).top - tester.getRect(autoCard).bottom,
@@ -643,15 +673,14 @@ void main() {
         (tester.widget<Container>(fixedBackground).decoration! as BoxDecoration)
                 .gradient!
             as LinearGradient;
-    expect(fixedGradient.begin, Alignment.topRight);
-    expect(fixedGradient.end, Alignment.bottomLeft);
-    expect(fixedGradient.colors.first, const Color(0xFF0D0E10));
-    expect(fixedGradient.colors.last, const Color(0xFF292A2F));
+    // The default theme, "Escuro", frames the sheet with the dark glass of
+    // every other card, and the text sits in a darker well inside it.
+    expect(fixedGradient.colors.first, const Color(0xCC1B1F26));
     final textSurface = tester.widget<Container>(
       find.byKey(const Key('playerChordTextSurface')),
     );
     final textDecoration = textSurface.decoration! as BoxDecoration;
-    expect(textDecoration.color, Colors.transparent);
+    expect(textDecoration.color, const Color(0x66050608));
     expect(textDecoration.gradient, isNull);
     final fixedTop = tester.getTopLeft(fixedBackground).dy;
     await tester.drag(
@@ -753,28 +782,10 @@ void main() {
     );
     await tap(tester, 'visualMainAdjustments');
     expect(find.byKey(const Key('coveredVideoTransport')), findsNothing);
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('adjustmentsExpandVideo')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('adjustmentsExpandVideo')),
-        matching: find.byType(CircleAvatar),
-      ),
-      findsOneWidget,
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, -80),
     );
-    expect(
-      tester
-          .widget<CircleAvatar>(
-            find.descendant(
-              of: find.byKey(const Key('adjustmentsClose')),
-              matching: find.byType(CircleAvatar),
-            ),
-          )
-          .radius,
-      18,
-    );
-    await tester.tap(find.byKey(const Key('adjustmentsExpandVideo')));
     await tester.pumpAndSettle();
     final transport = find.byKey(const Key('coveredVideoTransport'));
     expect(transport, findsOneWidget);
@@ -801,28 +812,29 @@ void main() {
       expect(transport, findsOneWidget);
       expect(tester.takeException(), isNull);
     }
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('adjustmentsClose')));
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, 80),
+    );
     await tester.pumpAndSettle();
     expect(transport, findsNothing);
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
     expect(find.text('Abrir ajustes'), findsNothing);
     await tester.drag(
-      find.byKey(const Key('visualMainAdjustments')),
+      find.byKey(const Key('adjustmentsHandle')),
       const Offset(0, -80),
     );
     await tester.pumpAndSettle();
     expect(transport, findsOneWidget);
     await tester.drag(
-      find.byKey(const Key('visualMainAdjustments')),
+      find.byKey(const Key('adjustmentsHandle')),
       const Offset(0, 80),
     );
     await tester.pumpAndSettle();
     expect(transport, findsNothing);
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
     await tester.drag(
-      find.byKey(const Key('visualMainAdjustments')),
+      find.byKey(const Key('adjustmentsHandle')),
       const Offset(0, 80),
     );
     await tester.pumpAndSettle();
@@ -884,7 +896,7 @@ void main() {
     expect(session.disposed, isFalse);
 
     await tester.drag(
-      find.byKey(const Key('visualMainAdjustments')),
+      find.byKey(const Key('adjustmentsHandle')),
       const Offset(0, 80),
     );
     await tester.pumpAndSettle();
@@ -905,7 +917,7 @@ void main() {
       await tester.pumpWidget(const StudioVisualApp());
       await tap(tester, 'visualMainAdjustments');
       await tester.drag(
-        find.byKey(const Key('visualMainAdjustments')),
+        find.byKey(const Key('adjustmentsHandle')),
         const Offset(0, -80),
       );
       await tester.pumpAndSettle();
@@ -955,10 +967,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tap(tester, 'visualMainAdjustments');
-      final adjustments = tester.getRect(
-        find.byKey(const Key('visualMainAdjustments')),
-      );
-      expect(adjustments.center.dx, greaterThan(size.width / 2));
+      expect(find.byKey(const Key('adjustmentsHandle')), findsOneWidget);
       for (final name in ['practice', 'chords', 'setlist']) {
         await tap(tester, 'unifiedSection$name');
         expect(tester.takeException(), isNull, reason: 'secção $name');

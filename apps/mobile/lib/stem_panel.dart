@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'studio_appearance.dart';
+
 /// Six-stem inference runs inside the Android app. Source files stay private.
 class StemPanel extends StatefulWidget {
   const StemPanel({super.key, required this.onBeforePreview});
@@ -253,133 +255,135 @@ class _StemPanelState extends State<StemPanel> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final processing = _phase == 'downloading' || _phase == 'separating';
     final running = _busyNative || processing;
-    return Card(
-      margin: const EdgeInsets.only(top: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    final bool skin = studioSpotifySkin;
+    final Widget body = Padding(
+      padding: skin
+          ? const EdgeInsets.only(top: 16, bottom: 16)
+          : const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (skin) ...[
+            const Divider(height: 1, color: Color(0x1FFFFFFF)),
+            const SizedBox(height: 16),
+            skinLabel('Separação de instrumentos'),
+          ] else
             const Text(
               'SEPARAÇÃO EXPERIMENTAL DE INSTRUMENTOS',
               style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: .7),
             ),
-            const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          const Text(
+            'Seis pistas: bateria, baixo, outros, voz, guitarra e piano. A separação é aproximada e pode demorar vários minutos. O áudio é processado só neste telemóvel.',
+          ),
+          const Text('Mantenha a app aberta; ao sair, a operação é cancelada.'),
+          const Text(
+            'Motor demucs.cpp e modelo Retrobear: MIT. Eigen: MPL 2.0 e avisos BSD. Textos em assets/stems_licenses.',
+          ),
+          const SizedBox(height: 8),
+          if (!_available)
             const Text(
-              'Seis pistas: bateria, baixo, outros, voz, guitarra e piano. A separação é aproximada e pode demorar vários minutos. O áudio é processado só neste telemóvel.',
+              'Motor de separação indisponível nesta versão ou arquitetura Android.',
             ),
-            const Text(
-              'Mantenha a app aberta; ao sair, a operação é cancelada.',
+          if (_available) ...[
+            Text(
+              _modelReady ? 'Modelo verificado e pronto.' : 'Modelo necessário: 55 MB, descarregado uma vez por HTTPS e verificado por SHA-256.',
             ),
-            const Text(
-              'Motor demucs.cpp e modelo Retrobear: MIT. Eigen: MPL 2.0 e avisos BSD. Textos em assets/stems_licenses.',
-            ),
-            const SizedBox(height: 8),
-            if (!_available)
-              const Text(
-                'Motor de separação indisponível nesta versão ou arquitetura Android.',
-              ),
-            if (_available) ...[
-              Text(
-                _modelReady ? 'Modelo verificado e pronto.' : 'Modelo necessário: 55 MB, descarregado uma vez por HTTPS e verificado por SHA-256.',
-              ),
-              if (!_modelReady)
-                OutlinedButton.icon(
-                  onPressed: running ? null : _prepare,
-                  icon: const Icon(Icons.download),
-                  label: const Text('Preparar modelo (55 MB)'),
-                ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                  'Tenho autorização para processar esta gravação.',
-                ),
-                value: _authorized,
-                onChanged: running
-                    ? null
-                    : (value) => setState(() => _authorized = value ?? false),
-              ),
+            if (!_modelReady)
               OutlinedButton.icon(
-                onPressed: !_authorized || running || _copying ? null : _choose,
-                icon: const Icon(Icons.audio_file_outlined),
-                label: Text(_sourceName ?? 'Escolher WAV local'),
+                onPressed: running ? null : _prepare,
+                icon: const Icon(Icons.download),
+                label: const Text('Preparar modelo (55 MB)'),
               ),
-              const Text(
-                'WAV PCM 16 bits · 44,1 kHz · mono/estéreo · 1 s–10 min · máximo 64 MB',
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Tenho autorização para processar esta gravação.',
               ),
-              if (_copying) const LinearProgressIndicator(),
-              if (_phase == 'downloading')
-                Text(
-                  'Modelo: ${(_downloaded / 54855129 * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                ),
-              if (_phase == 'separating') Text('Separação: $_progress%'),
-              if (running) const LinearProgressIndicator(),
-              Row(
-                children: [
-                  FilledButton(
-                    onPressed:
-                        _authorized &&
-                            _modelReady &&
-                            _input != null &&
-                            !running &&
-                            !_copying
-                        ? _start
-                        : null,
-                    child: const Text('Separar neste telemóvel'),
-                  ),
-                  if (processing)
-                    TextButton(
-                      onPressed: _cancel,
-                      child: const Text('Cancelar'),
-                    ),
-                ],
+              value: _authorized,
+              onChanged: running
+                  ? null
+                  : (value) => setState(() => _authorized = value ?? false),
+            ),
+            OutlinedButton.icon(
+              onPressed: !_authorized || running || _copying ? null : _choose,
+              icon: const Icon(Icons.audio_file_outlined),
+              label: Text(_sourceName ?? 'Escolher WAV local'),
+            ),
+            const Text(
+              'WAV PCM 16 bits · 44,1 kHz · mono/estéreo · 1 s–10 min · máximo 64 MB',
+            ),
+            if (_copying) const LinearProgressIndicator(),
+            if (_phase == 'downloading')
+              Text(
+                'Modelo: ${(_downloaded / 54855129 * 100).clamp(0, 100).toStringAsFixed(0)}%',
               ),
-              if (_phase == 'cancelled') const Text('Operação cancelada.'),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+            if (_phase == 'separating') Text('Separação: $_progress%'),
+            if (running) const LinearProgressIndicator(),
+            Row(
+              children: [
+                FilledButton(
+                  onPressed:
+                      _authorized &&
+                          _modelReady &&
+                          _input != null &&
+                          !running &&
+                          !_copying
+                      ? _start
+                      : null,
+                  child: const Text('Separar neste telemóvel'),
                 ),
-              if (_outputs.isNotEmpty) ...[
-                const Divider(),
-                const Text(
-                  'Última separação · ouvir uma pista de cada vez:',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                Slider(
-                  value: _volume,
-                  onChanged: (value) {
-                    setState(() => _volume = value);
-                    unawaited(
-                      _queuePreview(() async => _preview?.setVolume(value)),
-                    );
-                  },
-                ),
-                for (final item in _names.entries)
-                  if (_outputs[item.key] case final String path)
-                    ListTile(
-                      dense: true,
-                      title: Text(item.value),
-                      subtitle: Text(
-                        path,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: IconButton(
-                        tooltip: _playing == item.key
-                            ? 'Parar ${item.value}'
-                            : 'Ouvir ${item.value}',
-                        onPressed: () => _togglePreview(item.key, path),
-                        icon: Icon(
-                          _playing == item.key ? Icons.stop : Icons.play_arrow,
-                        ),
-                      ),
-                    ),
+                if (processing)
+                  TextButton(onPressed: _cancel, child: const Text('Cancelar')),
               ],
+            ),
+            if (_phase == 'cancelled') const Text('Operação cancelada.'),
+            if (_error != null)
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            if (_outputs.isNotEmpty) ...[
+              const Divider(),
+              const Text(
+                'Última separação · ouvir uma pista de cada vez:',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              Slider(
+                value: _volume,
+                onChanged: (value) {
+                  setState(() => _volume = value);
+                  unawaited(
+                    _queuePreview(() async => _preview?.setVolume(value)),
+                  );
+                },
+              ),
+              for (final item in _names.entries)
+                if (_outputs[item.key] case final String path)
+                  ListTile(
+                    dense: true,
+                    title: Text(item.value),
+                    subtitle: Text(
+                      path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      tooltip: _playing == item.key
+                          ? 'Parar ${item.value}'
+                          : 'Ouvir ${item.value}',
+                      onPressed: () => _togglePreview(item.key, path),
+                      icon: Icon(
+                        _playing == item.key ? Icons.stop : Icons.play_arrow,
+                      ),
+                    ),
+                  ),
             ],
           ],
-        ),
+        ],
       ),
     );
+    if (skin) return body;
+    return Card(margin: const EdgeInsets.only(top: 12), child: body);
   }
 }

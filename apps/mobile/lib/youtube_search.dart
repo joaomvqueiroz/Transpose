@@ -48,10 +48,11 @@ bool isSoundCloudBrowserUri(Uri uri) =>
     (uri.host == 'soundcloud.com' || uri.host.endsWith('.soundcloud.com'));
 
 /// SoundCloud's mobile search results for [query].
-Uri soundCloudSearchUri(String query) =>
-    Uri.https('m.soundcloud.com', '/search', <String, String>{
-      'q': query.trim(),
-    });
+Uri soundCloudSearchUri(String query) => Uri.https(
+  'm.soundcloud.com',
+  '/search',
+  <String, String>{'q': query.trim()},
+);
 
 /// Universal links must stay inside this WebView instead of starting an app.
 Uri? embeddedYouTubeUri(String value) {

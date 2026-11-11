@@ -80,14 +80,38 @@ void main() {
     expect(find.byKey(const Key('unifiedSectionchords')), findsOneWidget);
     expect(find.byKey(const Key('unifiedSectionpractice')), findsOneWidget);
     expect(find.byKey(const Key('transponoWordmark')), findsNothing);
-    final activeTab = tester.widget<OutlinedButton>(
+    // The selected tab is marked by the white pill under it.
+    final pill = tester.widget<Container>(
+      find.byKey(const Key('unifiedSectionPill')),
+    );
+    expect((pill.decoration! as BoxDecoration).color, Colors.white);
+    expect(
+      tester.getRect(find.byKey(const Key('unifiedSectionPill'))),
+      tester.getRect(find.byKey(const Key('unifiedSectionchords'))),
+    );
+    // Choosing another tab slides the pill there.
+    await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 90));
+    final sliding = tester.getRect(find.byKey(const Key('unifiedSectionPill')));
+    final chordsTab = tester.getRect(
       find.byKey(const Key('unifiedSectionchords')),
     );
-    expect(activeTab.style!.backgroundColor!.resolve({}), Colors.white);
-    final closeButton = tester.widget<IconButton>(
-      find.byKey(const Key('visualMainAdjustments')),
+    final practiceTab = tester.getRect(
+      find.byKey(const Key('unifiedSectionpractice')),
     );
-    expect(closeButton.tooltip, 'Expandir ou fechar ajustes');
+    expect(sliding.left, greaterThan(chordsTab.left));
+    expect(sliding.left, lessThan(practiceTab.left));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(find.byKey(const Key('unifiedSectionPill'))),
+      practiceTab,
+    );
+    await tester.tap(find.byKey(const Key('unifiedSectionchords')));
+    await tester.pumpAndSettle();
+    // No arrows button in the tabs: the bar at the top raises and closes.
+    expect(find.byKey(const Key('visualMainAdjustments')), findsNothing);
+    expect(find.byKey(const Key('adjustmentsHandle')), findsOneWidget);
     expect(find.byKey(const Key('unifiedSectioninstruments')), findsNothing);
     expect(find.byKey(const Key('unifiedChooseChord')), findsOneWidget);
     final pitchButtonsInCifra =
@@ -128,9 +152,10 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('unifiedMarkB'))).height, 36);
     await tester.tap(find.byKey(const Key('unifiedSectionpractice')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('adjustmentsClose')));
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, 80),
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedPracticeScroll')), findsNothing);
     expect(find.byKey(const Key('visualPlayerMenu')), findsNothing);
@@ -206,7 +231,10 @@ void main() {
     expect(find.byKey(const Key('visualPracticePause')), findsNothing);
     await tester.tap(find.byKey(const Key('unifiedSectionchords')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('visualMainAdjustments')));
+    await tester.drag(
+      find.byKey(const Key('adjustmentsHandle')),
+      const Offset(0, 80),
+    );
     await tester.pumpAndSettle();
     expect(creations, 1);
     expect(session.disposed, isFalse);
@@ -226,21 +254,13 @@ void main() {
     final mediaHeight = tester.getSize(viewport).height;
     final strip = find.byKey(const Key('unifiedSectionStrip'));
     final stripRect = tester.getRect(strip);
-    for (final tab in [
-      'chords',
-      'practice',
-      'audioSettings',
-      'appearanceSettings',
-    ]) {
+    for (final tab in ['chords', 'practice', 'audioSettings', 'setlist']) {
       final rect = tester.getRect(find.byKey(Key('unifiedSection$tab')));
       expect(rect.left, greaterThanOrEqualTo(stripRect.left));
       expect(rect.right, lessThanOrEqualTo(stripRect.right));
     }
     expect(tester.takeException(), isNull);
-    // The setlist is reached through the "Mais" tab.
-    await tester.tap(find.byKey(const Key('unifiedSectionappearanceSettings')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('unifiedSectionsetlist')));
+    // The setlist is a tab of its own again.
     await tester.tap(find.byKey(const Key('unifiedSectionsetlist')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('unifiedSetlist')), findsOneWidget);

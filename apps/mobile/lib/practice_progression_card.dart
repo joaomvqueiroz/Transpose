@@ -271,7 +271,7 @@ class _PracticeProgressionCardState extends State<PracticeProgressionCard> {
                 ),
               ],
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 'Cada nova etapa faz uma breve pausa para ajustar a velocidade '
                 'e recomeçar em A. Retomar também volta a A. '
                 'A contagem não avalia a sua execução musical.',

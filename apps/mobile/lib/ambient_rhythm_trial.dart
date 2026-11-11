@@ -162,13 +162,15 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
     decoration: BoxDecoration(
       color: switch (widget.appearanceMode) {
         StudioAppearanceMode.light => const Color(0xFFF7F9FC),
-        StudioAppearanceMode.glass => const Color(0x99303943),
+        StudioAppearanceMode.glass => studioGlassToolFill(),
         StudioAppearanceMode.dark => const Color(0xFF202023),
       },
       border: Border.all(
-        color: widget.appearanceMode == StudioAppearanceMode.light
-            ? const Color(0xFFB7C4D2)
-            : const Color(0xFF4A4A50),
+        color: switch (widget.appearanceMode) {
+          StudioAppearanceMode.light => const Color(0xFFB7C4D2),
+          StudioAppearanceMode.glass => studioGlassToolBorder(),
+          StudioAppearanceMode.dark => const Color(0xFF4A4A50),
+        },
       ),
       borderRadius: BorderRadius.circular(24),
     ),

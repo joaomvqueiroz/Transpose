@@ -268,7 +268,9 @@ class PlayerChordSheet extends StatefulWidget {
 
 class PlayerChordSheetState extends State<PlayerChordSheet> {
   BoxDecoration get _sheetDecoration =>
-      widget.appearance.mode == StudioAppearanceMode.dark &&
+      // Inside the studio the frame around the sheet already is the card:
+      // a second card here doubled its border and darkened its glass.
+      widget.appearance.mode != StudioAppearanceMode.light &&
           widget.fixedDarkBackground
       ? BoxDecoration(
           color: Colors.transparent,
@@ -279,11 +281,14 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
   Color get _textSurfaceColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => Colors.white,
     StudioAppearanceMode.dark => const Color(0xFF151619),
-    StudioAppearanceMode.glass => const Color(0xAA303B4A),
+    // Glass themes: a darker well inside the card, in the card's own tone
+    // (the cards are dark glass now, lighter in the mixed themes).
+    StudioAppearanceMode.glass =>
+      studioGlassDarkPanels ? const Color(0x55090B0F) : const Color(0x66050608),
   };
   Color get _controlColor => switch (widget.appearance.mode) {
     StudioAppearanceMode.light => const Color(0xFFE8EEF4),
-    StudioAppearanceMode.glass => const Color(0xAA303841),
+    StudioAppearanceMode.glass => const Color(0x2EFFFFFF),
     StudioAppearanceMode.dark => const Color(0xFF303034),
   };
   Color get _accentColor => widget.appearance.mode == StudioAppearanceMode.light
@@ -317,9 +322,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     try {
       final saved = await SharedPreferencesAsync().getDouble(_textScaleKey);
       if (saved != null && mounted) {
-        setState(
-          () => _textScale = saved.clamp(_textScaleMin, _textScaleMax),
-        );
+        setState(() => _textScale = saved.clamp(_textScaleMin, _textScaleMax));
       }
     } on Object {
       // No preference store (tests): keep the default size.
@@ -338,14 +341,27 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
     }());
   }
 
-  ButtonStyle get _compactButton => IconButton.styleFrom(
-    backgroundColor: _controlColor,
-    minimumSize: const Size(30, 30),
-    fixedSize: const Size(30, 30),
-    padding: EdgeInsets.zero,
-    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    visualDensity: VisualDensity.compact,
-  );
+  ButtonStyle get _compactButton => studioSpotifySkin
+      // Spotify: outlined round buttons, as on its player.
+      ? IconButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          disabledForegroundColor: const Color(0x66FFFFFF),
+          side: const BorderSide(color: Color(0x99FFFFFF), width: 1.5),
+          shape: const CircleBorder(),
+          minimumSize: const Size(36, 36),
+          fixedSize: const Size(36, 36),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        )
+      : IconButton.styleFrom(
+          backgroundColor: _controlColor,
+          minimumSize: const Size(30, 30),
+          fixedSize: const Size(30, 30),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
+        );
 
   int get _displayPitch =>
       _sheet.transpose + (_sheet.followAudio ? widget.model.pitch.round() : 0);
@@ -619,10 +635,13 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                                 widget.appearance.mode ==
                                     StudioAppearanceMode.light
                                 ? Colors.black
+                                : studioSpotifySkin
+                                ? Colors.white
                                 : null,
                             fontWeight:
                                 widget.appearance.mode ==
-                                    StudioAppearanceMode.light
+                                        StudioAppearanceMode.light ||
+                                    studioSpotifySkin
                                 ? FontWeight.w700
                                 : null,
                           ),
@@ -644,12 +663,14 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
             children: [
               Row(
                 children: [
-                  Icon(
-                    Icons.library_music_outlined,
-                    color: _accentColor,
-                    size: 21,
-                  ),
-                  const SizedBox(width: 8),
+                  if (!studioSpotifySkin) ...[
+                    Icon(
+                      Icons.library_music_outlined,
+                      color: _accentColor,
+                      size: 21,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,48 +683,34 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                               : 'Minha cifra',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
+                          style: TextStyle(
+                            fontSize: studioSpotifySkin ? 22 : 16,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        if (_sheet.sourceUrl.isNotEmpty)
-                          SelectableText(
-                            'Fonte: ${Uri.tryParse(_sheet.sourceUrl)?.host ?? _sheet.sourceUrl}',
-                            key: const Key('playerChordSource'),
-                            maxLines: 1,
-                            style: TextStyle(color: _mutedColor, fontSize: 11),
-                          ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    key: const Key('playerChordPitchReset'),
-                    tooltip: 'Repor cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed: ready ? () => _saveTone(0, false) : null,
-                    icon: const Icon(Icons.restore, size: 20),
-                  ),
-                  IconButton(
-                    key: const Key('playerChordEdit'),
-                    tooltip: widget.onSearch == null
-                        ? 'Editar cifra'
-                        : 'Pesquisar outra cifra',
-                    style: IconButton.styleFrom(backgroundColor: _controlColor),
-                    onPressed: _loading ? null : widget.onSearch ?? choose,
-                    icon: Icon(
-                      widget.onSearch == null
-                          ? Icons.edit_outlined
-                          : Icons.search,
-                      size: 20,
+                  // No "repor" button (the tone steps back with −), and no
+                  // search here where the studio has its own "Trocar cifra".
+                  if (widget.onSearch == null)
+                    IconButton(
+                      key: const Key('playerChordEdit'),
+                      tooltip: 'Editar cifra',
+                      style: IconButton.styleFrom(
+                        backgroundColor: _controlColor,
+                      ),
+                      onPressed: _loading ? null : choose,
+                      icon: const Icon(Icons.edit_outlined, size: 20),
                     ),
-                  ),
                   if (widget.onHide != null)
                     IconButton(
                       key: const Key('playerChordHide'),
                       tooltip: 'Esconder cifra',
                       style: IconButton.styleFrom(
-                        backgroundColor: _controlColor,
+                        backgroundColor: studioSpotifySkin
+                            ? Colors.transparent
+                            : _controlColor,
                       ),
                       onPressed: widget.onHide,
                       visualDensity: VisualDensity.compact,
@@ -722,97 +729,146 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                 ),
               // One line: chord key and text size, small enough to fit; on a
               // very narrow screen the whole row scales down.
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Tom da cifra', style: TextStyle(fontSize: 12)),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    key: const Key('playerChordPitchDown'),
-                    tooltip: 'Diminuir tonalidade da cifra',
-                    style: _compactButton,
-                    iconSize: 16,
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch > -12
-                                : _sheet.transpose > -24)
-                        ? () => _changeTone(-1)
-                        : null,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    pitch == 0
-                        ? 'Original'
-                        : '${pitch > 0 ? '+' : ''}$pitch st',
-                    key: const Key('playerChordPitchValue'),
-                    style: TextStyle(
-                      color: _accentColor,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+              // The tone on the left, the text size against the right edge.
+              LayoutBuilder(
+                builder: (context, row) => FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: row.maxWidth),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!studioSpotifySkin) ...[
+                              const Text(
+                                'Tom da cifra',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            IconButton(
+                              key: const Key('playerChordPitchDown'),
+                              tooltip: 'Diminuir tonalidade da cifra',
+                              style: _compactButton,
+                              iconSize: 16,
+                              onPressed:
+                                  canChange &&
+                                      (_sheet.followAudio
+                                          ? widget.model.pitch > -12
+                                          : _sheet.transpose > -24)
+                                  ? () => _changeTone(-1)
+                                  : null,
+                              icon: const Icon(Icons.remove),
+                            ),
+                            SizedBox(width: studioSpotifySkin ? 8 : 4),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (studioSpotifySkin)
+                                  Text(
+                                    'TOM',
+                                    style: TextStyle(
+                                      color: _mutedColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: .9,
+                                    ),
+                                  ),
+                                Text(
+                                  pitch == 0
+                                      ? 'Original'
+                                      : '${pitch > 0 ? '+' : ''}$pitch st',
+                                  key: const Key('playerChordPitchValue'),
+                                  style: TextStyle(
+                                    color: studioSpotifySkin
+                                        ? Colors.white
+                                        : _accentColor,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: studioSpotifySkin ? 15 : 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(width: studioSpotifySkin ? 8 : 4),
+                            IconButton(
+                              key: const Key('playerChordPitchUp'),
+                              tooltip: 'Aumentar tonalidade da cifra',
+                              style: _compactButton,
+                              iconSize: 16,
+                              onPressed:
+                                  canChange &&
+                                      (_sheet.followAudio
+                                          ? widget.model.pitch < 12
+                                          : _sheet.transpose < 24)
+                                  ? () => _changeTone(1)
+                                  : null,
+                              icon: const Icon(Icons.add),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 10),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              key: const Key('playerChordTextSmaller'),
+                              tooltip: 'Diminuir letra da cifra',
+                              style: _compactButton,
+                              iconSize: 16,
+                              onPressed: _textScale > _textScaleMin + 0.01
+                                  ? () => _changeTextScale(-0.1)
+                                  : null,
+                              icon: studioSpotifySkin
+                                  ? const Text(
+                                      'A−',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    )
+                                  : const Icon(Icons.text_decrease),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${(_textScale * 100).round()}%',
+                              key: const Key('playerChordTextScale'),
+                              style: TextStyle(
+                                color: studioSpotifySkin
+                                    ? Colors.white
+                                    : _accentColor,
+                                fontWeight: FontWeight.w700,
+                                fontSize: studioSpotifySkin ? 14 : 12,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              key: const Key('playerChordTextLarger'),
+                              tooltip: 'Aumentar letra da cifra',
+                              style: _compactButton,
+                              iconSize: 16,
+                              onPressed: _textScale < _textScaleMax - 0.01
+                                  ? () => _changeTextScale(0.1)
+                                  : null,
+                              icon: studioSpotifySkin
+                                  ? const Text(
+                                      'A+',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    )
+                                  : const Icon(Icons.text_increase),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    key: const Key('playerChordPitchUp'),
-                    tooltip: 'Aumentar tonalidade da cifra',
-                    style: _compactButton,
-                    iconSize: 16,
-                    onPressed:
-                        canChange &&
-                            (_sheet.followAudio
-                                ? widget.model.pitch < 12
-                                : _sheet.transpose < 24)
-                        ? () => _changeTone(1)
-                        : null,
-                    icon: const Icon(Icons.add),
-                  ),
-                  const SizedBox(width: 10),
-                  const Text('Letra', style: TextStyle(fontSize: 12)),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    key: const Key('playerChordTextSmaller'),
-                    tooltip: 'Diminuir letra da cifra',
-                    style: _compactButton,
-                    iconSize: 16,
-                    onPressed: _textScale > _textScaleMin + 0.01
-                        ? () => _changeTextScale(-0.1)
-                        : null,
-                    icon: const Icon(Icons.text_decrease),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${(_textScale * 100).round()}%',
-                    key: const Key('playerChordTextScale'),
-                    style: TextStyle(
-                      color: _accentColor,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    key: const Key('playerChordTextLarger'),
-                    tooltip: 'Aumentar letra da cifra',
-                    style: _compactButton,
-                    iconSize: 16,
-                    onPressed: _textScale < _textScaleMax - 0.01
-                        ? () => _changeTextScale(0.1)
-                        : null,
-                    icon: const Icon(Icons.text_increase),
-                  ),
-                ],
                 ),
-              ),
-              Text(
-                _sheet.followAudio
-                    ? 'Acordes · acompanham o áudio'
-                    : 'Acordes · independente do áudio',
-                style: TextStyle(color: _mutedColor, fontSize: 11),
               ),
               const SizedBox(height: 8),
               if (_loading) const LinearProgressIndicator(),
@@ -866,9 +922,13 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                         color:
                             widget.appearance.mode == StudioAppearanceMode.light
                             ? Colors.black
+                            : studioSpotifySkin
+                            ? Colors.white
                             : null,
                         fontWeight:
-                            widget.appearance.mode == StudioAppearanceMode.light
+                            widget.appearance.mode ==
+                                    StudioAppearanceMode.light ||
+                                studioSpotifySkin
                             ? FontWeight.w700
                             : null,
                       ),
@@ -1028,7 +1088,7 @@ class _ChordChooserState extends State<_ChordChooser> {
                 ),
               ),
               if (!widget.sourceSelected)
-                const Text(
+                Text(
                   'Sem música selecionada, a cifra fica apenas nesta sessão.',
                   style: TextStyle(color: studioMuted, fontSize: 12),
                 ),

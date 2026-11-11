@@ -200,7 +200,7 @@ class _StagePanelState extends State<StagePanel> {
               ),
               child: Column(
                 children: [
-                  const Text(
+                  Text(
                     'TRANSPOSIÇÃO ATUAL',
                     style: TextStyle(color: studioMuted, letterSpacing: 1),
                   ),
@@ -283,10 +283,7 @@ class _StagePanelState extends State<StagePanel> {
             if (m.message != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  m.message!,
-                  style: const TextStyle(color: studioMuted),
-                ),
+                child: Text(m.message!, style: TextStyle(color: studioMuted)),
               ),
             const SizedBox(height: 12),
             Row(
@@ -336,7 +333,7 @@ class _StagePanelState extends State<StagePanel> {
               ],
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Trocar de música prepara os ajustes guardados e deixa a reprodução pausada.',
               style: TextStyle(fontSize: 12, color: studioMuted),
             ),

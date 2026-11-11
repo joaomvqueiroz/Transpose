@@ -39,6 +39,10 @@ class MainActivity : FlutterActivity() {
     // Picture-in-picture: while a YouTube video plays, leaving the app shows
     // it in the system's small window (the Dart side draws only the video).
     private var pipChannel: MethodChannel? = null
+
+    // The song in the background: its notification and lock-screen controls.
+    private var backgroundChannel: MethodChannel? = null
+    private var askedNotifications = false
     private var videoPlaying = false
 
     // The small window's own buttons (back 10 s, play or pause, forward
@@ -84,6 +88,36 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 } else {
                     result.notImplemented()
+                }
+            }
+        }
+        backgroundChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "transpono/background",
+        ).also { channel ->
+            BackgroundPlaybackService.listener = { action ->
+                runOnUiThread { backgroundChannel?.invokeMethod("action", action) }
+            }
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "update" -> {
+                        val args = call.arguments as? Map<*, *>
+                        val playing = args?.get("playing") == true
+                        if (playing) askForNotifications()
+                        BackgroundPlaybackService.update(
+                            applicationContext,
+                            args?.get("title") as? String ?: "",
+                            args?.get("artist") as? String ?: "",
+                            playing,
+                            (args?.get("position") as? Number)?.toLong() ?: 0L,
+                            (args?.get("duration") as? Number)?.toLong() ?: 0L,
+                        )
+                        result.success(null)
+                    }
+                    "stop" -> {
+                        BackgroundPlaybackService.stop(applicationContext)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
                 }
             }
         }
@@ -152,6 +186,10 @@ class MainActivity : FlutterActivity() {
         audioPlayer = null
         widgetChannel?.setMethodCallHandler(null)
         widgetChannel = null
+        backgroundChannel?.setMethodCallHandler(null)
+        backgroundChannel = null
+        BackgroundPlaybackService.listener = null
+        BackgroundPlaybackService.stop(applicationContext)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -160,6 +198,17 @@ class MainActivity : FlutterActivity() {
         qaPhoneRhythm?.cancel()
         stems?.cancelForLifecycle(stemMessenger)
         super.onPause()
+    }
+
+    // Android 13+: the notification needs the user's yes, asked once.
+    private fun askForNotifications() {
+        if (askedNotifications || Build.VERSION.SDK_INT < 33) return
+        askedNotifications = true
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4712)
+        }
     }
 
     @RequiresApi(26)
