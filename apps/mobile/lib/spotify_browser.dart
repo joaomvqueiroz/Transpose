@@ -184,8 +184,7 @@ const String _snapshotScript = '''
 /// bar gets the start-screen button beside its gear. Taps are counted; the
 /// app reads the counters.
 /// The start-screen button beside Spotify's gear, in the place of the
-/// site's "Abrir app" (hidden). Part of [_dressScript] and, on iPhone's
-/// Gecko engine, the whole of [_geckoDressScript]. Needs `S`, `icon`,
+/// site's "Abrir app" (hidden). Part of [_dressScript]; needs `S`, `icon`,
 /// `count`, `grid` and `home` in scope.
 const String _spotifyHomeButtonJs = r'''
   // "Abrir app" / "Open app": never shown; the start-screen button takes
@@ -215,28 +214,6 @@ const String _spotifyHomeButtonJs = r'''
     const box = button.getBoundingClientRect();
     home = box.bottom > 0 && box.top < window.innerHeight;
   }
-''';
-
-/// iPhone (Gecko): only the start-screen button beside the gear.
-const String _geckoDressScript = '''
-(() => {
-  const S = window.__transponoSp || (window.__transponoSp = {adjust: 0, home: 0});
-  const grid = '<path fill="currentColor" d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/>';
-  const icon = (host, path) => {
-    const svg = host.querySelector('svg');
-    if (!svg) return;
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.innerHTML = path;
-  };
-  const count = (element, key) => element.addEventListener('click', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    S[key] += 1;
-  }, true);
-  let home = false;
-$_spotifyHomeButtonJs
-  return JSON.stringify({home: S.home, hasHome: home});
-})()
 ''';
 
 const String _dressScript = '''
@@ -605,10 +582,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
 
   /// Spotify's own bars carry the studio's buttons; their taps come here.
   Future<void> _dressPage() async {
-    if (_gecko != null) {
-      await _dressGeckoPage();
-      return;
-    }
+    // The same on iPhone's Gecko engine as on Android.
     try {
       final values = _decodeMap(
         await _controller.runJavaScriptReturningResult(_dressScript),
@@ -632,26 +606,6 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
         }
         _adjustSeq = adjust.toInt();
       }
-      final Object? home = values['home'];
-      if (home is num) {
-        if (_homeSeq != null && home.toInt() != _homeSeq) {
-          pageHomeRequests.value++;
-        }
-        _homeSeq = home.toInt();
-      }
-    } on Object {
-      // No page yet; the next poll dresses it.
-    }
-  }
-
-  /// iPhone: the start-screen button beside the gear (and no "Abrir app").
-  Future<void> _dressGeckoPage() async {
-    try {
-      final values = _decodeMap(
-        await _controller.runJavaScriptReturningResult(_geckoDressScript),
-      );
-      if (_disposed || values == null) return;
-      pageDrawsHomeButton.value = values['hasHome'] == true;
       final Object? home = values['home'];
       if (home is num) {
         if (_homeSeq != null && home.toInt() != _homeSeq) {
@@ -788,8 +742,9 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       await platform.setMediaPlaybackRequiresUserGesture(false);
     }
     await _controller.setNavigationDelegate(_navigationDelegate());
-    if (_gecko == null) {
-      // The finger on the open player, passed on as it moves.
+    {
+      // The finger on the open player, passed on as it moves. On Gecko the
+      // relay extension provides window.TransponoSpotify.
       await _controller.addJavaScriptChannel(
         'TransponoSpotify',
         onMessageReceived: (JavaScriptMessage message) {

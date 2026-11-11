@@ -51,6 +51,12 @@
       send({type: 'channel', name: 'TransponoBridge', message: String(json)});
     },
   });
+  // Spotify's page buttons and the finger on its open player.
+  window.TransponoSpotify = Object.freeze({
+    postMessage(text) {
+      send({type: 'channel', name: 'TransponoSpotify', message: String(text)});
+    },
+  });
 
   try {
     port = browser.runtime.connectNative('transpono');
