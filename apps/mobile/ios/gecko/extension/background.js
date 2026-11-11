@@ -2,12 +2,13 @@
  *
  * Sets the cookies of the user's own Google sign-in, copied by the app from
  * Safari's engine (where Google lets them sign in) so that YouTube opens
- * signed in here too. Only Google and YouTube domains, only on request from
- * this extension's own relay content script.
+ * signed in here too. The same for the user's own Spotify sign-in. Only
+ * Google, YouTube and Spotify domains, only on request from this extension's
+ * own relay content script.
  */
 'use strict';
 
-const GOOGLE = /(^|\.)(youtube\.com|google\.(com|[a-z]{2}|com?\.[a-z]{2}))$/;
+const GOOGLE = /(^|\.)(youtube\.com|spotify\.com|google\.(com|[a-z]{2}|com?\.[a-z]{2}))$/;
 
 browser.runtime.onMessage.addListener(async (message, sender) => {
   if (!message || message.type !== 'setCookies' || sender.id !== browser.runtime.id) return;

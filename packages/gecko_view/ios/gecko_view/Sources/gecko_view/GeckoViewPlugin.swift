@@ -55,6 +55,12 @@ private enum GeckoBridge {
       of: #"(^|\.)google\.(com|[a-z]{2}|com?\.[a-z]{2})$"#, options: .regularExpression) != nil
   }
 
+  /// spotify.com, with or without subdomains.
+  static func isSpotifySession(_ domain: String) -> Bool {
+    let host = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+    return host == "spotify.com" || host.hasSuffix(".spotify.com")
+  }
+
   static func make(_ sink: @escaping EventSink) -> TransponoGeckoHost? {
     guard isRunning, let cls = bridgeClass as AnyObject? else { return nil }
     let selector = NSSelectorFromString("makeHostWithEventSink:")
@@ -96,7 +102,7 @@ public class GeckoViewPlugin: NSObject, FlutterPlugin {
       return
     }
     if call.method == "importWebKitSession" {
-      importWebKitSession(result)
+      importWebKitSession(spotify: (args["scope"] as? String) == "spotify", result)
       return
     }
     guard let id = (args["id"] as? NSNumber)?.intValue, let host = hosts[id] else {
@@ -173,10 +179,20 @@ public class GeckoViewPlugin: NSObject, FlutterPlugin {
   /// Google sign-in works in Safari's engine but not in Gecko without JIT:
   /// copy the Google/YouTube cookies of the default WebKit store (where the
   /// app's WKWebViews keep them) into Gecko. Result: how many were staged.
-  private func importWebKitSession(_ result: @escaping FlutterResult) {
+  ///
+  /// With `spotify`, the Spotify cookies instead (its sign-in check refuses
+  /// this engine too); nothing is staged unless the session cookie is there.
+  private func importWebKitSession(spotify: Bool, _ result: @escaping FlutterResult) {
     WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-      let list: [[String: Any]] = cookies
-        .filter { GeckoBridge.isGoogleSession($0.domain) }
+      let wanted = cookies.filter {
+        spotify
+          ? GeckoBridge.isSpotifySession($0.domain) : GeckoBridge.isGoogleSession($0.domain)
+      }
+      if spotify && !wanted.contains(where: { $0.name == "sp_dc" && !$0.value.isEmpty }) {
+        DispatchQueue.main.async { result(0) }
+        return
+      }
+      let list: [[String: Any]] = wanted
         .map { cookie in
           var item: [String: Any] = [
             "name": cookie.name,

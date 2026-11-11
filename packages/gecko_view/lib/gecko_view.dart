@@ -43,10 +43,17 @@ abstract final class GeckoEngine {
   /// into Gecko, where Google refuses to sign in without JIT. The cookies are
   /// set as soon as a Gecko page is open (now, or the next one) and that page
   /// reloads signed in. Returns how many cookies were handed over.
-  static Future<int> importWebKitSession({MethodChannel? channel}) async {
+  ///
+  /// With [scope] "spotify" it copies the Spotify sign-in instead (Spotify's
+  /// own sign-in check also refuses this engine); 0 when there is none.
+  static Future<int> importWebKitSession({
+    MethodChannel? channel,
+    String scope = 'google',
+  }) async {
     if (!_available) return 0;
     return await (channel ?? _channel).invokeMethod<int>(
           'importWebKitSession',
+          <String, Object?>{'scope': scope},
         ) ??
         0;
   }

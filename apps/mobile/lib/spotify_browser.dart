@@ -30,6 +30,15 @@ bool isSpotifyBrowserUri(Uri uri) {
       host == 'm.facebook.com';
 }
 
+/// Counts the times the Spotify page (on iPhone's Gecko engine) headed for
+/// Spotify's sign-in: that page refuses this engine, so the app opens the
+/// sign-in in Safari's engine instead (see `spotify_sign_in.dart`).
+final ValueNotifier<int> spotifySignInRequests = ValueNotifier<int>(0);
+
+/// Spotify's own sign-in pages.
+bool isSpotifySignInUri(Uri uri) =>
+    uri.scheme == 'https' && uri.host == 'accounts.spotify.com';
+
 /// The song the Spotify web player reports, from Media Session or the title.
 class SpotifyTrack {
   const SpotifyTrack({required this.title, this.artist = ''});
@@ -875,6 +884,12 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     NavigationDecision decide(NavigationRequest request) {
       if (!request.isMainFrame) return NavigationDecision.navigate;
       final Uri? uri = Uri.tryParse(request.url);
+      // On Gecko the sign-in happens in Safari's engine: Spotify's check
+      // answers "Ocorreu um problema" to this one.
+      if (_gecko != null && uri != null && isSpotifySignInUri(uri)) {
+        spotifySignInRequests.value++;
+        return NavigationDecision.prevent;
+      }
       // "Abrir app", spotify: links and other sites stay out of the player.
       return uri != null && isSpotifyBrowserUri(uri)
           ? NavigationDecision.navigate

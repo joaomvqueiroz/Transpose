@@ -6,8 +6,8 @@
     }
   },
   "name": "Transpono Gecko bridge",
-  "version": "1.4",
-  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube and SoundCloud, read the song title on Spotify and read chord sheets on Cifras.com.br. Can also copy the user’s own Google sign-in from Safari’s engine into this engine (cookies API, Google and YouTube only). No media is captured, fetched or exported.",
+  "version": "1.5",
+  "description": "Built-in: lets the Transpono app run its page-local practice scripts on YouTube and SoundCloud, read the song title on Spotify and read chord sheets on Cifras.com.br. Can also copy the user’s own Google and Spotify sign-ins from Safari’s engine into this engine (cookies API; Google, YouTube and Spotify only). No media is captured, fetched or exported.",
   "content_scripts": [
     {
       "matches": [
@@ -37,6 +37,7 @@
     "https://www.cifras.com.br/*",
     "cookies",
     "https://*.google.com/*",
+    "https://*.spotify.com/*",
     "https://*.google.pt/*"
   ],
   "content_security_policy": "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; object-src 'self'",

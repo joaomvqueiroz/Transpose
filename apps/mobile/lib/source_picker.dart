@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'google_sign_in_probe.dart';
+import 'spotify_sign_in.dart';
 import 'home_button_visibility.dart';
 import 'home_widget_bridge.dart';
 import 'premium_branding.dart';
@@ -51,6 +52,7 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     super.initState();
     widgetSourceRequest.addListener(_widgetSource);
     pageHomeRequests.addListener(_pageHome);
+    spotifySignInRequests.addListener(_spotifySignIn);
     unawaited(HomeWidgetBridge.listenForSources());
   }
 
@@ -58,7 +60,26 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   void dispose() {
     widgetSourceRequest.removeListener(_widgetSource);
     pageHomeRequests.removeListener(_pageHome);
+    spotifySignInRequests.removeListener(_spotifySignIn);
     super.dispose();
+  }
+
+  bool _spotifySigningIn = false;
+
+  /// iPhone: the Spotify page asked to sign in. That happens in Safari's
+  /// engine; the session then passes to the page by itself, which reloads.
+  Future<void> _spotifySignIn() async {
+    if (!mounted || _spotifySigningIn || _source != ListeningSource.spotify) {
+      return;
+    }
+    _spotifySigningIn = true;
+    try {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(builder: (_) => const SpotifySignInPage()),
+      );
+    } finally {
+      _spotifySigningIn = false;
+    }
   }
 
   /// The start-screen icon the page draws in its top bar was tapped.

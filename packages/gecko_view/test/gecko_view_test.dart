@@ -34,6 +34,9 @@ void main() {
     reply = (call) => call.method == 'importWebKitSession' ? 12 : null;
     expect(await GeckoEngine.importWebKitSession(), 12);
     expect(calls.single.method, 'importWebKitSession');
+    expect(calls.single.arguments, {'scope': 'google'});
+    await GeckoEngine.importWebKitSession(scope: 'spotify');
+    expect(calls.last.arguments, {'scope': 'spotify'});
     GeckoEngine.debugSetAvailable(false);
   });
 
