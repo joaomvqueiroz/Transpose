@@ -68,9 +68,10 @@ abstract final class GlassBar {
     String selected = '',
     String avatar = '',
     bool dark = true,
+    bool music = false,
   }) {
     if (!nativeGlassBar.value) return;
-    final String state = '$visible|$selected|$avatar|$dark';
+    final String state = '$visible|$selected|$avatar|$dark|$music';
     if (state == _sent) return;
     _sent = state;
     unawaited(
@@ -80,6 +81,9 @@ abstract final class GlassBar {
             'selected': selected,
             'avatar': avatar,
             'dark': dark,
+            // YouTube Music: the second and fourth buttons are "explore"
+            // and the library (still named "shorts" and "you" on the wire).
+            'music': music,
           })
           .catchError((Object _) {}),
     );

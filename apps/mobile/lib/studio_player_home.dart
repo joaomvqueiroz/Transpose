@@ -2663,7 +2663,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             final browse = _browse;
             // YouTube Music has no bottom bar on a phone: the app draws one.
             if (bars?.music == true && browse != null) {
-              if (bars!.hidden) return const SizedBox.shrink();
+              // iPhone: the glass bar floats over the page instead.
+              if (bars!.hidden || nativeGlassBar.value) {
+                return const SizedBox.shrink();
+              }
               return _MusicBottomBar(
                 current: bars.tab,
                 onTab: (name) => unawaited(browse.openTab(name)),
@@ -5321,7 +5324,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       // Two pages with a video open: the bottom bar (it has
                       // the adjustments button) instead of the wide
                       // "Abrir ajustes".
-                      if (_playerBarShown && _musicSource)
+                      if (_playerBarShown &&
+                          _musicSource &&
+                          !nativeGlassBar.value)
                         Positioned(
                           left: 0,
                           right: 0,
@@ -5348,7 +5353,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         )
                       else if (_playerBarShown) ...[
                         if (nativeGlassBar.value)
-                          _GlassBarHost(playerPage: true, onTap: _playerBarTap)
+                          _GlassBarHost(
+                            playerPage: true,
+                            music: _musicSource,
+                            onTap: _playerBarTap,
+                          )
                         else
                           Positioned(
                             left: 0,
@@ -5449,7 +5458,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
 /// it shows while the site's bottom bar would (or on the Shorts page) and
 /// leaves with this page.
 class _GlassBarHost extends StatefulWidget {
-  const _GlassBarHost({required this.onTap, this.playerPage = false});
+  const _GlassBarHost({
+    required this.onTap,
+    this.playerPage = false,
+    this.music,
+  });
+
+  /// YouTube Music's bar (home, explore, adjustments, library). Null: as the
+  /// page being browsed says.
+  final bool? music;
 
   final void Function(String name) onTap;
 
@@ -5479,7 +5496,19 @@ class _GlassBarHostState extends State<_GlassBarHost> {
     _sync();
   }
 
-  void _tap(String name) => widget.onTap(name);
+  bool get _music => widget.music ?? pageYouTubeBars.value?.music ?? false;
+
+  /// The native bar names its buttons as on YouTube; on YouTube Music the
+  /// second is "explore" and the fourth the library.
+  void _tap(String name) => widget.onTap(
+    !_music
+        ? name
+        : switch (name) {
+            'shorts' => 'explore',
+            'you' => 'library',
+            _ => name,
+          },
+  );
 
   Future<Uint8List> _png(Path shape) async {
     final recorder = ui.PictureRecorder();
@@ -5510,10 +5539,17 @@ class _GlassBarHostState extends State<_GlassBarHost> {
                 !pageScrolledDown.value
           : bars != null &&
                 !bars.hidden &&
-                (bars.pivot != null || bars.shorts) &&
+                (bars.pivot != null || bars.shorts || bars.music) &&
                 !pictureInPictureShown.value &&
                 !pageInputFocused.value,
-      selected: widget.playerPage ? '' : bars?.tab ?? '',
+      music: _music,
+      selected: widget.playerPage
+          ? ''
+          : switch (bars?.tab ?? '') {
+              'explore' => 'shorts',
+              'library' => 'you',
+              final String tab => tab,
+            },
       avatar: bars?.avatar ?? '',
       dark: bars?.dark ?? true,
     );

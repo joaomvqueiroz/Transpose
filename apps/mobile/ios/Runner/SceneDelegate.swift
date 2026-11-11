@@ -48,6 +48,7 @@ final class TransponoGlassBar: NSObject {
   private var avatar: UIImage?
   private var avatarURL = ""
   private var selected = ""
+  private var music = false
   private var shown = false
 
   init(window: UIWindow, messenger: FlutterBinaryMessenger) {
@@ -94,6 +95,7 @@ final class TransponoGlassBar: NSObject {
     window.bringSubviewToFront(bar)
     bar.overrideUserInterfaceStyle = (state["dark"] as? Bool ?? true) ? .dark : .light
     selected = state["selected"] as? String ?? ""
+    music = state["music"] as? Bool ?? false
     let url = state["avatar"] as? String ?? ""
     if url != avatarURL {
       avatarURL = url
@@ -167,10 +169,19 @@ final class TransponoGlassBar: NSObject {
   private func refreshIcons() {
     guard !buttons.isEmpty else { return }
     buttons["home"]?.setImage(symbol(selected == "home" ? "house.fill" : "house"), for: .normal)
-    let reel = shorts[selected == "shorts" ? "shortsFilled" : "shortsOutline"]
-    buttons["shorts"]?.setImage(reel ?? symbol("play.square.stack"), for: .normal)
     buttons["adjust"]?.setImage(symbol("slider.horizontal.3"), for: .normal)
-    buttons["you"]?.setImage(avatar ?? symbol("person.crop.circle"), for: .normal)
+    if music {
+      // YouTube Music: explore and the library in the same two places.
+      buttons["shorts"]?.setImage(
+        symbol(selected == "shorts" ? "safari.fill" : "safari"), for: .normal)
+      buttons["you"]?.setImage(
+        symbol(selected == "you" ? "music.note.square.stack.fill" : "music.note.square.stack"),
+        for: .normal)
+    } else {
+      let reel = shorts[selected == "shorts" ? "shortsFilled" : "shortsOutline"]
+      buttons["shorts"]?.setImage(reel ?? symbol("play.square.stack"), for: .normal)
+      buttons["you"]?.setImage(avatar ?? symbol("person.crop.circle"), for: .normal)
+    }
     for (name, button) in buttons {
       button.backgroundColor =
         name == selected ? UIColor.label.withAlphaComponent(0.16) : .clear
