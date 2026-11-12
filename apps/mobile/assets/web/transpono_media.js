@@ -952,6 +952,79 @@
     setInterval(hideAppPrompts, 1000);
     hideAppPrompts();
   }
+  // Presses YouTube's own «Ignorar» / «Skip» button as soon as YouTube
+  // shows it, on youtube.com and music.youtube.com alike.
+  // Terms-of-service boundary: this only does what the user could do with
+  // one tap on the button YouTube itself offers. It never blocks, hides,
+  // mutes, seeks or speeds up an ad, and never touches playbackRate or
+  // currentTime; an ad without a skip button plays normally to its end.
+  if (/(^|\.)youtube\.com$/i.test(window.location.hostname) &&
+      !window.__transponoAdSkip) {
+    window.__transponoAdSkip = true;
+    const skipSelectors = '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, ' +
+      '.ytp-skip-ad-button, .ytp-ad-skip-button-container button';
+    const skipText = /^\s*(Ignorar|Skip)/i;
+    const shown = el => {
+      if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' &&
+        Number(style.opacity || '1') > 0.05;
+    };
+    const findSkip = () => {
+      for (const el of document.querySelectorAll(skipSelectors)) {
+        if (shown(el)) return el;
+      }
+      // Only inside an ad: a plain «Skip»-labelled button elsewhere on the
+      // page is not YouTube's ad button.
+      if (!document.querySelector('.ad-showing, .ad-interrupting')) return null;
+      const player = document.querySelector('#movie_player, .html5-video-player') || document;
+      for (const el of player.querySelectorAll('button')) {
+        if (skipText.test(el.textContent || '') && shown(el)) return el;
+      }
+      return null;
+    };
+    let lastSkip = 0;
+    const pressSkip = () => {
+      const button = findSkip();
+      if (!button) return;
+      const now = Date.now();
+      if (now - lastSkip < 400) return;
+      lastSkip = now;
+      // A real tap's sequence, then click(): the button reacts to either.
+      const opts = { bubbles: true, cancelable: true, view: window };
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        try {
+          const Ctor = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
+          button.dispatchEvent(new Ctor(type, opts));
+        } catch (_) {}
+      }
+      try { button.click(); } catch (_) {}
+    };
+    let skipQueued = false;
+    const queueSkip = () => {
+      if (skipQueued) return;
+      skipQueued = true;
+      setTimeout(() => { skipQueued = false; pressSkip(); }, 50);
+    };
+    const startSkipWatch = () => {
+      const root = document.documentElement;
+      if (!root) return;
+      try {
+        new MutationObserver(queueSkip).observe(root, {
+          subtree: true, childList: true, attributes: true,
+          attributeFilter: ['class', 'style', 'disabled', 'aria-disabled'],
+        });
+      } catch (_) {}
+      // A light backstop for changes the observer misses (e.g. opacity
+      // animations that end without an attribute change).
+      setInterval(pressSkip, 500);
+      pressSkip();
+    };
+    if (document.documentElement) startSkipWatch();
+    else document.addEventListener('DOMContentLoaded', startSkipWatch, { once: true });
+  }
   // The notification's next / previous on YouTube Music.
   window.__transponoMusicSkip = forward => {
     const bar = document.querySelector('ytmusic-player-bar');
