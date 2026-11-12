@@ -988,6 +988,7 @@
     let lastSkip = 0;
     const pressSkip = () => {
       const button = findSkip();
+      window.__transponoAdSkipVisible = !!button;
       if (!button) return;
       const now = Date.now();
       if (now - lastSkip < 400) return;
@@ -2400,6 +2401,9 @@
         (loopB === null || loopB < durationOf(video)),
       playbackReady: playbackReady(),
       isAd,
+      // YouTube shows its own «Ignorar» / «Skip» on this ad (see the
+      // ad-skip watcher above); the app only reports it.
+      adSkippable: isAd && window.__transponoAdSkipVisible === true,
       ...(probeEnabled ? {probe: probeSnapshot()} : {}),
     };
   }

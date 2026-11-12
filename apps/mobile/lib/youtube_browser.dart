@@ -222,6 +222,7 @@ class YouTubeMediaState {
     this.loopB,
     this.loopEnabled = false,
     this.isAd = false,
+    this.adSkippable = false,
     this.loopCount = 0,
     this.loopEpoch = 0,
     this.loopEventsSupported = false,
@@ -286,6 +287,7 @@ class YouTubeMediaState {
       loopB: number('loopB'),
       loopEnabled: json['loopEnabled'] == true,
       isAd: json['isAd'] == true,
+      adSkippable: json['isAd'] == true && json['adSkippable'] == true,
       loopCount: loopCount ?? 0,
       loopEpoch: loopEpoch ?? 0,
       loopEventsSupported:
@@ -324,6 +326,7 @@ class YouTubeMediaState {
     loopB: loopB,
     loopEnabled: loopEnabled,
     isAd: isAd,
+    adSkippable: adSkippable,
     loopCount: loopCount,
     loopEpoch: loopEpoch,
     loopEventsSupported: loopEventsSupported,
@@ -336,6 +339,10 @@ class YouTubeMediaState {
 
   final String videoId, title, pitchStatus, pitchMessage;
   final bool hasVideo, playing, muted, loopEnabled, isAd;
+
+  /// During an ad, YouTube shows its own «Ignorar» / «Skip» button (which
+  /// the page script presses); unskippable ads play normally.
+  final bool adSkippable;
   final bool loopEventsSupported, playbackReady;
   final int loopCount, loopEpoch;
   final double position, duration, speed, pitch;

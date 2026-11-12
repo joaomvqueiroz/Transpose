@@ -5592,9 +5592,57 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             ),
                           ),
                         ),
+                      _adPill(),
                     ],
                   ),
                 ),
+        ),
+      ),
+    );
+  }
+
+  /// While the YouTube being heard plays an ad (also the hidden one behind
+  /// Spotify), a small pill says so: the player has not frozen. Only a
+  /// label: the ad itself is never muted, hidden or skipped from here (the
+  /// page presses YouTube's own «Ignorar» when YouTube offers it).
+  Widget _adPill() {
+    final YouTubeBrowserSession? session = _player.youtube;
+    if (session == null) return const SizedBox.shrink();
+    return Positioned(
+      top: 8,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: ListenableBuilder(
+          listenable: session,
+          builder: (context, _) {
+            final YouTubeMediaState media = session.media;
+            if (!media.isAd) return const SizedBox.shrink();
+            return Center(
+              child: Container(
+                key: const Key('studioAdPill'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xE6212121),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: const Color(0x33FFFFFF)),
+                ),
+                child: Text(
+                  media.adSkippable
+                      ? 'Publicidade em curso · a saltar…'
+                      : 'Publicidade em curso…',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
