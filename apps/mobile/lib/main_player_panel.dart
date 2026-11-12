@@ -1279,10 +1279,11 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Wrap(
+            alignment: WrapAlignment.center,
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final v in const [-2, -1, 0, 1, 2])
+              for (final v in const [-3, -2, -1, 0, 1, 2, 3])
                 _youtubeChip(
                   Key('youtubePitchQuick$v'),
                   v == 0 ? 'Original' : (v > 0 ? '+$v' : '$v'),
