@@ -715,7 +715,7 @@ class _TunerGaugePainter extends CustomPainter {
               ? studioSpotifySkin
                     ? (studioYouTubeSkin
                           ? const Color(0xFFFF0033)
-                          : const Color(0xFF1ED760))
+                          : skinGreen)
                     : Color.lerp(Colors.white, const Color(0xFF4ADE80), green)!
               : studioSpotifySkin
               ? const Color(0x66FFFFFF)

@@ -147,6 +147,21 @@ bool studioSpotifySource = false;
 /// Spotify), whatever the theme.
 bool studioMusicSource = false;
 
+/// YouTube and YouTube Music in "Nativo": their adjustments are Spotify's
+/// own panel (the flat Spotify look of [studioSpotifySkin], coming up from
+/// under the player), in YouTube's red where Spotify has its green.
+bool studioRedAccent = false;
+
+/// The red YouTube uses for its own accents.
+const Color youtubeRed = Color(0xFFFF0033);
+
+/// Spotify's green, or YouTube's red with [studioRedAccent].
+Color get skinGreen => studioRedAccent ? youtubeRed : spotifyGreen;
+
+/// Text and icons over [skinGreen]: black on Spotify's green, white on
+/// YouTube's red.
+Color get skinGreenInk => studioRedAccent ? Colors.white : Colors.black;
+
 /// The skins' palette: Spotify's, or the YouTube app's.
 Color get skinChip =>
     studioYouTubeSkin ? const Color(0xFF272727) : const Color(0x1AFFFFFF);
@@ -155,9 +170,9 @@ Color get skinChipOn =>
 Color get skinChipOnInk =>
     studioYouTubeSkin ? const Color(0xFF0F0F0F) : const Color(0xFF000000);
 Color get skinAccent =>
-    studioYouTubeSkin ? const Color(0xFFFF0033) : spotifyGreen;
+    studioYouTubeSkin ? const Color(0xFFFF0033) : skinGreen;
 Color get skinSwitch =>
-    studioYouTubeSkin ? const Color(0xFF3EA6FF) : spotifyGreen;
+    studioYouTubeSkin ? const Color(0xFF3EA6FF) : skinGreen;
 Color get skinSubdued =>
     studioYouTubeSkin ? const Color(0xFFAAAAAA) : const Color(0xBFFFFFFF);
 Color get skinCard => studioYouTubeSkin ? const Color(0x00000000) : spotifyCard;
