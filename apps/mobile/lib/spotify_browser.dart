@@ -9,6 +9,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'home_button_visibility.dart';
+import 'spotify_desktop_library.dart';
 import 'spotify_library.dart';
 import 'spotify_library_view.dart';
 import 'studio_appearance.dart';
@@ -969,6 +970,36 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     }
   }
 
+  /// The library experiment (iPhone, Safari's engine; see
+  /// [spotifyDesktopLibraryExperiment]): «Sua Biblioteca» shows Spotify's
+  /// desktop library beside the app's own.
+  bool get _desktopLibrary =>
+      spotifyDesktopLibraryExperiment &&
+      _gecko == null &&
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// A tap in the desktop library: the item opens here, in the mobile page;
+  /// a song, album or playlist also starts playing (as from the app's own
+  /// library), and the app follows it with YouTube.
+  Future<void> openLibraryLink(String url) async {
+    final canonical = canonicalSpotifyItemUrl(url);
+    if (canonical == null || _disposed) return;
+    final Uri uri = Uri.parse(canonical.url);
+    closeLibrary();
+    final SpotifyLibraryKind kind = canonical.kind;
+    final bool play =
+        kind == SpotifyLibraryKind.track ||
+        kind == SpotifyLibraryKind.album ||
+        kind == SpotifyLibraryKind.playlist;
+    _playOpenedPath = play ? uri.path : null;
+    _playOpenedTicks = 0;
+    try {
+      await _controller.loadRequest(uri);
+    } on Object {
+      _playOpenedPath = null;
+    }
+  }
+
   /// One step of pressing play on a song opened from the library.
   Future<void> _playOpened() async {
     final String? path = _playOpenedPath;
@@ -1660,13 +1691,21 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
           builder: (BuildContext context, Widget? _) {
             final bool shown = libraryShown.value && !spotifyPlayerOpen.value;
             if (!shown) return const SizedBox.shrink();
+            final Widget own = SpotifyLibraryView(
+              store: libraryStore,
+              onOpen: (SpotifyLibraryItem item) =>
+                  unawaited(openLibraryItem(item)),
+            );
             return Padding(
               padding: EdgeInsets.only(bottom: _libraryInset.value),
-              child: SpotifyLibraryView(
-                store: libraryStore,
-                onOpen: (SpotifyLibraryItem item) =>
-                    unawaited(openLibraryItem(item)),
-              ),
+              child: _desktopLibrary
+                  ? SpotifyLibraryScreen(
+                      key: const Key('spotifyLibraryScreen'),
+                      transpono: own,
+                      onOpenLink: (String url) =>
+                          unawaited(openLibraryLink(url)),
+                    )
+                  : own,
             );
           },
         ),
