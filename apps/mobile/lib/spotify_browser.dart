@@ -9,6 +9,8 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'home_button_visibility.dart';
+import 'spotify_library.dart';
+import 'spotify_library_view.dart';
 import 'studio_appearance.dart';
 import 'youtube_browser.dart';
 import 'youtube_search.dart';
@@ -269,8 +271,9 @@ const String _spotifyIosDressJs = r'''
     }
     if (nav) {
       // Which tab is open, from the page's address (Spotify's own marks are
-      // not stable): its link turns white.
-      const path = location.pathname;
+      // not stable): its link turns white. With the app's library open over
+      // the page, «Sua Biblioteca» is the open one.
+      const path = window.__transponoLibOpen === true ? '/collection' : location.pathname;
       for (const link of nav.querySelectorAll('a')) {
         const href = link.dataset.transpono ? '' : (link.getAttribute('href') || '');
         let on = false;
@@ -285,6 +288,224 @@ const String _spotifyIosDressJs = r'''
         }
       }
     }
+  }
+''';
+
+/// Transpono's own library (spotify_library.dart): Spotify's mobile page
+/// has none («Baixar app»). Part of [_dressScript]; needs `nav` in scope and
+/// sets `onCollection` and `libBottom` for its answer.
+/// - One click listener for the whole document (capture phase, nothing
+///   stopped) sees the user's own taps on «Seguir» / «Follow», the heart
+///   («Adicionar às Músicas Curtidas») and «Salvar na Sua Biblioteca» /
+///   «Save to Your Library», and their undoing («Seguindo», «A seguir»,
+///   «Remover da …»). Buttons are known by aria-label, text and
+///   data-testid, in Portuguese and English. The item is read from the row
+///   the button sits in, from the open player, from the menu's own row (a
+///   «⋯» menu) or from the page itself, and goes to the app as
+///   `lib:{"action":"add"|"remove",kind,name,subtitle,url,image}`.
+/// - The «Sua Biblioteca» / «Your Library» tab opens the app's library
+///   (`libopen`) instead of Spotify's page; the other tabs close it
+///   (`libclose`).
+const String _spotifyLibraryJs = r'''
+  if (!window.__transponoLibHook) {
+    window.__transponoLibHook = true;
+    const post = (text) => {
+      try { if (window.TransponoSpotify) window.TransponoSpotify.postMessage(text); } catch (_) {}
+    };
+    const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+    const KIND = /^\/(?:intl-[a-z-]+\/)?(artist|track|album|playlist|show|episode)\/([A-Za-z0-9]+)/i;
+    const kindOf = (href) => {
+      try {
+        const m = new URL(href || '', location.href).pathname.match(KIND);
+        if (!m) return null;
+        const kind = m[1].toLowerCase();
+        return {kind: kind, url: 'https://open.spotify.com/' + kind + '/' + m[2]};
+      } catch (_) { return null; }
+    };
+    const imgOf = (root) => {
+      if (!root || !root.querySelector) return '';
+      for (const i of root.querySelectorAll('img')) {
+        const s = i.currentSrc || i.src || '';
+        if (/^https:/.test(s)) return s;
+      }
+      return '';
+    };
+    const meta = (p) => {
+      const e = document.querySelector('meta[property="' + p + '"]');
+      return e ? (e.getAttribute('content') || '') : '';
+    };
+    const ROWS = '[data-testid="tracklist-row"],[role="row"],[data-testid="list-row"],' +
+      '[data-encore-id="listRow"],[data-encore-id="card"],[data-testid="card"],[role="listitem"],li';
+    const PLAYER = '[data-testid="npv-container"],[data-testid="floating-now-playing-bar"],' +
+      '[data-testid="now-playing-widget"],[data-testid="now-playing-bar"]';
+    const MENU = '[role="menu"],[role="dialog"],[data-testid="context-menu"],#context-menu';
+    // An item from the links inside [root] (a list row, a card, a menu's
+    // own header): the first non-artist link is the item, artist links
+    // are its subtitle; only artist links: it is an artist.
+    const fromLinks = (root) => {
+      if (!root || !root.querySelectorAll) return null;
+      const links = [...root.querySelectorAll('a[href]')];
+      let main = null;
+      for (const a of links) {
+        const k = kindOf(a.getAttribute('href'));
+        if (k && k.kind !== 'artist') { main = {a: a, k: k}; break; }
+      }
+      if (!main) {
+        for (const a of links) {
+          const k = kindOf(a.getAttribute('href'));
+          if (k) { main = {a: a, k: k}; break; }
+        }
+      }
+      if (!main) return null;
+      let name = clean(main.a.textContent) || clean(main.a.getAttribute('aria-label')) ||
+        clean(main.a.getAttribute('title'));
+      if (!name) {
+        // The link may hold only the cover: the row's first line of text.
+        for (const a of links) {
+          const k = kindOf(a.getAttribute('href'));
+          if (k && k.url === main.k.url && clean(a.textContent)) { name = clean(a.textContent); break; }
+        }
+      }
+      if (!name) {
+        const img = main.a.querySelector('img');
+        name = clean(img && img.getAttribute('alt'));
+      }
+      const artists = [];
+      for (const a of links) {
+        if (a === main.a) continue;
+        const k = kindOf(a.getAttribute('href'));
+        const text = clean(a.textContent);
+        if (k && k.kind === 'artist' && k.url !== main.k.url && text && artists.indexOf(text) < 0) artists.push(text);
+      }
+      return {kind: main.k.kind, url: main.k.url, name: name, subtitle: artists.join(', '), image: imgOf(root)};
+    };
+    // The page's own item (an artist's, album's or playlist's page).
+    const fromPage = () => {
+      const k = kindOf(location.pathname);
+      if (!k) return null;
+      const h1 = document.querySelector('main h1') || document.querySelector('h1');
+      const name = clean(h1 && h1.textContent) || clean(meta('og:title'));
+      let head = h1;
+      for (let i = 0; head && i < 4 && head.parentElement; i++) head = head.parentElement;
+      let image = '';
+      for (let e = h1, i = 0; e && i < 7 && !image; e = e.parentElement, i++) image = imgOf(e);
+      if (!image && /^https:/.test(meta('og:image'))) image = meta('og:image');
+      let subtitle = '';
+      if (head && k.kind !== 'artist') {
+        const found = [];
+        const by = k.kind === 'playlist' ? 'a[href*="/user/"], a[href*="/artist/"]' : 'a[href*="/artist/"], a[href*="/show/"]';
+        for (const a of head.querySelectorAll(by)) {
+          const text = clean(a.textContent);
+          if (text && found.indexOf(text) < 0) found.push(text);
+          if (found.length >= 3) break;
+        }
+        subtitle = found.join(', ');
+      }
+      return name ? {kind: k.kind, url: k.url, name: name, subtitle: subtitle, image: image} : null;
+    };
+    // The song playing now (the open player or the floating bar).
+    const fromPlayer = (box) => {
+      const linked = fromLinks(box);
+      if (linked && linked.kind === 'track') return linked;
+      const m = navigator.mediaSession && navigator.mediaSession.metadata;
+      let name = clean(m && m.title);
+      let subtitle = clean(m && m.artist);
+      if (!name) {
+        const lines = [...box.querySelectorAll('span')].map(e => clean(e.textContent)).filter(Boolean);
+        name = lines[0] || '';
+        subtitle = lines[1] || '';
+      }
+      if (!name) {
+        const parts = (document.title || '').split(' • ');
+        if (parts.length >= 2) { name = clean(parts[0]); subtitle = clean(parts.slice(1).join(', ')); }
+      }
+      let image = '';
+      if (m && m.artwork && m.artwork.length) image = m.artwork[m.artwork.length - 1].src || '';
+      if (!/^https:/.test(image)) image = imgOf(box);
+      return name ? {kind: 'track', url: '', name: name, subtitle: subtitle, image: image} : null;
+    };
+    const itemFor = (el) => {
+      const box = el.closest(PLAYER);
+      if (box) return fromPlayer(box);
+      const row = el.closest(ROWS);
+      return (row && fromLinks(row)) || fromPage();
+    };
+    const LIB = '(biblioteca|library|curtidas|liked|gost)';
+    const ADD = new RegExp('^(salvar|guardar|adicionar|save|add)\\b.*' + LIB, 'i');
+    const REMOVE = new RegExp('^(remover|retirar|eliminar|excluir|remove|delete)\\b.*' + LIB, 'i');
+    // Whole labels only: a song called «Follow You» is not a button.
+    const WHAT = '( (o |a )?(artista|artist|playlist|podcast|programa|show))?$';
+    const FOLLOW = new RegExp('^(seguir|follow|curtir|like)' + WHAT, 'i');
+    const UNFOLLOW = new RegExp('^(seguindo|a seguir|following|deixar de seguir|unfollow|descurtir|unlike)' + WHAT, 'i');
+    const TESTIDS = /^(add-button|heart-button|like-button|save-button|follow-button)$/;
+    // 'add', 'remove' or '' (not a library button): what the tap does now,
+    // before the page turns the button over.
+    const classify = (el) => {
+      const state = el.getAttribute('aria-checked') || el.getAttribute('aria-pressed') || '';
+      for (const s of [clean(el.getAttribute('aria-label')), clean(el.textContent)]) {
+        if (!s || s.length > 60) continue;
+        if (REMOVE.test(s) || UNFOLLOW.test(s)) return 'remove';
+        if (ADD.test(s) || FOLLOW.test(s)) return state === 'true' ? 'remove' : 'add';
+      }
+      if (TESTIDS.test(el.getAttribute('data-testid') || '') && (state === 'true' || state === 'false')) {
+        return state === 'true' ? 'remove' : 'add';
+      }
+      return '';
+    };
+    const LIBRARY_TAB = /^(sua|tua|a tua|your)?\s*biblioteca$|^your library$/i;
+    document.addEventListener('click', (event) => {
+      const t = event.target;
+      if (!t || !t.closest) return;
+      const tab = t.closest('[data-testid="bottom-tab-navigation"] a');
+      if (tab) {
+        if (tab.dataset.transpono) return;
+        let path = '';
+        try { path = new URL(tab.getAttribute('href') || '', location.href).pathname; } catch (_) {}
+        const words = clean(tab.getAttribute('aria-label')) || clean(tab.textContent);
+        if (/^\/(intl-[a-z-]+\/)?collection(\/|$)/.test(path) || LIBRARY_TAB.test(words)) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.__transponoLibOpen = true;
+          post('libopen');
+        } else if (window.__transponoLibOpen) {
+          window.__transponoLibOpen = false;
+          post('libclose');
+        }
+        return;
+      }
+      const more = t.closest('[data-testid="more-button"],button[aria-haspopup="menu"],' +
+        'button[aria-label^="Mais opções"],button[aria-label^="More options"]');
+      if (more && !more.closest(MENU)) {
+        window.__transponoLibCtx = {item: itemFor(more), at: Date.now()};
+        return;
+      }
+      const el = t.closest('button,[role="button"],[role="menuitem"],[role="menuitemcheckbox"],[role="switch"]');
+      if (!el) return;
+      const action = classify(el);
+      if (!action) return;
+      let item = null;
+      const menu = el.closest(MENU);
+      if (menu) {
+        const ctx = window.__transponoLibCtx;
+        if (ctx && ctx.item && Date.now() - ctx.at < 60000) item = ctx.item;
+        if (!item) item = fromLinks(menu) || fromPage();
+        window.__transponoLibCtx = null;
+      }
+      if (!item) item = itemFor(el);
+      if (!item || !item.name) return;
+      post('lib:' + JSON.stringify({action: action, kind: item.kind, name: item.name,
+        subtitle: item.subtitle || '', url: item.url || '', image: item.image || ''}));
+    }, true);
+  }
+  const onCollection = /^\/(intl-[a-z-]+\/)?collection(\/|$)/.test(location.pathname);
+  // How much of the page's bottom (the tabs and the floating song bar)
+  // stays in sight under the app's library.
+  let libBottom = 0;
+  if (nav) libBottom = Math.max(0, innerHeight - nav.getBoundingClientRect().top);
+  const floatBar = document.querySelector('[data-testid="floating-now-playing-bar"]');
+  if (floatBar) {
+    const r = floatBar.getBoundingClientRect();
+    if (r.height > 0 && r.top < innerHeight) libBottom = Math.max(libBottom, innerHeight - r.top);
   }
 ''';
 
@@ -375,6 +596,7 @@ const String _dressScript = '''
   if (share) adjust = true;
   let home = false;
 $_spotifyHomeButtonJs
+$_spotifyLibraryJs
 $_spotifyIosDressJs
   // Over the open player (song, cover, controls) there is no start-screen
   // button at all: it would sit on the cover.
@@ -451,7 +673,7 @@ $_spotifyIosDressJs
     document.documentElement.style.backgroundColor = '';
     document.body.style.backgroundColor = '';
   }
-  return JSON.stringify({adjust: S.adjust, home: S.home, hasAdjust: adjust, hasHome: home, tint: tint, tintEnd: tintEnd, npv: !!npv, npvBottom: npv ? npv.getBoundingClientRect().bottom * devicePixelRatio : null});
+  return JSON.stringify({adjust: S.adjust, home: S.home, hasAdjust: adjust, hasHome: home, tint: tint, tintEnd: tintEnd, onCollection: onCollection, libBottom: libBottom, npv: !!npv, npvBottom: npv ? npv.getBoundingClientRect().bottom * devicePixelRatio : null});
 })()
 ''';
 
@@ -604,6 +826,28 @@ String _seekScript(double seconds) =>
 })()
 ''';
 
+/// Presses play on the page of a song opened from the app's library (its
+/// address starts with [path]): 'wait' while the page or its button is not
+/// there yet, 'done' once pressed (or already playing).
+String _playOpenedScript(String path) =>
+    '''
+(() => {
+  const target = ${jsonEncode(path)};
+  const path = location.pathname.replace(/^\\/intl-[a-z-]+/, '');
+  if (path.indexOf(target) !== 0) return 'wait';
+  const button = document.querySelector('[data-testid="action-bar-row"] [data-testid="play-button"]') ||
+    document.querySelector('[data-testid="top-result-card"] [data-testid="play-button"]') ||
+    document.querySelector('main [data-testid="play-button"]') ||
+    document.querySelector('[data-testid="play-button"]') ||
+    [...document.querySelectorAll('main button[aria-label], button[aria-label]')].find(
+      (e) => /^(tocar|reproduzir|play)\\b/i.test(e.getAttribute('aria-label') || ''));
+  if (!button) return 'wait';
+  const label = (button.getAttribute('aria-label') || '').toLowerCase();
+  if (label.indexOf('pausa') < 0 && label.indexOf('pause') < 0) button.click();
+  return 'done';
+})()
+''';
+
 /// iPhone: Spotify's page runs in Safari's engine (WKWebView), where its
 /// protected songs play (Gecko has no such DRM: "Reprodução desativada") and
 /// its sign-in works; the sound, with the tone, comes from YouTube in Gecko
@@ -666,6 +910,85 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   int? _adjustSeq;
   int? _homeSeq;
 
+  /// Transpono's own library over the page, in the place of Spotify's
+  /// «Sua Biblioteca» (its mobile page has none: «Baixar app»).
+  final ValueNotifier<bool> libraryShown = ValueNotifier<bool>(false);
+
+  /// How much of the page's bottom (its tabs and floating song bar) stays
+  /// in sight under the library, in logical pixels.
+  final ValueNotifier<double> _libraryInset = ValueNotifier<double>(0);
+  bool _wasOnCollection = false;
+
+  /// A song opened from the library: its page's path, until its play
+  /// button is pressed.
+  String? _playOpenedPath;
+  int _playOpenedTicks = 0;
+
+  SpotifyLibraryStore get libraryStore => SpotifyLibraryStore.instance;
+
+  void openLibrary() {
+    if (_disposed) return;
+    unawaited(libraryStore.load());
+    libraryShown.value = true;
+    _notify();
+    unawaited(_markLibraryTab());
+  }
+
+  void closeLibrary() {
+    if (_disposed || !libraryShown.value) return;
+    libraryShown.value = false;
+    _notify();
+    unawaited(_markLibraryTab());
+  }
+
+  /// The page's bottom bar shows «Sua Biblioteca» open while the library is.
+  Future<void> _markLibraryTab() async {
+    try {
+      await _controller.runJavaScript(
+        'window.__transponoLibOpen = ${libraryShown.value};',
+      );
+    } on Object {
+      // The next dressing sets it.
+    }
+    unawaited(_dressPage());
+  }
+
+  /// A tap on an item of the library: its Spotify page opens; a song also
+  /// starts playing, as when it is played on Spotify (the app follows it
+  /// with YouTube).
+  Future<void> openLibraryItem(SpotifyLibraryItem item) async {
+    final Uri? uri = Uri.tryParse(item.url);
+    if (uri == null || !isSpotifyBrowserUri(uri) || _disposed) return;
+    closeLibrary();
+    _playOpenedPath = item.kind == SpotifyLibraryKind.track ? uri.path : null;
+    _playOpenedTicks = 0;
+    try {
+      await _controller.loadRequest(uri);
+    } on Object {
+      _playOpenedPath = null;
+    }
+  }
+
+  /// One step of pressing play on a song opened from the library.
+  Future<void> _playOpened() async {
+    final String? path = _playOpenedPath;
+    if (path == null) return;
+    if (++_playOpenedTicks > 40) {
+      _playOpenedPath = null;
+      return;
+    }
+    try {
+      final Object? answer = await _controller.runJavaScriptReturningResult(
+        _playOpenedScript(path),
+      );
+      if ('$answer'.contains('done') && _playOpenedPath == path) {
+        _playOpenedPath = null;
+      }
+    } on Object {
+      // The page is still loading.
+    }
+  }
+
   /// The song is heard from YouTube, where the tone works.
   bool get playsFromYouTube => _shadow != null;
 
@@ -693,14 +1016,24 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   Future<void> _dressPage() async {
     // The same on iPhone's Gecko engine as on Android.
     try {
+      final String libraryFlag =
+          'window.__transponoLibOpen = ${libraryShown.value};';
       final values = _decodeMap(
         await _controller.runJavaScriptReturningResult(
           defaultTargetPlatform == TargetPlatform.iOS
-              ? 'window.__transponoIosDress = true;$_dressScript'
-              : _dressScript,
+              ? 'window.__transponoIosDress = true;$libraryFlag$_dressScript'
+              : '$libraryFlag$_dressScript',
         ),
       );
       if (_disposed || values == null) return;
+      // Landing on Spotify's «Sua Biblioteca» page opens the app's library.
+      final bool onCollection = values['onCollection'] == true;
+      if (onCollection && !_wasOnCollection) openLibrary();
+      _wasOnCollection = onCollection;
+      final Object? libBottom = values['libBottom'];
+      _libraryInset.value = libBottom is num && libBottom.isFinite
+          ? libBottom.toDouble().clamp(0, 400).toDouble()
+          : 0;
       pageDrawsAdjustButton.value = values['hasAdjust'] == true;
       spotifyPlayerOpen.value = values['npv'] == true;
       final Object? npvBottom = values['npvBottom'];
@@ -811,7 +1144,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   @override
   String? get error => _error;
   @override
-  bool get canGoBack => _canGoBack;
+  bool get canGoBack => _canGoBack || libraryShown.value;
 
   void _notify() {
     if (_disposed) return;
@@ -840,7 +1173,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       m.audioEffects,
       _progress,
       _error,
-      _canGoBack,
+      canGoBack,
     ].join('|');
     if (now == _shown) return;
     _shown = now;
@@ -894,6 +1227,24 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
             pageAdjustRequests.value++;
             return;
           }
+          // Transpono's library (see _spotifyLibraryJs).
+          if (text == 'libopen') {
+            openLibrary();
+            return;
+          }
+          if (text == 'libclose') {
+            closeLibrary();
+            return;
+          }
+          if (text.startsWith('lib:')) {
+            final SpotifyLibraryEvent? event = SpotifyLibraryEvent.decode(
+              text.substring(4),
+            );
+            if (event != null) {
+              unawaited(libraryStore.apply(event).catchError((Object _) {}));
+            }
+            return;
+          }
           final double? value = double.tryParse(
             text.length > 2 ? text.substring(2) : '',
           );
@@ -904,6 +1255,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       );
     }
     if (_disposed) return;
+    unawaited(libraryStore.load());
     _poll = Timer.periodic(
       const Duration(milliseconds: 300),
       (_) => unawaited(_refresh()),
@@ -1183,6 +1535,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       _canGoBack = back;
       _tick++;
       if (_tick.isEven || spotifyPlayerOpen.value) unawaited(_dressPage());
+      if (_playOpenedPath != null) unawaited(_playOpened());
       unawaited(
         _followWithYouTube(
           track,
@@ -1246,7 +1599,14 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   Future<void> reload() => _controller.reload();
 
   @override
-  Future<void> goBack() => _controller.goBack();
+  Future<void> goBack() async {
+    // «Back» over the library closes it first.
+    if (libraryShown.value) {
+      closeLibrary();
+      return;
+    }
+    await _controller.goBack();
+  }
 
   @override
   Future<void> command(String action, [num? value]) async {
@@ -1284,7 +1644,37 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   }
 
   @override
-  Widget buildView() {
+  Widget buildView() => Stack(
+    fit: StackFit.expand,
+    children: [
+      _buildPageView(),
+      // The app's library over the page, down to its tabs and song bar
+      // (they stay in sight and in reach); not over the open player.
+      Positioned.fill(
+        child: AnimatedBuilder(
+          animation: Listenable.merge(<Listenable>[
+            libraryShown,
+            _libraryInset,
+            spotifyPlayerOpen,
+          ]),
+          builder: (BuildContext context, Widget? _) {
+            final bool shown = libraryShown.value && !spotifyPlayerOpen.value;
+            if (!shown) return const SizedBox.shrink();
+            return Padding(
+              padding: EdgeInsets.only(bottom: _libraryInset.value),
+              child: SpotifyLibraryView(
+                store: libraryStore,
+                onOpen: (SpotifyLibraryItem item) =>
+                    unawaited(openLibraryItem(item)),
+              ),
+            );
+          },
+        ),
+      ),
+    ],
+  );
+
+  Widget _buildPageView() {
     final gecko = _gecko;
     if (gecko != null) {
       return WebViewWidget.fromPlatform(
@@ -1313,6 +1703,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     _disposed = true;
     _poll?.cancel();
     _shadow?.dispose();
+    // The library's notifiers stay: the view may still listen to them.
     pageDrawsAdjustButton.value = false;
     pageDrawsHomeButton.value = false;
     spotifyPlayerOpen.value = false;
