@@ -328,7 +328,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _mainControlsExpanded = false;
       _adjustmentsCoverVideo = false;
     });
-    _dropYouTubePull();
     _syncPageRoles();
     unawaited(_player.playWatch(watch));
   }
@@ -362,7 +361,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _adjustmentsCoverVideo = false;
       _landscapeColumnsVisible = false;
     });
-    _dropYouTubePull();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _browsing && !_miniExpanding) {
         setState(() => _miniFull = false);
@@ -421,7 +419,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         _adjustmentsCoverVideo = false;
       }
     });
-    if (openAdjustments) _raiseYouTubePull();
     _syncPageRoles();
   }
 
@@ -435,7 +432,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       !_browsing &&
       // The big player (YouTube Music, Spotify): no bar under it; the
       // adjustments come up from under the player.
-      (!_spotifyScroll || _youtubePull) &&
+      !_spotifyScroll &&
       !_isLandscapePlayer &&
       !_mainControlsExpanded &&
       _player.loaded &&
@@ -889,7 +886,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _browsing = false;
       _mainControlsExpanded = true;
     });
-    _raiseYouTubePull();
     if (tab == StudioTab.tuner) unawaited(_player.pause());
   }
 
@@ -2767,15 +2763,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         child: ValueListenableBuilder<bool>(
                           valueListenable: pageScrolledDown,
                           builder: (context, scrolledDown, _) {
-                            void open() {
-                              setState(() {
-                                _browsing = false;
-                                _mainControlsExpanded = true;
-                                _adjustmentsCoverVideo = false;
-                              });
-                              _raiseYouTubePull();
-                            }
-
+                            void open() => setState(() {
+                              _browsing = false;
+                              _mainControlsExpanded = true;
+                              _adjustmentsCoverVideo = false;
+                            });
                             return AnimatedSwitcher(
                               duration: const Duration(milliseconds: 180),
                               transitionBuilder: (child, animation) =>
@@ -2881,29 +2873,6 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool get _spotifyScroll =>
       ((studioSpotifySkin && !studioYouTubeSkin) || studioMusicSource) &&
       !_isLandscapePlayer;
-
-  /// Plain YouTube in Spotify's look ("Nativo"): the adjustments are
-  /// Spotify's, coming up from under the player, in red. The page itself
-  /// scrolls as usual (a finger on it never pulls them); they open from the
-  /// adjustments button and close by their own bar, drag or button.
-  bool get _youtubePull =>
-      _spotifyScroll && studioRedAccent && !studioMusicSource;
-
-  /// With Spotify's look on YouTube, whatever opens the adjustments brings
-  /// them up from under the player, as Spotify's own button does.
-  void _raiseYouTubePull() {
-    if (!mounted || !studioRedAccent || !_spotifyScroll) return;
-    if (_pull.value < 1) {
-      unawaited(_pull.animateTo(1, curve: Curves.easeOutCubic));
-    }
-  }
-
-  /// ...and a new video, or the mini player, takes them down at once.
-  void _dropYouTubePull() {
-    if (!studioRedAccent || _pull.value == 0) return;
-    _pull.stop();
-    _pull.value = 0;
-  }
 
   /// The colour under the scrolled player: Spotify's own, or on YouTube
   /// Music its page's (black in the dark themes, white in the light one).
@@ -3109,10 +3078,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         onExit: () {},
         onTool: _tool,
         youtubeNativeTransport: _player.isYouTube,
-        // Plain YouTube: the same touch note as its usual layout.
-        onNativeMediaTouch: _youtubePull && _player.isYouTube
-            ? _player.noteNativeVideoTouch
-            : null,
+        onNativeMediaTouch: null,
       ),
     );
     final Widget content = RepaintBoundary(
@@ -4238,7 +4204,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     Widget chip(StudioTab tab, Widget child, {bool round = false}) {
       final bool on = selected == tab;
       return Material(
-        color: on ? skinGreen : const Color(0x1AFFFFFF),
+        color: on ? spotifyGreen : const Color(0x1AFFFFFF),
         shape: const StadiumBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -4252,12 +4218,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               child: Center(
                 child: IconTheme(
                   data: IconThemeData(
-                    color: on ? skinGreenInk : Colors.white,
+                    color: on ? Colors.black : Colors.white,
                     size: 18,
                   ),
                   child: DefaultTextStyle(
                     style: TextStyle(
-                      color: on ? skinGreenInk : Colors.white,
+                      color: on ? Colors.black : Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                     ),
@@ -4302,7 +4268,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     final light = widget.appearance.mode == StudioAppearanceMode.light;
     // Spotify's chips: the chosen one green with black text.
     final selectedFill = studioSpotifySkin
-        ? skinGreen
+        ? spotifyGreen
         : light
         ? const Color(0xFF163E51)
         : Colors.white;
@@ -5480,11 +5446,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         ),
                       ),
                       // The Apple design closes with its grabber instead.
-                      // (Spotify's look, YouTube Music and YouTube in red:
-                      // their own sheet closes them.)
                       if (!widget.appearance.apple &&
                           !studioYouTubeSkin &&
-                          !_spotifyScroll &&
                           !landscapePlayer &&
                           _mainControlsExpanded &&
                           !_adjustmentsCoverVideo)
@@ -6193,10 +6156,7 @@ class _CompactCloseAdjustments extends StatelessWidget {
     valueListenable: pageDrawsAdjustButton,
     builder: (context, inPage, child) =>
         (inPage && open && !(studioSpotifySource && !studioSpotifySkin)) ||
-            // YouTube in Spotify's look keeps the small "Abrir ajustes".
-            (studioSpotifySkin &&
-                !studioYouTubeSkin &&
-                (!studioRedAccent || !open)) ||
+            (studioSpotifySkin && !studioYouTubeSkin) ||
             // YouTube Music: the adjustments come up from under the player
             // and the bottom bar has their button; no arrow over the page.
             studioMusicSource

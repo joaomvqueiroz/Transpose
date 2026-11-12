@@ -1418,7 +1418,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      color: value == 0 ? Colors.white : skinGreen,
+                      color: value == 0 ? Colors.white : spotifyGreen,
                     ),
                   ),
                   Text(
@@ -1534,7 +1534,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                         height: 1,
                         letterSpacing: -1,
                         // Green once the tone moves; white at the original.
-                        color: value == 0 ? Colors.white : skinGreen,
+                        color: value == 0 ? Colors.white : spotifyGreen,
                       ),
                     ),
                     const SizedBox(height: 6),

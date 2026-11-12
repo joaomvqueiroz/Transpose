@@ -156,20 +156,12 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     ),
   );
 
-  StudioAppearance _studioAppearance(
-    bool spotify, {
-    bool music = false,
-    bool youtube = false,
-  }) {
+  StudioAppearance _studioAppearance(bool spotify, {bool music = false}) {
     studioMusicSource = music;
-    // "Nativo" is each source's own look: Spotify's on Spotify, and on
-    // YouTube and YouTube Music the very same Spotify adjustments (they come
-    // up from under the player) in YouTube's red instead of the green.
-    // SoundCloud keeps the YouTube app's look. The other themes look the
-    // same on every source.
+    // "Nativo" is each source's own look: the YouTube app's on YouTube,
+    // Spotify's on Spotify. The other themes look the same on both.
     studioSpotifySource = spotify;
-    studioRedAccent = youtube && !spotify && _appearance.native;
-    studioYouTubeSkin = !spotify && !studioRedAccent && _appearance.native;
+    studioYouTubeSkin = !spotify && _appearance.native;
     studioSpotifySkin = _appearance.native;
     return _appearance.native
         ? _appearance.copyWith(
@@ -205,7 +197,6 @@ class _StudioVisualAppState extends State<StudioVisualApp> {
     appearance: _studioAppearance(
       sessionFactory != null,
       music: home?.host == 'music.youtube.com',
-      youtube: home == null || isYouTubeBrowserUri(home),
     ),
     onAppearanceChanged: _changeAppearance,
     onInitialBrowserReady: () => _startupBrowserReady.value = true,
@@ -288,11 +279,7 @@ class _MainAdjustmentsBar extends StatelessWidget {
         // YouTube's look closes with the X beside its title.
         // On Spotify without its own look, our button opens them.
         (inPage && !expanded && !(studioSpotifySource && !studioSpotifySkin)) ||
-            // YouTube in Spotify's look: this bar opens them; closing is
-            // the sheet's own "Fechar ajustes".
-            (studioSpotifySkin &&
-                !studioYouTubeSkin &&
-                (!studioRedAccent || expanded)) ||
+            (studioSpotifySkin && !studioYouTubeSkin) ||
             // YouTube Music: they come up from under the player.
             studioMusicSource ||
             (studioYouTubeSkin && expanded)

@@ -1709,7 +1709,6 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     spotifyPlayerOpen.value = false;
     spotifyPlayerBottom.value = null;
     spotifyTint = spotifyBase;
-    spotifyTintEnd = spotifyBase;
     // Closing the Gecko session also stops Spotify's audio.
     final gecko = _gecko;
     if (gecko != null) unawaited(gecko.dispose());
