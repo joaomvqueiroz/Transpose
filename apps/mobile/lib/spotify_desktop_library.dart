@@ -208,7 +208,7 @@ const String _desktopLibraryScript = r'''
   const INNER = ['tp-main', 'tp-line', 'tp-multi', 'tp-cover', 'tp-round', 'tp-text',
     'tp-name', 'tp-sub', 'tp-hide', 'tp-span'];
   const OUTER = ['tp-root', 'tp-side', 'tp-grid', 'tp-path', 'tp-fill', 'tp-scroller',
-    'tp-list', 'tp-row', 'tp-wrap'];
+    'tp-list', 'tp-row', 'tp-wrap', 'tp-abs', 'tp-out'];
   // Transpono's subtitle prefix, from the kind in the row's link.
   const KIND_LABEL = { track: 'Música', album: 'Álbum', playlist: 'Playlist',
     artist: 'Artista', show: 'Podcast', episode: 'Episódio' };
@@ -263,6 +263,10 @@ const String _desktopLibraryScript = r'''
       e.removeAttribute('data-tp-only');
     }
     row.classList.add('tp-row');
+    // A row the virtual list places itself (absolute, at its own stride):
+    // its own height kept, no Transpono minimum.
+    const pos = getComputedStyle(row).position;
+    row.classList.toggle('tp-abs', pos === 'absolute' || pos === 'fixed');
     if (!pic) return;
     let cover = pic;
     while (cover.parentElement && cover.parentElement !== row && !has(cover.parentElement)) {
@@ -325,14 +329,11 @@ const String _desktopLibraryScript = r'''
     for (let el = lower; el !== root && el.parentElement; el = el.parentElement) {
       for (const sib of el.parentElement.children) {
         if (sib === el || sib.classList.contains('tp-hide')) continue;
-        // Empty boxes may be the list's spacers: kept, unless out of the
-        // flow or painted (the page's header gradient).
-        if (!sib.children.length && !has(sib)) {
-          const st = getComputedStyle(sib);
-          if (st.position === 'absolute' || st.position === 'fixed' ||
-              (st.backgroundImage && st.backgroundImage !== 'none')) sib.classList.add('tp-hide');
-          continue;
-        }
+        // Empty boxes are kept: they may be the list's spacers, or the size
+        // sensors the page measures itself with (hidden, the sidebar folds
+        // to covers only and the virtual list draws no rows). Painted ones
+        // (the header gradient) are flattened by the CSS instead.
+        if (!sib.children.length && !has(sib)) continue;
         let holds = false;
         for (const r of rows) if (sib.contains(r)) { holds = true; break; }
         if (!holds) sib.classList.add('tp-hide');
@@ -354,6 +355,23 @@ const String _desktopLibraryScript = r'''
       if (h.querySelector('[role="columnheader"]')) h.classList.add('tp-hide');
     }
     for (const r of rows) markRow(r);
+  };
+  // The kind of link each chip keeps («Tudo» and «Músicas»: every row).
+  const KIND_OF_CHIP = { playlists: '/playlist/', albums: '/album/', artists: '/artist/' };
+  // Transpono's empty note, over the list, when a chip leaves no rows. In
+  // <html>, out of the body, which the observer and isolate() never touch.
+  const empty = (on) => {
+    let note = document.getElementById('tp-empty');
+    if (!on) {
+      if (note) note.remove();
+      return;
+    }
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'tp-empty';
+      note.textContent = 'Nada nesta categoria.';
+      document.documentElement.appendChild(note);
+    }
   };
   // Which list is styled: the sidebar's (any filter but «Músicas»), else
   // the main view's (Músicas Curtidas, or the fallback without a sidebar).
@@ -377,11 +395,22 @@ const String _desktopLibraryScript = r'''
     W.__tpMode = mode;
     W.__tpSide = side ? side.el : null;
     document.documentElement.classList.toggle('tp-on', !!root);
-    if (!root) return { mode: mode, rows: 0, side: side };
+    if (!root) { empty(false); return { mode: mode, rows: 0, side: side }; }
     root.classList.toggle('tp-side', mode === 'sidebar');
     root.classList.toggle('tp-grid', mode === 'grid');
     isolate(root, found.rows);
-    return { mode: mode, rows: found.rows.length, side: side };
+    // The chip on our side too (Spotify's may be missing or not applied):
+    // a row whose link is not of the chip's kind is left out. Rows with no
+    // item link (Músicas Curtidas) belong to «Tudo» and «Músicas» only.
+    const kind = KIND_OF_CHIP[want] || '';
+    let shown = 0;
+    for (const r of found.rows) {
+      const out = !!kind && itemIn(r).indexOf(kind) < 0;
+      if (r.classList.contains('tp-out') !== out) r.classList.toggle('tp-out', out);
+      if (!out) shown++;
+    }
+    empty(!!kind && shown === 0);
+    return { mode: mode, rows: found.rows.length, shown: shown, side: side };
   };
   W.__tpApply = apply;
   // Rows the page adds (scrolling, filters) are styled at once.
@@ -532,10 +561,19 @@ const String _desktopLibraryScript = r'''
         // white, 2 gap, subtitle 13 #b3b3b3, a 48 wide ⋯ button: 68 high.
         '.tp-root .tp-row{display:flex!important;flex-direction:row!important;align-items:center!important;' +
           'justify-content:flex-start!important;width:100%!important;max-width:none!important;min-width:0!important;' +
-          'box-sizing:border-box!important;height:68px!important;min-height:68px!important;max-height:none!important;' +
+          'box-sizing:border-box!important;min-height:68px!important;' +
           'padding:6px 4px 6px 16px!important;margin:0!important;border:0!important;border-radius:0!important;' +
           'grid-template-columns:none!important;gap:0!important;text-align:left!important;' +
           '-webkit-tap-highlight-color:rgba(255,255,255,0.08)}',
+        // Rows the virtual list places itself keep its height (its stride):
+        // a forced one would overlap them.
+        '.tp-root .tp-row.tp-abs{min-height:0!important;padding-top:0!important;padding-bottom:0!important}',
+        // Rows of another kind than the chip's.
+        '.tp-root .tp-row.tp-out.tp-out{display:none!important}',
+        '#tp-empty{position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483001;display:flex;' +
+          'align-items:center;justify-content:center;padding:0 32px;box-sizing:border-box;' +
+          'pointer-events:none;color:#b3b3b3;font-size:15px;line-height:1.4;text-align:center;' +
+          'font-family:-apple-system,system-ui,sans-serif;background:transparent}',
         '.tp-root .tp-row *{text-align:left!important}',
         '.tp-root .tp-row::after{content:"⋯";flex:0 0 48px;width:48px;height:48px;display:flex;' +
           'align-items:center;justify-content:center;color:#b3b3b3;font-size:24px;line-height:1;' +
