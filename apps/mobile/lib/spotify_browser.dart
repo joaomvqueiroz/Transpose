@@ -216,6 +216,78 @@ const String _spotifyHomeButtonJs = r'''
   }
 ''';
 
+/// iPhone only (the page sets `window.__transponoIosDress` first, see
+/// [SpotifyStudioSession._dressPage]). Part of [_dressScript]; needs `nav`,
+/// `gear`, `grid`, `count` and `home` in scope.
+/// - The «Buscar» tab gets the start-screen button at its top too, as
+///   «Início» has it beside the gear.
+/// - Spotify's bottom tabs (Início, Buscar, Sua Biblioteca, Ajustes) wear
+///   the YouTube app's bar: dark, a thin line on top, the icon over a small
+///   label, white for the open tab and grey for the others. Its height
+///   stays the 56 px set above, so Spotify's player bar over it does not
+///   move.
+const String _spotifyIosDressJs = r'''
+  if (window.__transponoIosDress === true) {
+    const onSearch = /^\/search(\/|$)/.test(location.pathname);
+    let searchHome = document.querySelector('[data-transpono="search-home"]');
+    if (onSearch && !gear && nav) {
+      if (!searchHome) {
+        searchHome = document.createElement('button');
+        searchHome.type = 'button';
+        searchHome.dataset.transpono = 'search-home';
+        searchHome.setAttribute('aria-label', 'Voltar ao ecrã inicial');
+        searchHome.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24">' + grid + '</svg>';
+        searchHome.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top, 0px) + 10px);' +
+          'right:12px;z-index:30;width:40px;height:40px;display:flex;align-items:center;' +
+          'justify-content:center;border:0;border-radius:50%;padding:0;margin:0;' +
+          'background:transparent;color:#fff;-webkit-tap-highlight-color:transparent;';
+        count(searchHome, 'home');
+        document.body.appendChild(searchHome);
+      }
+      home = true;
+    } else if (searchHome) {
+      searchHome.remove();
+    }
+    if (nav && !document.getElementById('transpono-yt-nav')) {
+      const bar = document.createElement('style');
+      bar.id = 'transpono-yt-nav';
+      const n = '[data-testid="bottom-tab-navigation"]';
+      bar.textContent =
+        n + '{background:#0f0f0f!important;background-image:none!important;' +
+          'border-top:1px solid rgba(255,255,255,.12)!important;box-shadow:none!important}' +
+        n + '>div{background:transparent!important;background-image:none!important}' +
+        n + ' a{display:flex!important;flex-direction:column!important;align-items:center!important;' +
+          'justify-content:center!important;gap:3px!important;padding:0!important;' +
+          'color:#aaaaaa!important;text-decoration:none!important}' +
+        n + ' a svg{width:24px!important;height:24px!important;fill:currentColor!important;' +
+          'color:inherit!important;margin:0!important}' +
+        n + ' a span{font-size:10px!important;line-height:12px!important;font-weight:400!important;' +
+          'letter-spacing:0!important;color:inherit!important;margin:0!important;padding:0!important}' +
+        n + ' a[data-tp-on]{color:#ffffff!important}' +
+        n + ' a[data-tp-on] span{font-weight:500!important}';
+      document.head.appendChild(bar);
+    }
+    if (nav) {
+      // Which tab is open, from the page's address (Spotify's own marks are
+      // not stable): its link turns white.
+      const path = location.pathname;
+      for (const link of nav.querySelectorAll('a')) {
+        const href = link.dataset.transpono ? '' : (link.getAttribute('href') || '');
+        let on = false;
+        try {
+          const target = href ? new URL(href, location.href).pathname : '';
+          on = target === '/' ? path === '/' : (target.length > 1 && path.indexOf(target) === 0);
+        } catch (_) {}
+        if (on) {
+          if (!link.hasAttribute('data-tp-on')) link.setAttribute('data-tp-on', '');
+        } else if (link.hasAttribute('data-tp-on')) {
+          link.removeAttribute('data-tp-on');
+        }
+      }
+    }
+  }
+''';
+
 const String _dressScript = '''
 (() => {
   const S = window.__transponoSp || (window.__transponoSp = {adjust: 0, home: 0});
@@ -303,6 +375,7 @@ const String _dressScript = '''
   if (share) adjust = true;
   let home = false;
 $_spotifyHomeButtonJs
+$_spotifyIosDressJs
   // Over the open player (song, cover, controls) there is no start-screen
   // button at all: it would sit on the cover.
   // The start-screen button lives only in the home page's top bar, beside
@@ -621,7 +694,11 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     // The same on iPhone's Gecko engine as on Android.
     try {
       final values = _decodeMap(
-        await _controller.runJavaScriptReturningResult(_dressScript),
+        await _controller.runJavaScriptReturningResult(
+          defaultTargetPlatform == TargetPlatform.iOS
+              ? 'window.__transponoIosDress = true;$_dressScript'
+              : _dressScript,
+        ),
       );
       if (_disposed || values == null) return;
       pageDrawsAdjustButton.value = values['hasAdjust'] == true;
