@@ -8,6 +8,7 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'spotify_browser.dart';
 import 'spotify_library.dart';
+import 'spotify_library_view.dart';
 import 'studio_appearance.dart';
 
 /// Experiment, iPhone only: «Sua Biblioteca» opens a screen with two
@@ -205,9 +206,30 @@ const String _desktopLibraryScript = r'''
     return null;
   };
   const INNER = ['tp-main', 'tp-line', 'tp-multi', 'tp-cover', 'tp-round', 'tp-text',
-    'tp-name', 'tp-sub', 'tp-hide'];
+    'tp-name', 'tp-sub', 'tp-hide', 'tp-span'];
   const OUTER = ['tp-root', 'tp-side', 'tp-grid', 'tp-path', 'tp-fill', 'tp-scroller',
-    'tp-list', 'tp-row'];
+    'tp-list', 'tp-row', 'tp-wrap'];
+  // Transpono's subtitle prefix, from the kind in the row's link.
+  const KIND_LABEL = { track: 'Música', album: 'Álbum', playlist: 'Playlist',
+    artist: 'Artista', show: 'Podcast', episode: 'Episódio' };
+  const KIND_TEXT = /^(música|musica|song|álbum|album|playlist|artista|artist|podcast|episódio|episodio|episode|single|ep)(\s|$|[•·,])/i;
+  const kindOf = (row) => {
+    const m = itemIn(row).match(/^https:\/\/open\.spotify\.com\/([a-z]+)\//);
+    return m && KIND_LABEL[m[1]] ? KIND_LABEL[m[1]] : '';
+  };
+  // Prefixes the row's subtitle with its kind, as Transpono's «Kind • …»
+  // (CSS ::before, from data-tp-pre); a row with a name only gets the kind
+  // as its subtitle (data-tp-only). Not when the subtitle already says it.
+  const prefix = (row, textBox) => {
+    const kind = kindOf(row);
+    if (!kind) return;
+    const sub = row.querySelector('.tp-sub');
+    if (sub) {
+      if (!KIND_TEXT.test((sub.textContent || '').trim())) sub.setAttribute('data-tp-pre', kind + ' • ');
+    } else if (textBox) {
+      textBox.setAttribute('data-tp-only', kind);
+    }
+  };
   const unmark = (box, names) => {
     for (const c of names) {
       for (const e of Array.from(box.getElementsByClassName(c))) e.classList.remove(c);
@@ -236,6 +258,10 @@ const String _desktopLibraryScript = r'''
         (!pic || row.querySelector('.tp-cover'))) return;
     row.__tpKey = key;
     unmark(row, INNER);
+    for (const e of Array.from(row.querySelectorAll('[data-tp-pre],[data-tp-only]'))) {
+      e.removeAttribute('data-tp-pre');
+      e.removeAttribute('data-tp-only');
+    }
     row.classList.add('tp-row');
     if (!pic) return;
     let cover = pic;
@@ -248,6 +274,10 @@ const String _desktopLibraryScript = r'''
     if (itemIn(row).indexOf('/artist/') >= 0) cover.classList.add('tp-round');
     if (line !== row) {
       line.classList.add('tp-line');
+      // Boxes between the row and the line: no padding, start-aligned.
+      for (let el = line.parentElement; el && el !== row; el = el.parentElement) {
+        el.classList.add('tp-span');
+      }
       // Desktop columns (date added, album, duration, index...): hidden.
       for (const cell of row.children) {
         cell.classList.add(cell.contains(cover) ? 'tp-main' : 'tp-hide');
@@ -266,10 +296,12 @@ const String _desktopLibraryScript = r'''
     if (texts.length === 1) {
       texts[0].classList.add('tp-text');
       label(texts[0]);
+      prefix(row, texts[0]);
     } else if (texts.length > 1) {
       line.classList.add('tp-multi');
       texts[0].classList.add('tp-name');
       for (let i = 1; i < texts.length; i++) texts[i].classList.add('tp-sub');
+      prefix(row, null);
     }
   };
   // Only the list on screen: the root fills it, everything around it is
@@ -288,11 +320,19 @@ const String _desktopLibraryScript = r'''
     const lower = rows.length > 1 ? common(rows[0], rows[rows.length - 1]) : rows[0].parentElement;
     if (!lower) return;
     lower.classList.add('tp-list');
+    // From the list up to the root: no insets, no backgrounds.
+    for (let el = lower; el && el !== root; el = el.parentElement) el.classList.add('tp-wrap');
     for (let el = lower; el !== root && el.parentElement; el = el.parentElement) {
       for (const sib of el.parentElement.children) {
         if (sib === el || sib.classList.contains('tp-hide')) continue;
-        // Empty boxes may be the list's spacers: kept.
-        if (!sib.children.length && !has(sib)) continue;
+        // Empty boxes may be the list's spacers: kept, unless out of the
+        // flow or painted (the page's header gradient).
+        if (!sib.children.length && !has(sib)) {
+          const st = getComputedStyle(sib);
+          if (st.position === 'absolute' || st.position === 'fixed' ||
+              (st.backgroundImage && st.backgroundImage !== 'none')) sib.classList.add('tp-hide');
+          continue;
+        }
         let holds = false;
         for (const r of rows) if (sib.contains(r)) { holds = true; break; }
         if (!holds) sib.classList.add('tp-hide');
@@ -465,56 +505,81 @@ const String _desktopLibraryScript = r'''
         '.tp-hide.tp-hide.tp-hide.tp-hide{display:none!important}',
         'html.tp-on [data-testid*="banner" i],html.tp-on [data-testid*="upsell" i],' +
           'html.tp-on [data-testid*="download" i],html.tp-on a[href*="/download"]{display:none!important}',
-        '.tp-path{transform:none!important;filter:none!important;contain:none!important;will-change:auto!important}',
+        '.tp-path{transform:none!important;filter:none!important;contain:none!important;will-change:auto!important;' +
+          'background-color:#121212!important;background-image:none!important}',
         '.tp-root{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:0!important;' +
           'width:auto!important;height:auto!important;min-width:0!important;max-width:none!important;' +
           'max-height:none!important;margin:0!important;padding:0!important;border:0!important;' +
           'border-radius:0!important;transform:none!important;z-index:2147483000!important;' +
-          'background:#121212!important;display:flex!important;flex-direction:column!important;' +
-          'overflow:hidden!important;--tpc:56px}',
-        '.tp-root.tp-grid{--tpc:48px}',
+          'background:#121212!important;background-image:none!important;display:flex!important;' +
+          'flex-direction:column!important;overflow:hidden!important}',
+        // Flat #121212: no gradient nor colour on anything but the covers.
+        '.tp-root *:not(img):not(.tp-cover):not(.tp-cover *){background-color:transparent!important;' +
+          'background-image:none!important}',
+        '.tp-root *::before{background:none!important}',
         '.tp-root.tp-scroller{overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}',
         '.tp-fill{display:flex!important;flex-direction:column!important;flex:1 1 auto!important;' +
           'width:100%!important;max-width:none!important;min-width:0!important;height:auto!important;' +
-          'min-height:0!important;max-height:none!important;margin:0!important;border-radius:0!important;' +
-          'background:#121212!important}',
+          'min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;' +
+          'border-radius:0!important}',
         '.tp-fill.tp-scroller{display:block!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important}',
+        '.tp-root .tp-wrap{margin:0!important;padding-left:0!important;padding-right:0!important;' +
+          'width:100%!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important}',
         '.tp-root .tp-list{display:flex!important;flex-direction:column!important;grid-template-columns:none!important;' +
-          'gap:0!important;width:100%!important;min-width:0!important}',
+          'gap:0!important;width:100%!important;min-width:0!important;padding:0!important;margin:0!important}',
+        // Transpono's row (spotify_library_view.dart): padding 16/6/4/6, a
+        // 56 cover (radius 4, round for artists), 12 gap, name 16 w500
+        // white, 2 gap, subtitle 13 #b3b3b3, a 48 wide ⋯ button: 68 high.
         '.tp-root .tp-row{display:flex!important;flex-direction:row!important;align-items:center!important;' +
-          'width:100%!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;' +
-          'padding:4px 4px 4px 16px!important;margin:0!important;border-radius:0!important;' +
-          'background:transparent!important;grid-template-columns:none!important;gap:0!important;' +
+          'justify-content:flex-start!important;width:100%!important;max-width:none!important;min-width:0!important;' +
+          'box-sizing:border-box!important;height:68px!important;min-height:68px!important;max-height:none!important;' +
+          'padding:6px 4px 6px 16px!important;margin:0!important;border:0!important;border-radius:0!important;' +
+          'grid-template-columns:none!important;gap:0!important;text-align:left!important;' +
           '-webkit-tap-highlight-color:rgba(255,255,255,0.08)}',
-        '.tp-root .tp-row::after{content:"⋯";flex:0 0 auto;color:#b3b3b3;font-size:20px;line-height:1;padding:0 12px}',
-        '.tp-root .tp-main{flex:1 1 auto!important;min-width:0!important;width:auto!important;max-width:none!important;' +
-          'margin:0!important;padding:0!important;background:transparent!important}',
+        '.tp-root .tp-row *{text-align:left!important}',
+        '.tp-root .tp-row::after{content:"⋯";flex:0 0 48px;width:48px;height:48px;display:flex;' +
+          'align-items:center;justify-content:center;color:#b3b3b3;font-size:24px;line-height:1;' +
+          'background:none!important}',
+        '.tp-root .tp-main,.tp-root .tp-span{display:flex!important;flex-direction:row!important;' +
+          'align-items:center!important;justify-content:flex-start!important;flex:1 1 auto!important;' +
+          'min-width:0!important;width:auto!important;max-width:none!important;margin:0!important;' +
+          'padding:0!important;gap:0!important;grid-template-columns:none!important;align-self:stretch!important;' +
+          'justify-self:stretch!important}',
         '.tp-root .tp-line{display:flex!important;flex-direction:row!important;align-items:center!important;' +
-          'flex:1 1 auto!important;width:100%!important;min-width:0!important;gap:0!important;margin:0!important;' +
-          'padding:0!important;grid-template-columns:none!important}',
+          'justify-content:flex-start!important;flex:1 1 auto!important;width:100%!important;min-width:0!important;' +
+          'gap:0!important;margin:0!important;padding:0!important;grid-template-columns:none!important}',
         '.tp-root .tp-line.tp-multi{display:grid!important;grid-template-columns:auto minmax(0,1fr)!important;' +
-          'align-content:center!important}',
+          'align-content:center!important;justify-items:start!important;justify-content:start!important;' +
+          'row-gap:2px!important}',
         '.tp-root .tp-multi>.tp-cover{grid-row:1 / span 2!important}',
-        '.tp-root .tp-multi>:not(.tp-cover){grid-column:2!important}',
-        '.tp-root .tp-cover{width:var(--tpc)!important;height:var(--tpc)!important;min-width:var(--tpc)!important;' +
-          'max-width:var(--tpc)!important;min-height:var(--tpc)!important;flex:0 0 var(--tpc)!important;' +
+        '.tp-root .tp-multi>:not(.tp-cover){grid-column:2!important;justify-self:stretch!important}',
+        '.tp-root .tp-cover{width:56px!important;height:56px!important;min-width:56px!important;' +
+          'max-width:56px!important;min-height:56px!important;max-height:56px!important;flex:0 0 56px!important;' +
           'margin:0 12px 0 0!important;padding:0!important;border-radius:4px!important;overflow:hidden!important;' +
-          'position:relative!important;inset:auto!important}',
+          'position:relative!important;inset:auto!important;align-self:center!important}',
         '.tp-root .tp-cover.tp-round{border-radius:50%!important}',
-        '.tp-root .tp-cover img{width:100%!important;height:100%!important;object-fit:cover!important}',
+        '.tp-root .tp-cover img{width:100%!important;height:100%!important;object-fit:cover!important;' +
+          'border-radius:inherit!important}',
         '.tp-root img.tp-cover{object-fit:cover!important}',
         '.tp-root .tp-cover button,.tp-root .tp-cover [role="button"]{display:none!important}',
         '.tp-root .tp-text{display:flex!important;flex-direction:column!important;justify-content:center!important;' +
-          'flex:1 1 auto!important;min-width:0!important;overflow:hidden!important;margin:0!important;' +
-          'padding:0!important;gap:2px!important}',
+          'align-items:stretch!important;flex:1 1 auto!important;min-width:0!important;overflow:hidden!important;' +
+          'margin:0!important;padding:0!important;gap:2px!important}',
+        '.tp-root .tp-text[data-tp-only]::after{content:attr(data-tp-only);display:block;color:#b3b3b3;' +
+          'font-size:13px;font-weight:400;line-height:1.3;white-space:nowrap;overflow:hidden;' +
+          'text-overflow:ellipsis;text-align:left;font-family:-apple-system,system-ui,sans-serif}',
         '.tp-root .tp-name,.tp-root .tp-sub{display:block!important;white-space:nowrap!important;overflow:hidden!important;' +
-          'text-overflow:ellipsis!important;max-width:100%!important;min-width:0!important;margin:0!important;' +
-          'padding:0!important}',
-        '.tp-root .tp-name *,.tp-root .tp-sub *{display:inline!important;white-space:nowrap!important;text-decoration:none!important}',
-        '.tp-root .tp-name,.tp-root .tp-name *{color:#fff!important;font-size:16px!important;font-weight:700!important;' +
-          'line-height:1.3!important}',
+          'text-overflow:ellipsis!important;width:100%!important;max-width:100%!important;min-width:0!important;' +
+          'margin:0!important;padding:0!important;align-self:stretch!important;justify-self:stretch!important;' +
+          'text-align:left!important;font-family:-apple-system,system-ui,sans-serif!important}',
+        '.tp-root .tp-name *,.tp-root .tp-sub *{display:inline!important;white-space:nowrap!important;' +
+          'text-decoration:none!important;margin:0!important;padding:0!important;' +
+          'font-family:-apple-system,system-ui,sans-serif!important}',
+        '.tp-root .tp-name,.tp-root .tp-name *{color:#fff!important;font-size:16px!important;font-weight:500!important;' +
+          'line-height:1.25!important}',
         '.tp-root .tp-sub,.tp-root .tp-sub *{color:#b3b3b3!important;font-size:13px!important;font-weight:400!important;' +
-          'line-height:1.35!important}',
+          'line-height:1.3!important}',
+        '.tp-root .tp-sub[data-tp-pre]::before{content:attr(data-tp-pre)}',
         '.tp-root .tp-sub svg,.tp-root .tp-name svg{display:none!important}'
       ].join('\n');
       document.head.appendChild(css);
@@ -560,18 +625,6 @@ int _int(Object? value) => value is num && value.isFinite ? value.toInt() : 0;
 
 enum _LibrarySource { spotify, transpono }
 
-/// The chips over the Spotify library, as Transpono's segments. Their
-/// [Enum.name] is the filter the page script applies (`window.__tpWant`).
-enum _SpotifyFilter { all, playlists, artists, albums, tracks }
-
-String _filterLabel(_SpotifyFilter filter) => switch (filter) {
-  _SpotifyFilter.all => 'Tudo',
-  _SpotifyFilter.playlists => 'Playlists',
-  _SpotifyFilter.artists => 'Artistas',
-  _SpotifyFilter.albums => 'Álbuns',
-  _SpotifyFilter.tracks => 'Músicas',
-};
-
 /// The library screen of the experiment: «Spotify» (the desktop web
 /// player's library, in its own WKWebView) and «Transpono» ([transpono],
 /// the app's own library). A tap on an item of the Spotify one hands its
@@ -586,6 +639,10 @@ class SpotifyLibraryScreen extends StatefulWidget {
   final Widget transpono;
   final ValueChanged<String> onOpenLink;
 
+  /// The header, as Transpono's ([SpotifyLibraryView.title]).
+  static const String title = SpotifyLibraryView.title;
+  static const String note = 'Da tua conta Spotify.';
+
   static const String gateNote =
       'O Spotify não mostrou a biblioteca nesta versão. Usa o separador '
       'Transpono.';
@@ -596,7 +653,9 @@ class SpotifyLibraryScreen extends StatefulWidget {
 
 class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
   _LibrarySource _source = _LibrarySource.spotify;
-  _SpotifyFilter _filter = _SpotifyFilter.all;
+  // The chips, Transpono's segments: their [Enum.name] is the filter the
+  // page script applies (`window.__tpWant`).
+  SpotifyLibrarySegment _filter = SpotifyLibrarySegment.all;
   late final WebViewController _controller;
   Timer? _poll;
   bool _reading = false;
@@ -711,7 +770,7 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
         // Músicas Curtidas opened from the list (its row): its chip lights.
         const String tracks = '/collection/tracks';
         if (!_path.startsWith(tracks) && path.startsWith(tracks)) {
-          _filter = _SpotifyFilter.tracks;
+          _filter = SpotifyLibrarySegment.tracks;
         }
         _host = '${values['host'] ?? ''}';
         _path = path;
@@ -778,18 +837,23 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          // Spotify's list, filtered like Transpono's segments.
+          // Spotify's list, with Transpono's header and chips (the same
+          // widgets, at the same offsets as in [widget.transpono], whose
+          // top gap is 12 under the segments).
           if (spotify) ...[
-            SizedBox(
-              height: 36,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  for (final _SpotifyFilter filter in _SpotifyFilter.values)
-                    _chip(filter),
-                ],
-              ),
+            const SizedBox(height: 12),
+            const SpotifyLibraryHeader(
+              title: SpotifyLibraryScreen.title,
+              note: SpotifyLibraryScreen.note,
+            ),
+            const SizedBox(height: 12),
+            SpotifyLibraryChips(
+              selected: _filter,
+              onSelected: (SpotifyLibrarySegment filter) {
+                if (filter == _filter) return;
+                setState(() => _filter = filter);
+                unawaited(_read());
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -808,7 +872,10 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
               ],
             ),
           ),
-          if (spotify && defaultTargetPlatform == TargetPlatform.iOS)
+          // Only when something failed, for the owner's reports.
+          if (spotify &&
+              defaultTargetPlatform == TargetPlatform.iOS &&
+              _showDiagnostic)
             _diagnostic(),
         ],
       ),
@@ -831,40 +898,6 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
               color: on ? Colors.black : Colors.white,
               fontSize: 14,
               fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// A chip as Transpono's: the page script then works Spotify's own
-  /// filter chips (or opens Músicas Curtidas).
-  Widget _chip(_SpotifyFilter filter) {
-    final bool on = filter == _filter;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: on ? spotifyGreen : const Color(0x1AFFFFFF),
-        shape: const StadiumBorder(),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: () {
-            if (filter == _filter) return;
-            setState(() => _filter = filter);
-            unawaited(_read());
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Center(
-              child: Text(
-                _filterLabel(filter),
-                style: TextStyle(
-                  color: on ? Colors.black : Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
             ),
           ),
         ),
@@ -933,6 +966,11 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
       ],
     );
   }
+
+  /// The diagnostic shows only on a gate, a sign-in, an error, or a loaded
+  /// page with no rows styled.
+  bool get _showDiagnostic =>
+      _gate || _login || _error != null || (_progress >= 100 && _rows == 0);
 
   /// For the owner's screenshots: where the desktop page is and whether it
   /// shows a library.

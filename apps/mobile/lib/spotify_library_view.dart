@@ -8,7 +8,7 @@ import 'studio_appearance.dart';
 /// The segments of the library: «Tudo» and one per kind.
 enum SpotifyLibrarySegment { all, artists, tracks, playlists, albums }
 
-extension on SpotifyLibrarySegment {
+extension SpotifyLibrarySegmentLabel on SpotifyLibrarySegment {
   String get label => switch (this) {
     SpotifyLibrarySegment.all => 'Tudo',
     SpotifyLibrarySegment.artists => 'Artistas',
@@ -36,6 +36,106 @@ String _kindLabel(SpotifyLibraryKind kind) => switch (kind) {
   SpotifyLibraryKind.episode => 'Episódio',
 };
 
+/// A library's header, as Transpono's: its title and a one-line note.
+/// Shared with the Spotify desktop library (spotify_desktop_library.dart).
+class SpotifyLibraryHeader extends StatelessWidget {
+  const SpotifyLibraryHeader({
+    super.key,
+    required this.title,
+    required this.note,
+  });
+
+  final String title;
+  final String note;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: Text(
+            note,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: spotifySubdued, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A library's chips, as Transpono's: «Tudo» and one per kind, in a
+/// horizontal scroll. Shared with the Spotify desktop library.
+class SpotifyLibraryChips extends StatelessWidget {
+  const SpotifyLibraryChips({
+    super.key,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final SpotifyLibrarySegment selected;
+  final ValueChanged<SpotifyLibrarySegment> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final SpotifyLibrarySegment segment
+              in SpotifyLibrarySegment.values)
+            _chip(segment),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(SpotifyLibrarySegment segment) {
+    final bool on = segment == selected;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Material(
+        color: on ? spotifyGreen : const Color(0x1AFFFFFF),
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () => onSelected(segment),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Center(
+              child: Text(
+                segment.label,
+                style: TextStyle(
+                  color: on ? Colors.black : Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Transpono's library for the Spotify source, in Spotify's own look: what
 /// the user followed, hearted or saved in the Spotify page.
 class SpotifyLibraryView extends StatefulWidget {
@@ -51,6 +151,7 @@ class SpotifyLibraryView extends StatefulWidget {
   static const String emptyText =
       'Ainda não há nada na tua biblioteca. Toca em Seguir, ♡ ou Guardar no '
       'Spotify e aparece aqui.';
+  static const String title = 'A tua biblioteca';
   static const String localNote =
       'Guardada só neste telemóvel; não sincroniza com a conta Spotify.';
 
@@ -89,38 +190,15 @@ class _SpotifyLibraryViewState extends State<SpotifyLibraryView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(height: top + 12),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'A tua biblioteca',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
-                  child: Text(
-                    SpotifyLibraryView.localNote,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: spotifySubdued, fontSize: 12),
-                  ),
+                const SpotifyLibraryHeader(
+                  title: SpotifyLibraryView.title,
+                  note: SpotifyLibraryView.localNote,
                 ),
                 const SizedBox(height: 12),
-                SizedBox(
-                  height: 36,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    children: [
-                      for (final SpotifyLibrarySegment segment
-                          in SpotifyLibrarySegment.values)
-                        _chip(segment),
-                    ],
-                  ),
+                SpotifyLibraryChips(
+                  selected: _segment,
+                  onSelected: (SpotifyLibrarySegment segment) =>
+                      setState(() => _segment = segment),
                 ),
                 const SizedBox(height: 8),
                 Expanded(
@@ -149,34 +227,6 @@ class _SpotifyLibraryViewState extends State<SpotifyLibraryView> {
               ],
             );
           },
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(SpotifyLibrarySegment segment) {
-    final bool on = segment == _segment;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: on ? spotifyGreen : const Color(0x1AFFFFFF),
-        shape: const StadiumBorder(),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: () => setState(() => _segment = segment),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Center(
-              child: Text(
-                segment.label,
-                style: TextStyle(
-                  color: on ? Colors.black : Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ),
         ),
       ),
     );
