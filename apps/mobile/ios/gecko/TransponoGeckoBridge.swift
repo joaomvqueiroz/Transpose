@@ -53,7 +53,7 @@ private enum JITLessReporter {
 
 @objc(TransponoGeckoBridge)
 public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressDelegate,
-  AddonMessageDelegate, AddonPortDelegate
+  AddonMessageDelegate, AddonPortDelegate, PermissionEmbedderDelegate
 {
   public typealias EventSink = (String, [String: Any]) -> Void
   public typealias DecisionHandler = (String, Bool, @escaping (Bool) -> Void) -> Void
@@ -118,7 +118,24 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   @objc(makeHostWithEventSink:)
   public static func makeHost(eventSink: @escaping EventSink) -> TransponoGeckoBridge? {
     guard geckoRunning else { return nil }
+    applyMediaPrefs()
     return TransponoGeckoBridge(eventSink: eventSink)
+  }
+
+  private static var mediaPrefsApplied = false
+
+  /// Media may start without a finger on the page, as Android's WebView
+  /// does for this app (setMediaPlaybackRequiresUserGesture(false)): the
+  /// YouTube page behind Spotify is never touched, and Reynard's Gecko
+  /// (media.geckoview.autoplay.request) otherwise refuses its play() and
+  /// leaves it silent. See also the autoplay answer below.
+  private static func applyMediaPrefs() {
+    guard !mediaPrefsApplied else { return }
+    mediaPrefsApplied = true
+    GeckoRuntime.setDefaultPrefs([
+      "media.autoplay.default": 0,
+      "media.autoplay.blocking_policy": 0,
+    ])
   }
 
   private let sink: EventSink
@@ -144,6 +161,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     geckoView.backgroundColor = .black
     session.navigationDelegate = self
     session.progressDelegate = self
+    session.permissionDelegate = self
     session.setAddonMessageDelegate(
       self, extensionID: Self.extensionID, nativeApp: Self.nativeApp)
     session.open()
@@ -238,6 +256,7 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
       nil, extensionID: Self.extensionID, nativeApp: Self.nativeApp)
     session.navigationDelegate = nil
     session.progressDelegate = nil
+    session.permissionDelegate = nil
     geckoView.session = nil
     session.close()
   }
@@ -307,6 +326,18 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     guard port === self.port else { return }
     self.port = nil
     failPending("NO_CONTEXT: a página mudou.")
+  }
+
+  // MARK: Permissions
+
+  /// Autoplay is allowed (the app starts YouTube's sound itself, e.g. the
+  /// hidden player behind Spotify). Every other permission (camera,
+  /// microphone, location...) keeps Gecko's default answer, as before.
+  @MainActor
+  public func permissionDelegate(
+    decideContentPermission permission: ContentPermission, session: GeckoSession
+  ) async -> ContentPermission.Value {
+    permission.permission == .autoplay ? .allow : .prompt
   }
 
   // MARK: Navigation

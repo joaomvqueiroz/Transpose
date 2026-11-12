@@ -466,14 +466,24 @@ String _holdScript(double seconds) =>
 })()
 ''';
 
-/// The first video of a YouTube results page (never a Short).
+/// The first video of a YouTube results page (never a Short, a playlist or
+/// a promoted video). m.youtube.com's results come in two markups (the
+/// older `ytm-video-with-context-renderer` and the newer `*-view-model`
+/// lockups); both link their video with an `a[href="/watch?v=..."]`.
+/// With none found it answers `none:LINKS:PATH`, for the diagnostic.
 const String _firstVideoScript = '''
 (() => {
-  for (const a of document.querySelectorAll('a[href*="/watch?v="]')) {
+  const promoted = 'ytm-promoted-sparkles-web-renderer, ytm-promoted-video-renderer, ' +
+    'ytm-companion-ad-renderer, ad-slot-renderer, ytm-ad-slot-renderer, ' +
+    'ytm-display-ad-renderer, ytm-promoted-sparkles-text-search-renderer';
+  const links = document.querySelectorAll('a[href*="/watch?v="], a[href^="watch?v="]');
+  for (const a of links) {
     const href = a.href || '';
-    if (href.indexOf('list=') < 0) return href;
+    if (href.indexOf('/watch?v=') < 0 || href.indexOf('list=') >= 0) continue;
+    if (a.closest && a.closest(promoted)) continue;
+    return href;
   }
-  return '';
+  return 'none:' + links.length + ':' + location.pathname;
 })()
 ''';
 
@@ -586,6 +596,26 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   /// The song is heard from YouTube, where the tone works.
   bool get playsFromYouTube => _shadow != null;
 
+  /// iPhone only, for the owner's tests: which step of the sound from the
+  /// hidden YouTube is where (not started, no result, play refused,
+  /// playing). Shown as the studio's message line; Android shows nothing.
+  String? _soundStep;
+  bool get _diagnoses => defaultTargetPlatform == TargetPlatform.iOS;
+  bool _shadowStarted = false;
+  String? _shadowStartError;
+  int _soundWaitTicks = 0;
+
+  void _step(String? text) {
+    if (!_diagnoses || _disposed) return;
+    String? value = text;
+    if (value != null && value.length > 160) {
+      value = '${value.substring(0, 160)}…';
+    }
+    if (value == _soundStep) return;
+    _soundStep = value;
+    _notify();
+  }
+
   /// Spotify's own bars carry the studio's buttons; their taps come here.
   Future<void> _dressPage() async {
     // The same on iPhone's Gecko engine as on Android.
@@ -663,8 +693,11 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   @override
   YouTubeMediaState get media {
     final shadow = _shadow;
+    final String? step = _soundStep;
     if (shadow == null || !_shadowLoaded || !shadow.media.hasVideo) {
-      return _media;
+      return step == null || !_media.hasVideo
+          ? _media
+          : _media.copyWith(pitchMessage: step);
     }
     final YouTubeMediaState heard = shadow.media;
     return YouTubeMediaState(
@@ -677,7 +710,9 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       speed: heard.speed,
       pitch: heard.pitch,
       pitchStatus: heard.pitchStatus,
-      pitchMessage: heard.pitchMessage,
+      pitchMessage: step != null && heard.pitchMessage.isEmpty
+          ? step
+          : heard.pitchMessage,
       loopA: heard.loopA,
       loopB: heard.loopB,
       loopEnabled: heard.loopEnabled,
@@ -798,12 +833,18 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     );
     await _controller.loadRequest(home);
     final shadow = _shadow;
-    if (shadow != null && !_disposed) {
+    if (shadow == null) {
+      _step('Som: sem YouTube oculto (motor Gecko indisponível nesta versão).');
+    } else if (!_disposed) {
       try {
         await shadow.start(Uri.https('m.youtube.com', '/'));
-      } on Object {
+      } on Object catch (failure) {
         // Without YouTube the song still plays from Spotify itself.
+        _shadowStartError = '$failure';
       }
+      // Songs are looked for only from now on: a search loaded before
+      // this would be replaced by the start page.
+      _shadowStarted = true;
     }
   }
 
@@ -833,15 +874,37 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       // No page yet.
     }
     if (track == null || track.isEmpty) return;
+    if (!_shadowStarted) {
+      _step('Som: o YouTube oculto ainda não arrancou.');
+      return;
+    }
+    final String? startError = _shadowStartError;
+    if (startError != null) {
+      _step('Som: o YouTube oculto não arrancou ($startError).');
+    }
     // A new song on Spotify: find it on YouTube.
     if (track.id != _shadowTrackId) {
       _shadowTrackId = track.id;
       _shadowSearchFor = track.id;
       _shadowSearchTicks = 0;
+      _soundWaitTicks = 0;
       _shadowLoaded = false;
       _advancing = false;
-      await shadow.command('pause');
-      await shadow.controller.loadRequest(youtubeSearchUri(track.query));
+      if (startError == null) _step('Som: a procurar no YouTube…');
+      // Nothing may be playing yet (no bridge on the start page): the
+      // search goes ahead whatever the pause answers.
+      try {
+        await shadow.command('pause');
+      } on Object {
+        // Nothing to pause.
+      }
+      try {
+        await shadow.controller.loadRequest(youtubeSearchUri(track.query));
+      } on Object catch (failure) {
+        // Searched again at the next step.
+        _shadowTrackId = null;
+        _step('Som: a pesquisa no YouTube falhou ($failure).');
+      }
       return;
     }
     // Waiting for the results page: open its first video.
@@ -862,16 +925,47 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
           watch.path == '/watch') {
         _shadowSearchFor = null;
         _shadowLoaded = true;
-        await shadow.playWatch(watch);
-      } else if (_shadowSearchTicks > 25) {
-        // Nothing found in 20 s: give the search another go.
-        _shadowTrackId = null;
+        _soundWaitTicks = 0;
+        _step('Som: a abrir o vídeo do YouTube…');
+        try {
+          await shadow.playWatch(watch);
+        } on Object catch (failure) {
+          _step('Som: o vídeo do YouTube não abriu ($failure).');
+        }
+      } else {
+        if (_shadowSearchTicks >= 10) {
+          // m.youtube.com's results did not show a video link (yet).
+          final String detail = link.startsWith('none:')
+              ? link.substring(5)
+              : (link.isEmpty ? 'sem resposta da página' : link);
+          _step('Som: sem resultado do YouTube ($detail).');
+        }
+        if (_shadowSearchTicks > 25) {
+          // Nothing found in 20 s: give the search another go.
+          _shadowTrackId = null;
+        }
       }
       return;
     }
     if (!_shadowLoaded) return;
     final YouTubeMediaState heard = shadow.media;
-    if (!heard.hasVideo || heard.isAd) return;
+    if (!heard.hasVideo) {
+      _soundWaitTicks++;
+      if (_soundWaitTicks > 20) {
+        final String? pageError = shadow.error;
+        _step(
+          pageError == null
+              ? 'Som: o vídeo do YouTube não carregou.'
+              : 'Som: $pageError',
+        );
+      }
+      return;
+    }
+    if (heard.isAd) {
+      _soundWaitTicks = 0;
+      _step(null);
+      return;
+    }
     final double left = heard.duration - heard.position;
     // The song ended on YouTube: Spotify moves to the next one.
     if (heard.duration > 5 && left < 1.2 && !_advancing) {
@@ -901,9 +995,28 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     }
     // Play and pause follow Spotify's own button.
     if (spotifyPlaying && !heard.playing && left > 1.5) {
-      await shadow.command('play');
+      _soundWaitTicks++;
+      try {
+        await shadow.command('play');
+        if (_soundWaitTicks > 10) {
+          _step('Som: o YouTube não começou a tocar (reprodução recusada?).');
+        }
+      } on Object catch (failure) {
+        _step('Som: o YouTube recusou tocar ($failure).');
+      }
     } else if (!spotifyPlaying && heard.playing) {
-      await shadow.command('pause');
+      try {
+        await shadow.command('pause');
+      } on Object {
+        // Tried again at the next step.
+      }
+    } else if (heard.playing) {
+      _soundWaitTicks = 0;
+      _step(
+        heard.muted
+            ? 'Som: o YouTube toca, mas sem som (mudo).'
+            : 'Som: a tocar pelo YouTube.',
+      );
     }
   }
 

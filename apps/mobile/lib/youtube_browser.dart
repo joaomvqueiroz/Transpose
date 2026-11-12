@@ -1297,7 +1297,12 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   Future<void> playWatch(Uri watch) async {
     if (!isYouTubeBrowserUri(watch)) throw ArgumentError.value(watch);
-    await command('pause');
+    try {
+      await command('pause');
+    } on Object {
+      // Nothing to pause (no bridge on this page yet, or Gecko's relay
+      // still connecting): the new video opens anyway.
+    }
     if (_disposed) return;
     _timeline.reset();
     _pauseOnReadyVideoId = null;
