@@ -1019,12 +1019,76 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   // How far the finger has dragged the adjustments' bar (null: no drag).
   double? _sheetDrag;
 
-  /// The finger let go of the bar: settle on the nearest height.
+  // A finger on the adjustments themselves (not their bar): with their list
+  // at its top, going down moves the whole sheet, as the bar does.
+  bool _sheetListAtTop = true;
+  int? _sheetFinger;
+  Offset _sheetFingerStart = Offset.zero;
+  bool _sheetFromContent = false;
+  VelocityTracker? _sheetVelocity;
+
+  void _sheetPointerDown(PointerDownEvent event) {
+    if (_sheetFinger != null) return;
+    _sheetFinger = event.pointer;
+    _sheetFingerStart = event.position;
+    _sheetFromContent = false;
+    _sheetVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+  }
+
+  void _sheetPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _sheetFinger) return;
+    _sheetVelocity?.addPosition(event.timeStamp, event.position);
+    if (!_sheetFromContent) {
+      if (_sheetDrag != null) return; // the bar is being dragged
+      final Offset moved = event.position - _sheetFingerStart;
+      if (moved.dy < kTouchSlop ||
+          moved.dy < moved.dx.abs() * 1.4 ||
+          event.delta.dy <= 0 ||
+          !_sheetListAtTop) {
+        return;
+      }
+      _sheetFromContent = true;
+      setState(() => _sheetDrag = 0);
+    }
+    setState(() => _sheetDrag = (_sheetDrag ?? 0) + event.delta.dy);
+  }
+
+  void _sheetPointerUp(PointerEvent event) {
+    if (event.pointer != _sheetFinger) return;
+    final bool dragging = _sheetFromContent;
+    final double vy =
+        _sheetVelocity?.getVelocity().pixelsPerSecond.dy ?? 0;
+    _sheetFinger = null;
+    _sheetFromContent = false;
+    _sheetVelocity = null;
+    if (dragging) _endSheetDrag(event is PointerCancelEvent ? 0 : vy);
+  }
+
+  // The bar's own drag; ignored while a finger on the adjustments already
+  // moves the sheet (one finger, one movement).
+  void _handleDragStart() {
+    if (!_sheetFromContent) setState(() => _sheetDrag = 0);
+  }
+
+  void _handleDragUpdate(double dy) {
+    if (!_sheetFromContent) setState(() => _sheetDrag = (_sheetDrag ?? 0) + dy);
+  }
+
+  void _handleDragEnd(double velocity) {
+    if (!_sheetFromContent) _endSheetDrag(velocity);
+  }
+
+  /// The finger let go: the sheet goes on the way the finger was going
+  /// (up: higher; down: lower or closed) and stops there, with a little
+  /// spring; never back the other way. Barely moved, it stays.
   void _endSheetDrag(double velocity) {
     final double moved = _sheetDrag ?? 0;
     setState(() => _sheetDrag = null);
-    final bool up = moved < -40 || (moved <= 0 && velocity < -500);
-    final bool down = moved > 40 || (moved >= 0 && velocity > 500);
+    // The finger's last direction first (it may have come back), then
+    // how far it went.
+    final bool up = velocity < -150 || (velocity.abs() <= 150 && moved < -40);
+    final bool down = velocity > 150 || (velocity.abs() <= 150 && moved > 40);
     // The floating sheet has one more height, the low one, between the
     // medium height and closed.
     final bool floating = _floatingSheet;
@@ -3693,9 +3757,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 // Between the tone tab and the others only the frame
                 // changes, not what is seen: no glide there either.
                 duration: _sheetDrag == null && !_tabJump
-                    ? const Duration(milliseconds: 240)
+                    ? const Duration(milliseconds: 340)
                     : Duration.zero,
-                curve: Curves.easeOutCubic,
+                // A little spring when it settles, then it stays.
+                curve: Curves.easeOutBack,
                 top: shownTop,
                 left: sheetSide,
                 right: sheetSide,
@@ -3712,12 +3777,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       Theme.of(context),
                       mode: widget.appearance.mode,
                     ),
-                    child: NotificationListener<ScrollNotification>(
+                    child: Listener(
+                      onPointerDown: _sheetPointerDown,
+                      onPointerMove: _sheetPointerMove,
+                      onPointerUp: _sheetPointerUp,
+                      onPointerCancel: _sheetPointerUp,
+                      child: ScrollConfiguration(
+                      // While the finger moves the sheet, its list holds
+                      // still.
+                      behavior: ScrollConfiguration.of(context).copyWith(
+                        physics: _sheetFromContent
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
+                      ),
+                      child: NotificationListener<ScrollNotification>(
                       // How far the adjustments are scrolled: their bar
                       // goes up with them instead of staying put.
                       onNotification: (note) {
                         if (note.metrics.axis == Axis.vertical &&
                             note.depth == 0) {
+                          _sheetListAtTop = note.metrics.pixels <=
+                              note.metrics.minScrollExtent + .5;
                           _handleScroll.value = note.metrics.pixels.clamp(
                             0.0,
                             60.0,
@@ -3851,12 +3931,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                 child: Center(
                                   child: AdjustmentsHandle(
                                     light: light,
-                                    onDragStart: () =>
-                                        setState(() => _sheetDrag = 0),
-                                    onDragUpdate: (dy) => setState(
-                                      () => _sheetDrag = (_sheetDrag ?? 0) + dy,
-                                    ),
-                                    onDragEnd: _endSheetDrag,
+                                    onDragStart: _handleDragStart,
+                                    onDragUpdate: _handleDragUpdate,
+                                    onDragEnd: _handleDragEnd,
                                   ),
                                 ),
                               ),
@@ -3892,18 +3969,17 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   gestureKey: const Key('adjustmentsGrabber'),
                                   alwaysVisible: true,
                                   light: light,
-                                  onDragStart: () =>
-                                      setState(() => _sheetDrag = 0),
-                                  onDragUpdate: (dy) => setState(
-                                    () => _sheetDrag = (_sheetDrag ?? 0) + dy,
-                                  ),
-                                  onDragEnd: _endSheetDrag,
+                                  onDragStart: _handleDragStart,
+                                  onDragUpdate: _handleDragUpdate,
+                                  onDragEnd: _handleDragEnd,
                                 ),
                               ),
                             ),
                           ],
                         ],
                       ),
+                    ),
+                    ),
                     ),
                   ),
                 ),
