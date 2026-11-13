@@ -6,9 +6,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'home_button_visibility.dart';
+import 'picture_in_picture.dart';
 
 import 'package:flutter/services.dart';
 import 'package:gecko_view/gecko_view.dart';
+
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
@@ -1255,6 +1257,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         'window.__transponoNativeBar = ${nativeGlassBar.value};'
         'window.__transponoBrowseOnly = $browseOnly;'
         'window.__transponoLowVideo = $lowVideo;'
+        // iPhone's small window (experimental): only the playing video's
+        // page sends its frames, never the browse page nor Spotify's
+        // hidden one.
+        'window.__transponoPipFrames = ${usesGecko && iosSmallWindow.value && !browseOnly && !lowVideo};'
         'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'
         'window.__transponoAppMiniSurface = $appMiniSurface;'

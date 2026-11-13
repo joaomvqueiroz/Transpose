@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_button_visibility.dart';
 
@@ -47,5 +50,38 @@ abstract final class PictureInPicture {
     } on Object {
       // Older app builds without the channel: nothing to do.
     }
+  }
+}
+
+/// iPhone, experimental (Ajustes → Mais): leaving the app shows the video
+/// in the system's small window. The page copies the video's frames to the
+/// app (only the playing video's page, only while this is on); the app
+/// shows them in iOS's picture-in-picture. Off unless turned on.
+final ValueNotifier<bool> iosSmallWindow = ValueNotifier<bool>(false);
+
+abstract final class IosSmallWindow {
+  static const String _key = 'transpono_ios_small_window';
+  static bool _loaded = false;
+
+  /// Whether this build can offer it (iPhone).
+  static bool get supported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  static Future<void> load() async {
+    if (_loaded || !supported) return;
+    _loaded = true;
+    try {
+      iosSmallWindow.value =
+          await SharedPreferencesAsync().getBool(_key) ?? false;
+    } on Object {
+      // No preferences: stays off.
+    }
+  }
+
+  static void set(bool on) {
+    iosSmallWindow.value = on;
+    unawaited(
+      SharedPreferencesAsync().setBool(_key, on).catchError((Object _) {}),
+    );
   }
 }

@@ -174,6 +174,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
     inPictureInPicture.addListener(_pipChanged);
+    // iPhone's small window (experimental): its setting, then the player
+    // page is told.
+    unawaited(
+      IosSmallWindow.load().then((_) {
+        if (mounted && iosSmallWindow.value) {
+          unawaited(_player.youtube?.applyPageRoles());
+        }
+      }),
+    );
     PictureInPicture.onAction = _pipButton;
     final browseFactory = widget.browseSessionFactory;
     if (browseFactory != null && widget.playerController == null) {
@@ -1759,7 +1768,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
-  Widget _appearanceSettingsContent() => studioSpotifySkin
+  Widget _appearanceSettingsContent() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _appearanceSettingsMain(),
+      if (IosSmallWindow.supported) _smallWindowSetting(),
+    ],
+  );
+
+  /// iPhone, experimental: the video in the system's small window when
+  /// leaving the app. Off unless turned on here.
+  Widget _smallWindowSetting() => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: ValueListenableBuilder<bool>(
+      valueListenable: iosSmallWindow,
+      builder: (context, on, _) => SwitchListTile.adaptive(
+        key: const Key('iosSmallWindowSwitch'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        title: const Text('Janela pequena (experimental)'),
+        subtitle: const Text(
+          'Ao sair da app, o vídeo do YouTube continua numa janela pequena '
+          'do iPhone. Pode gastar mais bateria.',
+        ),
+        value: on,
+        onChanged: (value) {
+          IosSmallWindow.set(value);
+          unawaited(_player.youtube?.applyPageRoles());
+        },
+      ),
+    ),
+  );
+
+  Widget _appearanceSettingsMain() => studioSpotifySkin
       ? _spotifyAppearanceSettings()
       : Container(
           key: const Key('appearanceSettings'),

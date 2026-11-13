@@ -7,6 +7,9 @@
 // `TransponoGeckoBridge` at run time. ObjC selector names are pinned to match
 // the plugin's `TransponoGeckoHost` protocol.
 
+import AVFoundation
+import AVKit
+import CoreMedia
 import Foundation
 import GeckoView
 import UIKit
@@ -322,6 +325,16 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
         "failed": (field("failed") as? NSNumber)?.intValue ?? 0,
       ])
       session.reload()
+    case "pipFrame":
+      // iPhone's small window (experimental): a picture of the video.
+      guard let image = field("image") as? String else { return }
+      TransponoSmallWindow.shared.frame(
+        from: self,
+        base64: image,
+        playing: (field("playing") as? Bool)
+          ?? (field("playing") as? NSNumber)?.boolValue ?? false,
+        time: (field("time") as? NSNumber)?.doubleValue ?? 0,
+        duration: (field("duration") as? NSNumber)?.doubleValue ?? 0)
     case "channel":
       emit("channel", [
         "name": (field("name") as? String) ?? "",
@@ -330,6 +343,12 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
     default:
       break
     }
+  }
+
+  /// A button of the small window: to this page's video.
+  func sendSmallWindowCommand(_ action: String, seconds: Double = 0) {
+    guard let port, !closed else { return }
+    port.postMessage(["type": "pipCommand", "action": action, "seconds": seconds])
   }
 
   public func addonPortDidDisconnect(_ port: AddonPort) {
@@ -405,5 +424,237 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
 
   public func onProgressChange(session: GeckoSession, progress: Int) {
     emit("progress", ["value": progress])
+  }
+}
+
+// MARK: Small window (experimental)
+
+/// iPhone's picture-in-picture for the YouTube video (Ajustes → Mais,
+/// "Janela pequena", off by default). Gecko has no picture-in-picture of its
+/// own: the page sends small pictures of the video (relay.js, only while the
+/// app asks it to), shown here in a sample-buffer layer that the system's
+/// small window uses. Leaving the app with a video playing opens it; its
+/// buttons (play/pause, back/forward) go back to the page's video.
+final class TransponoSmallWindow: NSObject, AVPictureInPictureControllerDelegate,
+  AVPictureInPictureSampleBufferPlaybackDelegate
+{
+  static let shared = TransponoSmallWindow()
+
+  private weak var host: TransponoGeckoBridge?
+  private var holder: UIView?
+  private let layer = AVSampleBufferDisplayLayer()
+  private var controller: AVPictureInPictureController?
+  private var timebase: CMTimebase?
+  private var playing = false
+  private var time: Double = 0
+  private var duration: Double = 0
+  private var lastFrame = Date.distantPast
+  private var watchdog: Timer?
+  private var active = false
+
+  func frame(
+    from host: TransponoGeckoBridge, base64: String, playing: Bool, time: Double,
+    duration: Double
+  ) {
+    guard AVPictureInPictureController.isPictureInPictureSupported(),
+      let data = Data(base64Encoded: base64),
+      let image = UIImage(data: data)?.cgImage
+    else { return }
+    self.host = host
+    guard setUp() else { return }
+    let changed = playing != self.playing || abs(duration - self.duration) > 0.5
+    self.playing = playing
+    self.time = time
+    self.duration = duration
+    lastFrame = Date()
+    if let timebase {
+      CMTimebaseSetTime(timebase, time: CMTime(seconds: time, preferredTimescale: 600))
+      CMTimebaseSetRate(timebase, rate: playing ? 1 : 0)
+    }
+    guard let buffer = sampleBuffer(image) else { return }
+    if layer.status == .failed { layer.flush() }
+    layer.enqueue(buffer)
+    if controller?.canStartPictureInPictureAutomaticallyFromInline == false {
+      controller?.canStartPictureInPictureAutomaticallyFromInline = true
+    }
+    if changed { controller?.invalidatePlaybackState() }
+  }
+
+  /// The layer sits in the window, behind the app's own view (the system
+  /// needs it on screen to take it into the small window).
+  private func setUp() -> Bool {
+    if controller != nil, holder?.window != nil { return true }
+    guard
+      let window = UIApplication.shared.connectedScenes
+        .compactMap({ $0 as? UIWindowScene })
+        .flatMap({ $0.windows })
+        .first(where: { $0.isKeyWindow })
+    else { return false }
+    if holder == nil {
+      let view = UIView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
+      view.isUserInteractionEnabled = false
+      view.backgroundColor = .black
+      layer.frame = view.bounds
+      layer.videoGravity = .resizeAspect
+      view.layer.addSublayer(layer)
+      holder = view
+      var base: CMTimebase?
+      CMTimebaseCreateWithSourceClock(
+        allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(),
+        timebaseOut: &base)
+      if let base {
+        timebase = base
+        layer.controlTimebase = base
+      }
+    }
+    if let holder, holder.window !== window {
+      holder.removeFromSuperview()
+      window.insertSubview(holder, at: 0)
+    }
+    if controller == nil {
+      try? AVAudioSession.sharedInstance().setActive(true)
+      let source = AVPictureInPictureController.ContentSource(
+        sampleBufferDisplayLayer: layer, playbackDelegate: self)
+      let pip = AVPictureInPictureController(contentSource: source)
+      pip.delegate = self
+      pip.canStartPictureInPictureAutomaticallyFromInline = true
+      controller = pip
+      // No pictures for a while (the video stopped, or the setting was
+      // turned off): leaving the app no longer opens the small window.
+      watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        guard let self, !self.active,
+          Date().timeIntervalSince(self.lastFrame) > 3
+        else { return }
+        self.controller?.canStartPictureInPictureAutomaticallyFromInline = false
+      }
+    }
+    return true
+  }
+
+  private func sampleBuffer(_ image: CGImage) -> CMSampleBuffer? {
+    let width = image.width
+    let height = image.height
+    var pixels: CVPixelBuffer?
+    let attributes =
+      [
+        kCVPixelBufferCGImageCompatibilityKey: true,
+        kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+        kCVPixelBufferIOSurfacePropertiesKey: [:] as [String: Any],
+      ] as CFDictionary
+    guard
+      CVPixelBufferCreate(
+        kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attributes, &pixels)
+        == kCVReturnSuccess,
+      let pixels
+    else { return nil }
+    CVPixelBufferLockBaseAddress(pixels, [])
+    let context = CGContext(
+      data: CVPixelBufferGetBaseAddress(pixels), width: width, height: height,
+      bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pixels),
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+        | CGBitmapInfo.byteOrder32Little.rawValue)
+    context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    CVPixelBufferUnlockBaseAddress(pixels, [])
+    guard context != nil else { return nil }
+    var format: CMVideoFormatDescription?
+    guard
+      CMVideoFormatDescriptionCreateForImageBuffer(
+        allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescriptionOut: &format)
+        == noErr,
+      let format
+    else { return nil }
+    var timing = CMSampleTimingInfo(
+      duration: .invalid,
+      presentationTimeStamp: CMTime(seconds: time, preferredTimescale: 600),
+      decodeTimeStamp: .invalid)
+    var buffer: CMSampleBuffer?
+    guard
+      CMSampleBufferCreateReadyWithImageBuffer(
+        allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescription: format,
+        sampleTiming: &timing, sampleBufferOut: &buffer) == noErr,
+      let buffer
+    else { return nil }
+    // Shown at once, whatever the clock says.
+    if let list = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: true),
+      CFArrayGetCount(list) > 0
+    {
+      let entry = unsafeBitCast(CFArrayGetValueAtIndex(list, 0), to: CFMutableDictionary.self)
+      CFDictionarySetValue(
+        entry,
+        Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+        Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+    }
+    return buffer
+  }
+
+  // MARK: AVPictureInPictureSampleBufferPlaybackDelegate
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool
+  ) {
+    self.playing = playing
+    host?.sendSmallWindowCommand(playing ? "play" : "pause")
+    if let timebase { CMTimebaseSetRate(timebase, rate: playing ? 1 : 0) }
+    pictureInPictureController.invalidatePlaybackState()
+  }
+
+  func pictureInPictureControllerTimeRangeForPlayback(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) -> CMTimeRange {
+    guard duration > 0 else {
+      return CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+    }
+    return CMTimeRange(
+      start: .zero, duration: CMTime(seconds: duration, preferredTimescale: 600))
+  }
+
+  func pictureInPictureControllerIsPlaybackPaused(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) -> Bool {
+    !playing
+  }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    didTransitionToRenderSize newRenderSize: CMVideoDimensions
+  ) {}
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    skipByInterval skipInterval: CMTime, completion completionHandler: @escaping () -> Void
+  ) {
+    host?.sendSmallWindowCommand("skip", seconds: CMTimeGetSeconds(skipInterval))
+    completionHandler()
+  }
+
+  // MARK: AVPictureInPictureControllerDelegate
+
+  func pictureInPictureControllerWillStartPictureInPicture(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) {
+    active = true
+  }
+
+  func pictureInPictureControllerDidStopPictureInPicture(
+    _ pictureInPictureController: AVPictureInPictureController
+  ) {
+    active = false
+  }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    failedToStartPictureInPictureWithError error: Error
+  ) {
+    active = false
+    NSLog("Transpono: small window failed: %@", "\(error)")
+  }
+
+  func pictureInPictureController(
+    _ pictureInPictureController: AVPictureInPictureController,
+    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler:
+      @escaping (Bool) -> Void
+  ) {
+    completionHandler(true)
   }
 }
