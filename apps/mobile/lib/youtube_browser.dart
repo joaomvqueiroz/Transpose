@@ -815,6 +815,31 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       unawaited(_checkContentReady());
     });
     await controller.loadRequest(uri);
+    if (usesGecko) unawaited(_reloadIfStuck(uri));
+  }
+
+  /// Gecko, first open: the page sometimes never starts (left on its empty
+  /// first document), with no error, until the app was opened again. If no
+  /// YouTube page is there after a while, the address is loaded again (at
+  /// most twice).
+  Future<void> _reloadIfStuck(Uri uri) async {
+    for (int tries = 0; tries < 2; tries++) {
+      await Future<void>.delayed(const Duration(seconds: 10));
+      if (_disposed || _contentReady || _error != null) return;
+      String current = '';
+      try {
+        current = await controller.currentUrl() ?? '';
+      } on Object {
+        current = '';
+      }
+      if (_disposed) return;
+      if (current.startsWith('http')) return;
+      try {
+        await controller.loadRequest(uri);
+      } on Object {
+        return;
+      }
+    }
   }
 
   Future<void> _checkContentReady() async {
@@ -884,7 +909,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         final bool noContext =
             failure.message.startsWith('NO_CONTEXT') ||
             failure.message == 'JS timeout';
-        if (noContext && attempt < attempts) {
+        // The engine's relay is still installing (first run after an
+        // install or update): keep waiting, up to 30 s.
+        final bool installing = failure.message.contains('a instalar');
+        if (noContext && (attempt < attempts || (installing && attempt < 30))) {
           await Future<void>.delayed(const Duration(seconds: 1));
           if (_disposed || generation != _document) return;
           continue;

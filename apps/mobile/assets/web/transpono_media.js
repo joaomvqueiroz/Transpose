@@ -832,9 +832,12 @@
         border-radius: 0 !important;
       }
       /* Without the site's tab row the player sits lower: no empty band
-         under its buttons. */
-      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #music-player-wrapper,
-      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #player-controls {
+         under its buttons. Only with the song's screen open: shrunk to the
+         bar, the page keeps saying FULL_PLAYER_VIEW, and a transform here
+         would hold the bar's cover (position: fixed, inside this wrapper)
+         in the middle of the page instead of in the bar. */
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"]:not([player-ui-state="PLAYER_BAR_ONLY"]) #music-player-wrapper,
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"]:not([player-ui-state="PLAYER_BAR_ONLY"]) #player-controls {
         transform: translateY(var(--tp-player-drop, 0px)) !important;
       }
       /* "Abrir no app YouTube Music": never shown. */

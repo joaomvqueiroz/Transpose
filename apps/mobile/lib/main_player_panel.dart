@@ -1015,6 +1015,8 @@ class _VideoSettings extends StatelessWidget {
         Expanded(
           child: SingleChildScrollView(
             key: const Key('visualPlayerSettingsScroll'),
+            // No bounce at the ends (iPhone): the list stops where it ends.
+            physics: const ClampingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: ListenableBuilder(
               listenable: model,
@@ -2533,6 +2535,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                   key: const Key(
                                     'visualFullscreenControlsScroll',
                                   ),
+                                  physics: const ClampingScrollPhysics(),
                                   child: Padding(
                                     padding: const EdgeInsets.fromLTRB(
                                       16,

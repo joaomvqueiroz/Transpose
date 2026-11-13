@@ -99,7 +99,37 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final Set<int> _mediaPointers = <int>{};
   bool _minimizeWhenReleased = false;
 
+  // Where each finger touched the video while the adjustments are open
+  // (see _mediaPointerMoved).
+  final Map<int, Offset> _mediaDragStart = <int, Offset>{};
+
+  void _mediaPointerDown(PointerDownEvent event) {
+    _mediaPointers.add(event.pointer);
+    // Only on the video itself (the top of the page), adjustments open.
+    final double videoBottom = _lastScreen.width * 9 / 16 + 48;
+    if (_mainControlsExpanded &&
+        !_adjustmentsCoverVideo &&
+        event.localPosition.dy < videoBottom) {
+      _mediaDragStart[event.pointer] = event.position;
+    }
+  }
+
+  /// With the adjustments open, a drag down on the video shrinks it to the
+  /// mini player too (the adjustments close with it), as with them closed.
+  /// Seen here, by the app: the page's own drag-down did not always reach
+  /// it while the adjustments were up.
+  void _mediaPointerMoved(PointerMoveEvent event) {
+    final Offset? start = _mediaDragStart[event.pointer];
+    if (start == null) return;
+    final Offset moved = event.position - start;
+    if (moved.dy > 60 && moved.dy > moved.dx.abs() * 1.4) {
+      _mediaDragStart.remove(event.pointer);
+      if (_twoPages && !_browsing && _player.isYouTube) _minimize();
+    }
+  }
+
   void _mediaPointerReleased(PointerEvent event) {
+    _mediaDragStart.remove(event.pointer);
     _mediaPointers.remove(event.pointer);
     if (_mediaPointers.isNotEmpty || !_minimizeWhenReleased) return;
     // After this event finished its dispatch (the platform view gets its
@@ -351,6 +381,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _minimizeWhenReleased = false;
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(true));
+    // The adjustments close with it: the page is told, as when they are
+    // closed by hand.
+    if (_mainControlsExpanded && player != null) {
+      unawaited(player.adjustmentsShown(false));
+    }
     setState(() {
       _browsing = true;
       // Starts where the full-size video was and moves to its corner.
@@ -1179,7 +1214,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       child: _player.isYouTube || _browsing
           ? Listener(
               // Observes only (see _minimize): which fingers are down here.
-              onPointerDown: (event) => _mediaPointers.add(event.pointer),
+              onPointerDown: _mediaPointerDown,
+              onPointerMove: _mediaPointerMoved,
               onPointerUp: _mediaPointerReleased,
               onPointerCancel: _mediaPointerReleased,
               child:
@@ -2102,7 +2138,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   ) {
     final enabled = _player.isYouTube && _player.loaded;
     final isDecibels = min < 0;
-    if (studioSpotifySkin) {
+    // YouTube and YouTube Music (any theme): Spotify's bars, in red.
+    final bool youtubeLook = !studioSpotifySkin && _player.isYouTube;
+    if (studioSpotifySkin || youtubeLook) {
+      final Color? ink = studioSpotifySkin ? Colors.white : null;
+      // Light themes: the same bars on a light page.
+      final bool light = Theme.of(context).brightness == Brightness.light;
+      final Color faint = light
+          ? const Color(0x33000000)
+          : const Color(0x33FFFFFF);
       final shown = isDecibels
           ? '${value > 0 ? '+' : ''}${value.toStringAsFixed(0)} dB'
           : '${(value * 100).round()}%';
@@ -2116,24 +2160,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: ink,
                 ),
               ),
             ),
             Expanded(
-              child: Slider(
-                key: Key(key),
-                min: min,
-                max: max,
-                divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
-                value: value,
-                onChanged: enabled
-                    ? (next) => setState(() => preview(next))
-                    : null,
-                onChangeEnd: enabled ? apply : null,
+              child: SliderTheme(
+                data: youtubeLook
+                    ? SliderTheme.of(context).copyWith(
+                        activeTrackColor: const Color(0xFFFF0033),
+                        inactiveTrackColor: faint,
+                        thumbColor: const Color(0xFFFF0033),
+                        overlayColor: const Color(0x29FF0033),
+                        activeTickMarkColor: const Color(0x80FFFFFF),
+                        inactiveTickMarkColor: light
+                            ? const Color(0x55000000)
+                            : const Color(0x66FFFFFF),
+                      )
+                    : SliderTheme.of(context),
+                child: Slider(
+                  key: Key(key),
+                  min: min,
+                  max: max,
+                  divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
+                  value: value,
+                  onChanged: enabled
+                      ? (next) => setState(() => preview(next))
+                      : null,
+                  onChangeEnd: enabled ? apply : null,
+                ),
               ),
             ),
             SizedBox(
@@ -2141,9 +2199,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               child: Text(
                 shown,
                 textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13, color: Color(0xBFFFFFFF)),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: light && !studioSpotifySkin
+                      ? const Color(0xBF000000)
+                      : const Color(0xBFFFFFFF),
+                ),
               ),
             ),
+            // YouTube keeps its per-row reset (Spotify's has one per
+            // section, in its title).
+            if (youtubeLook)
+              IconButton(
+                key: Key('${key}Reset'),
+                tooltip: 'Repor $label a zero',
+                onPressed: enabled && value != 0 ? () => apply(0) : null,
+                icon: const Icon(Icons.restart_alt, size: 16),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 30,
+                  height: 30,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
           ],
         ),
       );
@@ -2972,6 +3050,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   // lowers the adjustments instead).
   bool _panelAtTop = true;
 
+  // This finger scrolls the adjustments' list (vertically): reaching its
+  // top and going on down, it lowers the adjustments.
+  bool _panelListDrag = false;
+
   // How far the adjustments' list is scrolled (up to 60): their bar on top
   // goes up and fades with it.
   final ValueNotifier<double> _handleScroll = ValueNotifier<double>(0);
@@ -2991,12 +3073,28 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _pullPointer = event.pointer;
     _pullStart = event.position;
     _pulling = null;
+    _panelListDrag = false;
     _pullVelocity = VelocityTracker.withKind(event.kind)
       ..addPosition(event.timeStamp, event.position);
   }
 
   void _panelPointerMove(PointerMoveEvent event) {
-    if (event.pointer != _pullPointer || _pulling == false) return;
+    if (event.pointer != _pullPointer) return;
+    // The list was being scrolled down to its top and the finger goes on
+    // down: from here, the same finger lowers the adjustments (they fade
+    // as they go), and back up raises them again.
+    // Only a vertical scroll of the list (never a slider's sideways drag).
+    if (_pulling == false &&
+        _panelListDrag &&
+        _pull.value >= .999 &&
+        event.delta.dy > 0 &&
+        _panelAtTop) {
+      _pulling = true;
+      _pull.stop();
+      _pullVelocity = VelocityTracker.withKind(event.kind)
+        ..addPosition(event.timeStamp, event.position);
+    }
+    if (_pulling == false) return;
     _pullVelocity?.addPosition(event.timeStamp, event.position);
     if (_pulling == null) {
       final Offset moved = event.position - _pullStart;
@@ -3005,6 +3103,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       final bool vertical = moved.dy.abs() > moved.dx.abs() * 1.4;
       _pulling =
           vertical && (_pull.value < .999 || (moved.dy > 0 && _panelAtTop));
+      _panelListDrag = vertical && _pulling != true;
       if (_pulling != true) return;
       _pull.stop();
     }
@@ -3166,10 +3265,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     // Not all the way up: the finger moves the adjustments,
                     // not their list.
                     child: ScrollConfiguration(
+                      // All the way up: no bounce nor stretch at the ends
+                      // (the list stops where it ends, on every source).
                       behavior: ScrollConfiguration.of(context).copyWith(
                         physics: _pull.value < .999
                             ? const NeverScrollableScrollPhysics()
-                            : null,
+                            : const ClampingScrollPhysics(),
+                        overscroll: false,
                       ),
                       child: Theme(
                         data: studioColumnTheme(
@@ -3195,7 +3297,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                 // adjustments under Android's buttons.
                                 child: Offstage(
                                   offstage: header > 0 && pull <= header,
-                                  child: content,
+                                  // Lowered by the finger, they fade out
+                                  // as they go (all there when up).
+                                  child: Opacity(
+                                    opacity: ((_pull.value - .25) / .7)
+                                        .clamp(0.0, 1.0),
+                                    child: content,
+                                  ),
                                 ),
                               ),
                               if (header > 0)
@@ -4811,6 +4919,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_tab == StudioTab.audioSettings) {
       return SingleChildScrollView(
         key: const Key('unifiedAudioSettingsScroll'),
+        physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 88),
         child: Column(
           children: [
@@ -4832,6 +4941,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         top: false,
         child: SingleChildScrollView(
           key: const Key('unifiedAppearanceSettingsScroll'),
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 88),
           child: Column(
             children: [
@@ -4848,6 +4958,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_tab == StudioTab.practice) {
       return SingleChildScrollView(
         key: const Key('unifiedPracticeScroll'),
+        physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 88),
         child: Column(
           children: [
@@ -5221,6 +5332,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         NestedScrollView(
           key: const Key('unifiedChordScroll'),
           controller: _scroll,
+          physics: const ClampingScrollPhysics(),
           headerSliverBuilder: (context, innerScrolled) => [
             SliverToBoxAdapter(
               child: Column(
@@ -5285,6 +5397,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   child: SingleChildScrollView(
                                     key: const Key('unifiedChordTextScroll'),
                                     primary: true,
+                                    physics: const ClampingScrollPhysics(),
                                     child: PlayerChordSheet(
                                       key: _unifiedChordKey,
                                       model: _player,
@@ -5315,6 +5428,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       SingleChildScrollView(
         key: const Key('unifiedChordScroll'),
         controller: _scroll,
+        physics: const ClampingScrollPhysics(),
         child: Column(
           children: [
             if (topGap > 0) SizedBox(height: topGap),

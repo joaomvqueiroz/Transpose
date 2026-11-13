@@ -198,13 +198,23 @@ public final class TransponoGeckoBridge: NSObject, NavigationDelegate, ProgressD
   /// timeout, so waiting for it could leave the page never loading. If it
   /// finishes after the page started, reload once so the relay content script
   /// (document_start) is present for the bridge.
+  ///
+  /// On a cold start the install can finish before the page has even begun
+  /// loading: a reload then reloads the empty first document (about:blank)
+  /// and cancels the page on its way, which stayed blank until the app was
+  /// opened again. So the page is reloaded only once it has started (an
+  /// http(s) address); before that, the same address is loaded again.
   @objc(load:) public func load(_ target: String) {
     session.load(target)
     Task { @MainActor in
       let alreadyInstalled = Self.extensionReady
       await Self.ensureExtension()
       guard !self.closed, !alreadyInstalled, self.port == nil else { return }
-      self.session.reload()
+      if let current = self.url, current.hasPrefix("http") {
+        self.session.reload()
+      } else {
+        self.session.load(target)
+      }
     }
   }
 
