@@ -594,7 +594,7 @@ final class TransponoSmallWindow: NSObject, AVPictureInPictureControllerDelegate
     _ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool
   ) {
     self.playing = playing
-    host?.sendSmallWindowCommand(playing ? "play" : "pause")
+    Task { @MainActor [weak self] in self?.host?.sendSmallWindowCommand(playing ? "play" : "pause") }
     if let timebase { CMTimebaseSetRate(timebase, rate: playing ? 1 : 0) }
     pictureInPictureController.invalidatePlaybackState()
   }
@@ -624,7 +624,8 @@ final class TransponoSmallWindow: NSObject, AVPictureInPictureControllerDelegate
     _ pictureInPictureController: AVPictureInPictureController,
     skipByInterval skipInterval: CMTime, completion completionHandler: @escaping () -> Void
   ) {
-    host?.sendSmallWindowCommand("skip", seconds: CMTimeGetSeconds(skipInterval))
+    let seconds = CMTimeGetSeconds(skipInterval)
+    Task { @MainActor [weak self] in self?.host?.sendSmallWindowCommand("skip", seconds: seconds) }
     completionHandler()
   }
 
