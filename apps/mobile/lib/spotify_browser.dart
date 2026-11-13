@@ -192,12 +192,19 @@ const String _snapshotScript = '''
 const String _spotifyHomeButtonJs = r'''
   // "Abrir app" / "Open app": never shown; the start-screen button takes
   // its place, just left of the gear.
+  // Links already read and not «Abrir app» are skipped (the home page has
+  // hundreds of cards, each a whole subtree to read); all are read again
+  // every 20 runs, in case the page reused one.
+  window.__tpLinkRun = ((window.__tpLinkRun || 0) + 1) % 20;
+  if (!window.__tpLinkSeen || window.__tpLinkRun === 0) window.__tpLinkSeen = new WeakSet();
+  const linkSeen = window.__tpLinkSeen;
   for (const link of document.querySelectorAll('a, button')) {
-    if (link.dataset.transpono) continue;
+    if (link.dataset.transpono || linkSeen.has(link)) continue;
     const text = (link.textContent || '').trim();
-    if (/^(abrir (a |o )?app|abrir no app|open (the )?app|get (the )?app|obter (a )?app)$/i.test(text) &&
-        link.style.display !== 'none') {
-      link.style.setProperty('display', 'none', 'important');
+    if (/^(abrir (a |o )?app|abrir no app|open (the )?app|get (the )?app|obter (a )?app)$/i.test(text)) {
+      if (link.style.display !== 'none') link.style.setProperty('display', 'none', 'important');
+    } else {
+      linkSeen.add(link);
     }
   }
   const gear = document.querySelector('[data-testid="settings-container"] [data-testid="gears-button"]');
@@ -1029,6 +1036,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   String? _soundStep;
   bool get _diagnoses => defaultTargetPlatform == TargetPlatform.iOS;
   bool _shadowStarted = false;
+  bool _dressing = false;
   String? _shadowStartError;
   int _soundWaitTicks = 0;
 
@@ -1045,6 +1053,10 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
 
   /// Spotify's own bars carry the studio's buttons; their taps come here.
   Future<void> _dressPage() async {
+    // One at a time: while the page is busy loading, a call may outlast
+    // the poll's period, and calls would pile up.
+    if (_dressing) return;
+    _dressing = true;
     // The same on iPhone's Gecko engine as on Android.
     try {
       final String libraryFlag =
@@ -1092,6 +1104,8 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       }
     } on Object {
       // No page yet; the next poll dresses it.
+    } finally {
+      _dressing = false;
     }
   }
 
@@ -1296,6 +1310,15 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     if (shadow == null) {
       _step('Som: sem YouTube oculto (motor Gecko indisponível nesta versão).');
     } else if (!_disposed) {
+      // The hidden YouTube page starts once Spotify's home has loaded (or
+      // after 8 s at most), plus a moment: started together, it fought the
+      // home page for network and processor while that page was drawing.
+      for (var waited = 0; waited < 8000 && _progress < 100; waited += 200) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        if (_disposed) return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      if (_disposed) return;
       try {
         await shadow.start(Uri.https('m.youtube.com', '/'));
       } on Object catch (failure) {
@@ -1317,6 +1340,8 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   ) async {
     final shadow = _shadow;
     if (shadow == null || _disposed) return;
+    // Nothing to follow yet (the home page loading): no calls to the pages.
+    if ((track == null || track.isEmpty) && !_shadowStarted) return;
     try {
       // One call for the page: its sound off and, every few seconds, the
       // page kept "on screen" (both pages).
@@ -1565,7 +1590,12 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       _track = track;
       _canGoBack = back;
       _tick++;
-      if (_tick.isEven || spotifyPlayerOpen.value) unawaited(_dressPage());
+      // Every 600 ms (300 with the player open); every 1.2 s while the
+      // page is still loading, which leaves its main thread to the page.
+      final bool dress = _progress < 100
+          ? _tick % 4 == 0
+          : (_tick.isEven || spotifyPlayerOpen.value);
+      if (dress) unawaited(_dressPage());
       if (_playOpenedPath != null) unawaited(_playOpened());
       unawaited(
         _followWithYouTube(

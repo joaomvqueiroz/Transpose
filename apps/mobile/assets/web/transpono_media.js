@@ -1015,7 +1015,9 @@
       try {
         new MutationObserver(queueSkip).observe(root, {
           subtree: true, childList: true, attributes: true,
-          attributeFilter: ['class', 'style', 'disabled', 'aria-disabled'],
+          // Not 'style': the page changes it all the time (thumbnails,
+          // progress bar); the 500 ms backstop covers style-only changes.
+          attributeFilter: ['class', 'disabled', 'aria-disabled'],
         });
       } catch (_) {}
       // A light backstop for changes the observer misses (e.g. opacity
@@ -1450,9 +1452,13 @@
       root.style.setProperty('--transpono-mini-x', `${x}px`);
       root.style.setProperty('--transpono-mini-y', `${y}px`);
     };
+    // Walks for the sticky bars per entry into the mini player: a few, not
+    // forever (each walks up to 6000 nodes).
+    let liftTries = 0;
     const setMini = mini => {
       if (root.classList.contains('transpono-mini') === mini) return;
       root.classList.toggle('transpono-mini', mini);
+      liftTries = 0;
       if (mini) {
         liftStickyBars();
       } else {
@@ -1552,8 +1558,9 @@
       if (!root.classList.contains('transpono-mini')) return;
       if (!playerOf() || window.location.pathname !== '/watch') {
         setMini(false);
-      } else if (!lifted.length) {
+      } else if (!lifted.length && liftTries < 6) {
         // Only until the bar is found: walking the page is not free.
+        liftTries++;
         liftStickyBars();
       }
     }, 500);
@@ -2422,6 +2429,11 @@
   }
 
   function post() {
+    // Pushed snapshots only when asked for (window.__transponoPush): the
+    // app reads them itself (its poll), and nothing listens to this
+    // channel, while each snapshot measures the page's bars (layout) up to
+    // five times a second.
+    if (window.__transponoPush !== true) return;
     const json = JSON.stringify(snapshot());
     if (json === lastPosted) return;
     lastPosted = json;

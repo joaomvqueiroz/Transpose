@@ -497,6 +497,35 @@ const String _desktopLibraryScript = r'''
   let items = 0;
   for (const a of document.querySelectorAll('a[href]')) if (itemOf(a.getAttribute('href'))) items++;
   const labelled = document.querySelectorAll('[aria-labelledby*="spotify:"]').length;
+  // A collapsed sidebar (covers only: no names, no filter chips, and only
+  // the first rows drawn) is reopened with its own button. Spotify keeps
+  // that state between visits, so it is checked on every run, not only
+  // when no list was found: collapsed, the sidebar still has rows (the
+  // covers), so it used to be styled as it was. Collapsed means: no
+  // «Recolher/Collapse» button, and an «Abrir/Expandir/Expand» one (not
+  // «Mostrar mais», which widens the open panel). A few tries, 1.5 s apart.
+  let closed = false;
+  if (want !== 'tracks' && box.side && (W.__tpOpenTries || 0) < 5) {
+    let shut = null;
+    let open = false;
+    for (const b of document.querySelectorAll('button[aria-label]')) {
+      const l = b.getAttribute('aria-label') || '';
+      if (!/(biblioteca|library)/i.test(l)) continue;
+      if (/(recolher|collapse|fechar|close|ocultar|hide)/i.test(l)) open = true;
+      else if (!shut && /(abrir|open|expandir|expand)/i.test(l)) shut = b;
+    }
+    closed = !open && !!shut;
+    const now = Date.now();
+    if (closed && now - (W.__tpOpenAt || 0) > 1500) {
+      W.__tpOpenAt = now;
+      W.__tpOpenTries = (W.__tpOpenTries || 0) + 1;
+      W.__tpOpened = true;
+      // The chips come back with the open panel: Spotify's is tried again.
+      W.__tpApplied = '';
+      W.__tpTryFor = '';
+      shut.click();
+    }
+  }
   // A sidebar with rows but no names is collapsed: opened once. With no
   // sidebar list after 8 runs, the fallback: the desktop layout at 820 px,
   // scaled down, and its main view styled.
@@ -642,6 +671,9 @@ const String _desktopLibraryScript = r'''
   return JSON.stringify({
     host: location.host, path: location.pathname, playlists: playlists,
     items: items, rows: box.rows, box: box.mode, gate: gate, login: login,
+    // Ready to be seen: the list styled, the sidebar open, and the chip
+    // applied (the app keeps its cover over the page until then).
+    settled: box.mode !== 'nenhum' && box.rows > 0 && !closed && W.__tpApplied === want,
     ready: document.readyState === 'complete'
   });
 })()
@@ -708,6 +740,13 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
   bool _gate = false;
   bool _login = false;
   String? _error;
+  // The page stays under a cover until its list is styled (`settled`), so
+  // Spotify's own layout is never seen turning into Transpono's. Shown
+  // again on each chip change; lifted after [_coverLimit] whatever happens.
+  bool _settled = false;
+  DateTime _coverSince = DateTime.now();
+  int _tick = 0;
+  static const Duration _coverLimit = Duration(seconds: 12);
 
   @override
   void initState() {
@@ -757,10 +796,12 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
         },
       );
       if (!mounted) return;
-      _poll = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => unawaited(_read()),
-      );
+      // Every 250 ms while covered (the cover lifts as soon as the list
+      // is ready), every second after.
+      _poll = Timer.periodic(const Duration(milliseconds: 250), (_) {
+        _tick++;
+        if (_covered || _tick % 4 == 0) unawaited(_read());
+      });
       await _controller.loadRequest(spotifyDesktopLibraryStart);
     } on Object catch (failure) {
       if (mounted) setState(() => _error = '$failure');
@@ -797,6 +838,8 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
   Future<void> _read() async {
     if (_reading || !mounted) return;
     _reading = true;
+    // A chip changed during this read: its answer is about the old one.
+    final SpotifyLibrarySegment asked = _filter;
     try {
       final Object? raw = await _controller.runJavaScriptReturningResult(
         'window.__tpWant=${jsonEncode(_filter.name)};$_desktopLibraryScript',
@@ -816,6 +859,7 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
         _playlists = _int(values['playlists']);
         _items = _int(values['items']);
         _rows = _int(values['rows']);
+        if (values['settled'] == true && asked == _filter) _settled = true;
         _gate = values['gate'] == true;
         _login = values['login'] == true;
       });
@@ -826,8 +870,18 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
     }
   }
 
+  /// Covers the page until its list is styled again.
+  void _cover() {
+    _settled = false;
+    _coverSince = DateTime.now();
+  }
+
+  bool get _covered =>
+      !_settled && DateTime.now().difference(_coverSince) < _coverLimit;
+
   Future<void> _reload() async {
     setState(() {
+      _cover();
       _error = null;
       _gate = false;
       _login = false;
@@ -889,7 +943,10 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
               selected: _filter,
               onSelected: (SpotifyLibrarySegment filter) {
                 if (filter == _filter) return;
-                setState(() => _filter = filter);
+                setState(() {
+                  _filter = filter;
+                  _cover();
+                });
                 unawaited(_read());
               },
             ),
@@ -953,6 +1010,23 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
           key: const Key('spotifyDesktopLibrary'),
           controller: _controller,
         ),
+        // Until the list is styled: Transpono's background and a spinner,
+        // never Spotify's page half-way through its restyling.
+        if (_covered && !note)
+          const ColoredBox(
+            key: Key('spotifyDesktopLibraryCover'),
+            color: spotifyBase,
+            child: Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: spotifyGreen,
+                ),
+              ),
+            ),
+          ),
         if (_progress < 100)
           Positioned(
             top: 0,

@@ -661,6 +661,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   bool _checkingContent = false;
   String? _error;
   bool _canGoBack = false;
+  int _backTick = 0;
   bool _disposed = false;
   bool _refreshing = false;
   int _document = 0;
@@ -828,8 +829,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           const body = document.body;
           if (!body || document.readyState !== 'complete') return false;
           const hasVideo = !!body.querySelector('a[href*="/watch"]');
-          const hasReadablePage = (body.innerText || '').trim().length > 150;
-          return hasVideo || hasReadablePage;
+          if (hasVideo) return true;
+          // textContent, not innerText: no layout of the whole page.
+          return (body.textContent || '').trim().length > 150;
         })()
       ''');
       if (_disposed || document != _document) return;
@@ -940,7 +942,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       for (int count = 0; decoded is String && count < 2; count++) {
         decoded = jsonDecode(decoded);
       }
-      final bool back = await controller.canGoBack();
+      // Asked every 4th read, as on Spotify: each call to the page costs
+      // the phone's main thread.
+      final bool back = _backTick++ % 4 == 0
+          ? await controller.canGoBack()
+          : _canGoBack;
       if (_disposed ||
           generation != _document ||
           pausedVideoId != _pauseOnReadyVideoId) {

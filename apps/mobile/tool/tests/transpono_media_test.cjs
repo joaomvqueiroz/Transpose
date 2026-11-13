@@ -152,6 +152,7 @@ function fixture(options = {}) {
       return node;
     },
     TransponoBridge: {messages: [], postMessage(value) { this.messages.push(JSON.parse(value)); }},
+    __transponoPush: true,
   };
   window.top = options.frame ? {} : window;
   const document = {
