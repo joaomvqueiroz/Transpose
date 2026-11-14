@@ -22,6 +22,7 @@ class SceneDelegate: FlutterSceneDelegate {
     let engine = FlutterEngine(name: "transpono")
     engine.run()
     GeneratedPluginRegistrant.register(with: engine)
+    TransponoNative.register(with: engine)
     geckoModeEngine = engine
     let controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     let window = self.window ?? UIWindow(windowScene: windowScene)

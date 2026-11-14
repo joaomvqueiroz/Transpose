@@ -1,8 +1,10 @@
 import 'package:flutter/services.dart';
 
-/// The song in the background on Android: a media notification and the
-/// lock-screen controls, like Spotify's own app (see
-/// BackgroundPlaybackService.kt). Taps on them come back to [onAction].
+/// The song in the background: on Android a media notification and the
+/// lock-screen controls, like Spotify's own app (BackgroundPlaybackService.kt);
+/// on the iPhone the lock screen, Control Center and headphone buttons
+/// (TransponoBackground in AppDelegate.swift). Taps on them, and headphones
+/// being unplugged ("pause"), come back to [onAction].
 class BackgroundPlayback {
   static const MethodChannel _channel = MethodChannel('transpono/background');
 

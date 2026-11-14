@@ -1107,7 +1107,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   Timer? _backgroundStopTimer;
 
   void _updateBackground() {
-    if (!Platform.isAndroid) return;
+    // Android: notification; iPhone: lock screen and Control Center.
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     if (!(studioSpotifySource || studioMusicSource)) {
       _backgroundStopTimer?.cancel();
       unawaited(BackgroundPlayback.stop());
