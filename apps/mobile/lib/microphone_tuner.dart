@@ -24,11 +24,15 @@ class MicrophoneTunerTool extends StatefulWidget {
     super.key,
     this.referencePlayer,
     this.appearance = const StudioAppearance(),
+    this.recorder,
   });
 
   /// Optional injection for tests; production uses bundled piano recordings.
   final PianoReferencePlayer? referencePlayer;
   final StudioAppearance appearance;
+
+  /// Optional injection for tests; production records from the microphone.
+  final AudioRecorder? recorder;
 
   @override
   State<MicrophoneTunerTool> createState() => _MicrophoneTunerToolState();
@@ -38,7 +42,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
     with WidgetsBindingObserver {
   static const _sampleRate = 16000;
   static const _windowSize = 4096;
-  final AudioRecorder _recorder = AudioRecorder();
+  late final AudioRecorder _recorder = widget.recorder ?? AudioRecorder();
   PianoReferencePlayer? _referencePlayer;
   final List<double> _samples = List.filled(_windowSize, 0);
   StreamSubscription<Uint8List>? _subscription;
@@ -50,6 +54,7 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
   String? _error;
   bool _active = false;
   bool _starting = false;
+  bool _requestingPermission = false;
   int _cursor = 0;
   int _seen = 0;
   int _sinceEstimate = 0;
@@ -96,6 +101,9 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The permission dialog itself makes the app inactive; stopping then
+    // silently cancelled the start the user was answering.
+    if (state == AppLifecycleState.inactive && _requestingPermission) return;
     if (state != AppLifecycleState.resumed) {
       unawaited(_referencePlayer?.stop());
       _finishPreview();
@@ -147,7 +155,14 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
       _error = null;
     });
     try {
-      if (!await _recorder.hasPermission()) {
+      final bool allowed;
+      _requestingPermission = true;
+      try {
+        allowed = await _recorder.hasPermission();
+      } finally {
+        _requestingPermission = false;
+      }
+      if (!allowed) {
         throw StateError('Autorize o microfone nas definições do dispositivo.');
       }
       if (!mounted || request != _captureRequest) return;

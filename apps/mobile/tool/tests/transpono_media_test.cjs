@@ -78,6 +78,11 @@ function fixture(options = {}) {
       return node;
     }
     createConvolver() { return new Node('convolver'); }
+    createDynamicsCompressor() {
+      const node = new Node('compressor');
+      for (const name of ['threshold', 'knee', 'ratio', 'attack', 'release']) node[name] = parameter();
+      return node;
+    }
     createBuffer(channels, length, sampleRate) {
       const data = Array.from({length: channels}, () => new Float32Array(length));
       return {numberOfChannels: channels, length, sampleRate,
@@ -671,7 +676,9 @@ test('loop counter stays monotonic across epoch changes and unsupported states f
   await f.api.command({action: 'markA'});
   f.video.currentTime = 100;
   await f.api.command({action: 'markB'});
-  assert.equal(f.api.snapshot().loopEventsSupported, false, 'EOF looping is not confirmed reliably');
+  // B is kept clear of EOF, where the page pauses before the loop poll.
+  assert.equal(f.api.snapshot().loopB, 99.7);
+  assert.equal(f.api.snapshot().loopEventsSupported, true);
   f.video.duration = Infinity;
   assert.equal(f.api.snapshot().loopEventsSupported, false);
   f.navigate(null);
@@ -819,7 +826,7 @@ test('direct, cross-origin blob and protected media never acquire an audio sourc
 test('worklet preparation failure leaves native playback untouched', async () => {
   const f = fixture({factoryFails: true});
   const result = await f.api.command({action: 'pitch', value: 2});
-  assert.equal(result.pitchStatus, 'unavailable');
+  assert.equal(result.pitchStatus, 'failed');
   assert.equal(f.sources.length, 0);
   assert.equal(f.video.paused, false);
 });
@@ -884,7 +891,8 @@ test('schedule errors and processor errors restore only the original audio route
   f.state.scheduleFails = true;
   await f.api.command({action: 'pitch', value: 3});
   assert.deepEqual(f.gains(), [1, 0]);
-  assert.equal(f.api.snapshot().pitchStatus, 'unavailable');
+  // A timeout or rejected schedule is retryable; a dead processor is not.
+  assert.equal(f.api.snapshot().pitchStatus, 'failed');
   f.state.scheduleFails = false;
   await f.api.command({action: 'pitch', value: -1});
   f.advance();
@@ -902,8 +910,27 @@ test('nonzero input with sustained silent DSP output falls back to dry', async (
   f.state.outputSignal = 0;
   f.advance();
   f.advance(2600);
-  assert.equal(f.api.snapshot().pitchStatus, 'unavailable');
+  assert.equal(f.api.snapshot().pitchStatus, 'failed');
   assert.deepEqual(f.gains(), [1, 0]);
+});
+
+test('a transient pitch failure lets the next pitch command rebuild the route', async () => {
+  const f = fixture();
+  await f.api.command({action: 'pitch', value: 2});
+  f.advance();
+  f.state.outputSignal = 0;
+  await f.api.command({action: 'pitch', value: 4});
+  f.advance();
+  f.advance(2600);
+  assert.equal(f.api.snapshot().pitchStatus, 'failed');
+  assert.equal(f.api.snapshot().pitch, 0);
+  f.state.outputSignal = 0.1;
+  await f.api.command({action: 'pitch', value: 4});
+  f.advance();
+  assert.equal(f.api.snapshot().pitchStatus, 'active');
+  assert.equal(f.api.snapshot().pitch, 4);
+  assert.deepEqual(f.gains(), [0, 1]);
+  assert.equal(f.sources.length, 1);
 });
 
 test('unconfirmed silent input has a bounded loading period but paused time is excluded', async () => {
@@ -915,7 +942,7 @@ test('unconfirmed silent input has a bounded loading period but paused time is e
   assert.equal(f.api.snapshot().pitchStatus, 'loading');
   f.video.paused = false;
   for (let i = 0; i < 52; i += 1) f.advance(200);
-  assert.equal(f.api.snapshot().pitchStatus, 'unavailable');
+  assert.equal(f.api.snapshot().pitchStatus, 'failed');
   assert.equal(f.api.snapshot().pitch, 0);
   assert.match(f.api.snapshot().pitchMessage, /Não foi possível confirmar/);
   assert.deepEqual(f.gains(), [1, 0]);
@@ -1048,6 +1075,70 @@ test('ads bypass pitch/speed/loop without removing or skipping advertisements', 
   assert.equal(f.video.playbackRate, 0.75);
   assert.equal(f.api.snapshot().pitch, 2);
   assert.equal(f.sources.length, 1);
+});
+
+test('B near the end repeats even when the page reaches EOF first', async () => {
+  const f = fixture();
+  f.video.currentTime = 90;
+  await f.api.command({action: 'markA'});
+  f.video.currentTime = 100;
+  await f.api.command({action: 'markB'});
+  assert.equal(f.api.snapshot().loopB, 99.7);
+  assert.equal(f.api.snapshot().loopEnabled, true);
+  // The page ends before a poll sees B.
+  f.video.currentTime = 100;
+  f.video.pause();
+  f.video.ended = true;
+  f.video.dispatch('ended');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.video.currentTime, 90);
+  assert.equal(f.video.paused, false);
+  assert.equal(f.video.ended, false);
+  assert.equal(f.api.snapshot().loopEnabled, true);
+});
+
+test('ended without an enabled loop keeps the video stopped', async () => {
+  const f = fixture();
+  f.video.currentTime = 90;
+  await f.api.command({action: 'markA'});
+  f.video.currentTime = 99;
+  await f.api.command({action: 'markB'});
+  await f.api.command({action: 'toggleLoop'});
+  f.video.currentTime = 100;
+  f.video.pause();
+  f.video.ended = true;
+  f.video.dispatch('ended');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.video.currentTime, 100);
+  assert.equal(f.video.paused, true);
+});
+
+test('the safety limiter is switched in only while something boosts', async () => {
+  const f = fixture();
+  await f.api.command({action: 'bass', value: -3});
+  const limiter = f.nodes.find(node => node.kind === 'compressor');
+  assert.ok(limiter);
+  assert.equal(limiter.threshold.value, -1);
+  assert.equal(limiter.ratio.value, 20);
+  assert.equal(limiter.knee.value, 0);
+  const destination = f.contexts[0].destination;
+  const viaLimiter = () => outputRoutes(limiter, destination);
+  assert.equal(outputRoutes(f.sources[0], destination), 1);
+  const sends = () => f.nodes.filter(node => node.kind === 'gain' && node.connections.includes(limiter));
+  assert.equal(sends()[0].gain.value, 0, 'Untouched audio bypasses the compressor makeup gain');
+  await f.api.command({action: 'gain', value: 6});
+  assert.equal(sends()[0].gain.value, 1);
+  assert.equal(viaLimiter(), 1);
+  assert.equal(outputRoutes(f.sources[0], destination), 1, 'Never both routes at once');
+  await f.api.command({action: 'gain', value: 0});
+  assert.equal(sends()[0].gain.value, 0);
+  assert.equal(outputRoutes(f.sources[0], destination), 1);
+  await f.api.command({action: 'reverb', value: 0.2});
+  assert.equal(sends()[0].gain.value, 1);
+  f.setAd(true);
+  assert.equal(sends()[0].gain.value, 0);
+  f.setAd(false);
+  assert.equal(sends()[0].gain.value, 1);
 });
 
 test('absolute seek clamps bounds and only disarms a loop when leaving its range', async () => {

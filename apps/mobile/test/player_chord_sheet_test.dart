@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:transpose_mobile/chord_sheet.dart';
@@ -210,11 +211,39 @@ void main() {
       throwsFormatException,
     );
     expect(
-      () => decodePlayerChordFile(List.filled(40001, 65)),
+      () => decodePlayerChordFile(List.filled(240001, 65)),
       throwsFormatException,
     );
-    expect(() => validatePlayerChordText('C' * 10001), throwsFormatException);
-    expect(() => validatePlayerChordText('C\n' * 500), throwsFormatException);
+    expect(validatePlayerChordText('C' * 60000).length, 60000);
+    expect(() => validatePlayerChordText('C' * 60001), throwsFormatException);
+    expect(() => validatePlayerChordText('C\n' * 3000), throwsFormatException);
+  });
+
+  test('notação brasileira transpõe a linha inteira de acordes', () {
+    expect(transposePlayerChordText('C7/9   G   Am', 2), 'D7/9   A   Bm');
+    expect(transposePlayerChordText('Bº', 1), 'Cº');
+    expect(transposePlayerChordText('B°', 1), 'C°');
+    expect(transposePlayerChordText('C/E', 2), 'D/F#');
+    expect(
+      transposePlayerChordText(
+        'A7/13  D6/9  E7(9)  G7M  C7M(9)  Bm7(b5)  F#m7(11)  A4  Dsus4  Gadd9  A7+',
+        2,
+      ),
+      'B7/13  E6/9  F#7(9) A7M  D7M(9)  C#m7(b5) G#m7(11)  B4  Esus4  Aadd9  B7+',
+    );
+    const lyric = 'E agora A vida segue';
+    expect(transposePlayerChordText(lyric, 2), lyric);
+  });
+
+  test('um registo corrompido não bloqueia novas gravações', () async {
+    final prefs = SharedPreferencesAsync();
+    final store = ChordSheetStore(preferences: prefs);
+    final key =
+        'transpono.chords.v1.${base64Url.encode(utf8.encode('corrupta'))}';
+    await prefs.setString(key, '{"version":1}');
+    await expectLater(store.read('corrupta'), throwsFormatException);
+    await store.save('corrupta', const ChordSheet(notes: 'C   G'));
+    expect((await store.read('corrupta')).notes, 'C   G');
   });
 
   test('only chord rows transpose; lyric words and spacing are preserved', () {

@@ -102,6 +102,13 @@ class PlayerPreset {
   }
 }
 
+/// The song being added is already in the setlist.
+class AlreadyInSetlist implements Exception {
+  const AlreadyInSetlist();
+  @override
+  String toString() => 'Esta música já está na setlist.';
+}
+
 class PlayerPresetStore {
   PlayerPresetStore({SharedPreferencesAsync? preferences})
     : _preferences = preferences ?? SharedPreferencesAsync();
@@ -171,6 +178,18 @@ class PlayerPresetStore {
         }
         if (entries.any((entry) => entry is Map && entry['id'] == preset.id)) {
           throw StateError('Já existe um item com este identificador.');
+        }
+        // The setlist holds each song once: the same video (or file) is not
+        // added a second time.
+        if (setlist &&
+            preset.sourceId.isNotEmpty &&
+            entries.any((entry) {
+              final other = PlayerPreset.parse(entry);
+              return other != null &&
+                  other.youtube == preset.youtube &&
+                  other.sourceId == preset.sourceId;
+            })) {
+          throw const AlreadyInSetlist();
         }
         entries.add(preset.toJson());
       });

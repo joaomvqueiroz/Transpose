@@ -39,4 +39,37 @@ void main() {
       expect(embeddedYouTubeUri(blocked), isNull, reason: blocked);
     }
   });
+
+  test('browse list pages: results and home, never a video page', () {
+    expect(isBrowseListUri(youtubeSearchUri('promessas')), isTrue);
+    expect(isBrowseListUri(Uri.parse('https://m.youtube.com/')), isTrue);
+    expect(
+      isBrowseListUri(Uri.parse('https://music.youtube.com/search?q=x')),
+      isTrue,
+    );
+    expect(
+      isBrowseListUri(Uri.parse('https://m.youtube.com/watch?v=abcdefghijk')),
+      isFalse,
+    );
+    expect(
+      isBrowseListUri(Uri.parse('https://m.youtube.com/shorts/abcdefghijk')),
+      isFalse,
+    );
+    expect(isBrowseListUri(Uri.parse('https://accounts.google.com/')), isFalse);
+  });
+
+  test('the latest search is told apart from an earlier one', () {
+    final Uri first = youtubeSearchUri('eu te busco');
+    final Uri latest = youtubeSearchUri('promessas');
+    expect(sameBrowseList(first, latest), isFalse);
+    expect(
+      sameBrowseList(
+        Uri.parse(
+          'https://m.youtube.com/results?search_query=promessas&sp=EgIQAQ%3D%3D',
+        ),
+        latest,
+      ),
+      isTrue,
+    );
+  });
 }

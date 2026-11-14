@@ -217,7 +217,7 @@ PlayerPreset _preset(String id) => PlayerPreset(
   id: id,
   name: 'My $id',
   title: 'Song',
-  sourceId: 'video-id',
+  sourceId: 'video-$id',
   locator: 'aqz-KE-bpKQ',
   youtube: true,
   pitch: 2,

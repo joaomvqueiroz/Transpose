@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'player_panel_model.dart';
@@ -35,6 +37,16 @@ class PracticePanel extends StatefulWidget {
 class _PracticePanelState extends State<PracticePanel> {
   double? _speedPreview;
   double? _seekPreview;
+  // Released speed shown until the model reports it, so the thumb does not
+  // jump back to the old value meanwhile.
+  double? _speedPending;
+  Timer? _speedPendingTimeout;
+
+  @override
+  void dispose() {
+    _speedPendingTimeout?.cancel();
+    super.dispose();
+  }
 
   static String _time(Duration? value) {
     if (value == null) return '—';
@@ -67,7 +79,13 @@ class _PracticePanelState extends State<PracticePanel> {
           model.markerA != null &&
           model.markerB != null &&
           model.markerB! - model.markerA! >= const Duration(milliseconds: 250);
-      final speed = _speedPreview ?? model.speed;
+      if (_speedPending != null &&
+          (model.speed - _speedPending!).abs() < .005) {
+        _speedPending = null;
+        _speedPendingTimeout?.cancel();
+      }
+      // 0.5–1.5× is linear yet already puts 1× in the centre.
+      final speed = _speedPreview ?? _speedPending ?? model.speed;
       final maxPosition = model.duration.inMilliseconds.toDouble();
       final position =
           (_seekPreview ?? model.position.inMilliseconds.toDouble()).clamp(
@@ -252,11 +270,29 @@ class _PracticePanelState extends State<PracticePanel> {
                     divisions: 20,
                     label: '${(speed * 100).round()}%',
                     onChanged: ready && model.canSpeed
-                        ? (v) => setState(() => _speedPreview = v)
+                        ? (v) {
+                            _speedPendingTimeout?.cancel();
+                            setState(() {
+                              _speedPending = null;
+                              _speedPreview = v;
+                            });
+                          }
                         : null,
                     onChangeEnd: ready && model.canSpeed
                         ? (v) {
-                            setState(() => _speedPreview = null);
+                            setState(() {
+                              _speedPreview = null;
+                              _speedPending = v;
+                            });
+                            _speedPendingTimeout?.cancel();
+                            _speedPendingTimeout = Timer(
+                              const Duration(seconds: 5),
+                              () {
+                                if (mounted) {
+                                  setState(() => _speedPending = null);
+                                }
+                              },
+                            );
                             model.changeSpeed(v);
                           }
                         : null,

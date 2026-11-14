@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
 import 'package:transpose_mobile/microphone_tuner.dart';
 import 'package:transpose_mobile/piano_reference_player.dart';
 import 'package:transpose_mobile/studio_appearance.dart';
@@ -33,6 +35,30 @@ class _DelayedPianoReferencePlayer extends _FakePianoReferencePlayer {
   Future<void> stop() async {
     stops++;
   }
+}
+
+class _FakeRecorder implements AudioRecorder {
+  final permission = Completer<bool>();
+  final audio = StreamController<Uint8List>();
+  int starts = 0;
+
+  @override
+  Future<bool> hasPermission({bool request = true}) => permission.future;
+
+  @override
+  Future<Stream<Uint8List>> startStream(RecordConfig config) async {
+    starts++;
+    return audio.stream;
+  }
+
+  @override
+  Future<String?> stop() async => null;
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -197,6 +223,62 @@ void main() {
     piano.ready.complete();
     await tester.pump();
     expect(find.text('Nota de referência · piano'), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+  });
+
+  testWidgets('o diálogo de permissão não cancela o primeiro arranque', (
+    tester,
+  ) async {
+    final recorder = _FakeRecorder();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: MicrophoneTunerTool(
+              referencePlayer: _FakePianoReferencePlayer(),
+              recorder: recorder,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('tunerMicrophoneToggle')));
+    await tester.pump();
+    // The system dialog covers the app while the user answers it.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    recorder.permission.complete(true);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+    expect(recorder.starts, 1);
+    expect(find.text('Parar microfone'), findsOneWidget);
+  });
+
+  testWidgets('sair da app durante a permissão cancela o arranque', (
+    tester,
+  ) async {
+    final recorder = _FakeRecorder();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: MicrophoneTunerTool(
+              referencePlayer: _FakePianoReferencePlayer(),
+              recorder: recorder,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('tunerMicrophoneToggle')));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    recorder.permission.complete(true);
+    await tester.pump();
+    expect(recorder.starts, 0);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
   });

@@ -589,6 +589,14 @@ abstract class YouTubeBrowserSession extends ChangeNotifier {
   /// The video was dragged down in an [appMini] page.
   VoidCallback? onMinimizeRequest;
 
+  /// YouTube's own fullscreen button was pressed in an [appMini] page (the
+  /// player page): the app shows its landscape fullscreen instead.
+  VoidCallback? onFullscreenRequest;
+
+  /// A search made in the top bar of an [appMini] page (the player page):
+  /// its results belong in the browse page, not over the video.
+  void Function(String query)? onSearchRequest;
+
   /// Applies [browseOnly] and [appMini] to the current page.
   Future<void> applyPageRoles() async {}
 
@@ -771,6 +779,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           _minimizeSeq = null;
           _homeSeq = null;
           _openSeq = null;
+          _searchSeq = null;
+          _fullscreenSeq = null;
+          _handedSearchUrl = null;
           _error = null;
           _media = const YouTubeMediaState();
           _notify();
@@ -994,6 +1005,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       return;
     }
     _snapshotRevision = revision.toInt();
+    if (browseOnly && state['pageUrl'] is String) {
+      final Uri? page = Uri.tryParse(state['pageUrl'] as String);
+      if (page != null && isBrowseListUri(page)) _lastListUri = page;
+    }
     if (!browseOnly && state.containsKey('songTabs')) {
       final SongTabs? tabs = songTabsFromState(state['songTabs']);
       if (!sameSongTabs(tabs, musicSongTabs.value)) musicSongTabs.value = tabs;
@@ -1045,6 +1060,38 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         }
       }
     }
+    if (!browseOnly && appMini) {
+      final Object? searchSeq = state['searchSeq'];
+      final Object? query = state['searchRequest'];
+      if (searchSeq is num && searchSeq.toInt() != _searchSeq) {
+        final bool first = _searchSeq == null;
+        _searchSeq = searchSeq.toInt();
+        if ((!first || _searchSeq! > 0) &&
+            query is String &&
+            query.trim().isNotEmpty) {
+          onSearchRequest?.call(query.trim());
+        }
+      }
+      final Object? fullscreenSeq = state['fullscreenSeq'];
+      if (fullscreenSeq is num && fullscreenSeq.toInt() != _fullscreenSeq) {
+        final bool first = _fullscreenSeq == null;
+        _fullscreenSeq = fullscreenSeq.toInt();
+        if (!first || _fullscreenSeq! > 0) onFullscreenRequest?.call();
+      }
+      // A search the page made anyway (a way into results the tap
+      // interception missed): its results go to the browse page and this
+      // page goes back to its video.
+      final Object? pageUrl = state['pageUrl'];
+      final Uri? page = pageUrl is String ? Uri.tryParse(pageUrl) : null;
+      final String missed = page != null && page.path == '/results'
+          ? (page.queryParameters['search_query'] ?? '').trim()
+          : '';
+      if (missed.isNotEmpty && pageUrl != _handedSearchUrl) {
+        _handedSearchUrl = pageUrl as String;
+        onSearchRequest?.call(missed);
+        unawaited(controller.goBack().catchError((Object _) {}));
+      }
+    }
     if (browseOnly) {
       // A video started here anyway (YouTube Music plays in its own bar, a
       // link the tap interception missed): hand it to the player page and
@@ -1061,14 +1108,19 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           _shortsVideoId = id;
           onShortsPlaying?.call();
         }
-      } else if (id is String &&
-          id.isNotEmpty &&
-          state['hasVideo'] == true &&
-          state['isAd'] != true &&
-          id != _handedOffVideoId) {
+      } else {
+        // Left the Shorts: the same Short opened again later counts as new
+        // (and pauses the other page again).
         _shortsVideoId = null;
-        _handedOffVideoId = id;
-        unawaited(_handOffVideo(id));
+        if (id is String &&
+            id.isNotEmpty &&
+            state['hasVideo'] == true &&
+            state['isAd'] != true &&
+            id != _handedOffVideoId &&
+            !_isInlinePreview(state)) {
+          _handedOffVideoId = id;
+          unawaited(_handOffVideo(id));
+        }
       }
     }
     final pausedVideoId = _pauseOnReadyVideoId;
@@ -1187,6 +1239,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   int? _minimizeSeq;
   int? _homeSeq;
   int? _openSeq;
+  int? _searchSeq;
+  int? _fullscreenSeq;
+  String? _handedSearchUrl;
 
   Future<void> _handOffVideo(String id) async {
     final Uri? page = Uri.tryParse(await controller.currentUrl() ?? '');
@@ -1200,8 +1255,47 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (!_disposed &&
         page != null &&
         (page.path == '/watch' || page.path.startsWith('/shorts/'))) {
-      await goBack();
+      await _returnToList();
     }
+  }
+
+  /// On the YouTube site a video playing in a list (search results, home)
+  /// is the site's own muted preview of the card in view, not a video the
+  /// user chose: it is never handed to the player page (it used to replace
+  /// the song playing there). A chosen video opens its watch page.
+  /// YouTube Music plays in its own bar, so it is not filtered here.
+  static bool _isInlinePreview(Map<String, dynamic> state) {
+    final Object? pageUrl = state['pageUrl'];
+    final Uri? page = pageUrl is String ? Uri.tryParse(pageUrl) : null;
+    if (page == null || page.host.startsWith('music.')) return false;
+    if (page.host != 'youtube.com' && !page.host.endsWith('.youtube.com')) {
+      return false;
+    }
+    return page.path != '/watch';
+  }
+
+  /// The last list page seen here (search results, home…): the page the
+  /// browse page shows behind the mini player.
+  Uri? _lastListUri;
+
+  /// Back to the list the video came from. The site's own history is not
+  /// enough: after a second search, going back could land on the FIRST
+  /// search's results, so the page is checked and, if it is not the latest
+  /// list, that list is loaded.
+  Future<void> _returnToList() async {
+    final Uri? list = _lastListUri;
+    await goBack();
+    if (list == null) return;
+    for (int i = 0; i < 12; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      if (_disposed) return;
+      final Uri? here = Uri.tryParse(await controller.currentUrl() ?? '');
+      if (here != null && isBrowseListUri(here)) {
+        if (sameBrowseList(here, list)) return;
+        break;
+      }
+    }
+    if (!_disposed) await controller.loadRequest(list);
   }
 
   @override
@@ -1232,6 +1326,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   Future<void> command(String action, [num? value]) async {
     if (_disposed) return;
+    // Paused (or closed) before its sound came on: the unmute that waits
+    // for it must not start it again.
+    if (action == 'pause') _unmuteOnReadyVideoId = null;
     final native = _native;
     if (native != null && value != null && native.handles(action)) {
       await native.command(action, value);
@@ -1362,6 +1459,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     _pauseOnReadyVideoId = null;
     _focusOnReadyVideoId = null;
     _error = null;
+    if (browseOnly && !_soundCloud) _lastListUri = youtubeSearchUri(query);
     await controller.loadRequest(
       _soundCloud ? soundCloudSearchUri(query) : youtubeSearchUri(query),
     );

@@ -31,7 +31,12 @@ class MainActivity : FlutterActivity() {
     private var pendingWidgetAction: String? = null
     private val bandNoisy = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) bandAudio?.interrupt()
+            if (intent?.action != AudioManager.ACTION_AUDIO_BECOMING_NOISY) return
+            bandAudio?.interrupt()
+            // Headphones unplugged or Bluetooth gone: the song (YouTube,
+            // Spotify, a file) pauses too instead of going on out loud. The
+            // WebViews do not do this by themselves.
+            backgroundChannel?.invokeMethod("action", "pause")
         }
     }
     private var bandNoisyRegistered = false
@@ -194,6 +199,12 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onPause() {
+        // WebView writes cookies to disk only every ~30 s: a sign-in made just
+        // before the app is closed would be lost.
+        try {
+            android.webkit.CookieManager.getInstance().flush()
+        } catch (_: Throwable) {
+        }
         bandAudio?.interrupt()
         qaPhoneRhythm?.cancel()
         stems?.cancelForLifecycle(stemMessenger)

@@ -1567,7 +1567,6 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     final bool canSpeed = ready && model.canSpeed;
     final bool canLoop = ready && model.canLoop;
     final double min = youtubeNativeTransport ? .25 : .5;
-    final double speed = model.speed.clamp(min, 2.0);
     void set(double v) =>
         model.changeSpeed((v.clamp(min, 2.0) * 100).roundToDouble() / 100);
     Widget round(Key key, IconData icon, VoidCallback? onTap) => Material(
@@ -1666,12 +1665,11 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                 canSpeed ? () => set(model.speed - .05) : null,
               ),
               Expanded(
-                child: Slider(
-                  key: const Key('unifiedSpeedSlider'),
-                  min: min,
-                  max: 2,
-                  value: speed,
-                  onChanged: canSpeed ? set : null,
+                child: _CentredSpeedSlider(
+                  model: model,
+                  enabled: canSpeed,
+                  minSpeed: min,
+                  maxSpeed: 2,
                 ),
               ),
               round(
@@ -3248,6 +3246,96 @@ class _SeekControlState extends State<_SeekControl> {
   }
 }
 
+/// Slider position (0–1) for [speed]: each half covers its own range, so 1×
+/// stays in the centre even when min..max is not symmetric (0.25–2×).
+double speedSliderPosition(double speed, double minSpeed, double maxSpeed) =>
+    speed <= 1
+    ? (speed - minSpeed) / (1 - minSpeed) * .5
+    : .5 + (speed - 1) / (maxSpeed - 1) * .5;
+
+double speedForSliderPosition(
+  double position,
+  double minSpeed,
+  double maxSpeed,
+) {
+  // A small resting zone makes returning to the original speed feel precise.
+  if ((position - .5).abs() <= .035) return 1;
+  return position < .5
+      ? minSpeed + (1 - minSpeed) * position * 2
+      : 1 + (maxSpeed - 1) * (position - .5) * 2;
+}
+
+/// YouTube-look speed slider: sends while dragging, as before, but keeps the
+/// thumb on the dragged value until the model reports it.
+class _CentredSpeedSlider extends StatefulWidget {
+  const _CentredSpeedSlider({
+    required this.model,
+    required this.enabled,
+    required this.minSpeed,
+    required this.maxSpeed,
+  });
+  final PlayerPanelModel model;
+  final bool enabled;
+  final double minSpeed, maxSpeed;
+
+  @override
+  State<_CentredSpeedSlider> createState() => _CentredSpeedSliderState();
+}
+
+class _CentredSpeedSliderState extends State<_CentredSpeedSlider> {
+  double? _shownSpeed;
+  Timer? _timeout;
+
+  @override
+  void dispose() {
+    _timeout?.cancel();
+    super.dispose();
+  }
+
+  double _speedAt(double position) =>
+      (speedForSliderPosition(position, widget.minSpeed, widget.maxSpeed) * 100)
+          .roundToDouble() /
+      100;
+
+  void _show(double speed, {required bool released}) {
+    _timeout?.cancel();
+    _timeout = null;
+    setState(() => _shownSpeed = speed);
+    if (released) {
+      _timeout = Timer(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _shownSpeed = null);
+      });
+    }
+    widget.model.changeSpeed(speed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_shownSpeed != null &&
+        _timeout != null &&
+        (widget.model.speed - _shownSpeed!).abs() < .005) {
+      _shownSpeed = null;
+      _timeout?.cancel();
+    }
+    final double speed = (_shownSpeed ?? widget.model.speed).clamp(
+      widget.minSpeed,
+      widget.maxSpeed,
+    );
+    return Slider(
+      key: const Key('unifiedSpeedSlider'),
+      value: speedSliderPosition(speed, widget.minSpeed, widget.maxSpeed),
+      semanticFormatterCallback: (position) =>
+          '${_speedAt(position).toStringAsFixed(2)} vezes',
+      onChanged: widget.enabled
+          ? (position) => _show(_speedAt(position), released: false)
+          : null,
+      onChangeEnd: widget.enabled
+          ? (position) => _show(_speedAt(position), released: true)
+          : null,
+    );
+  }
+}
+
 class _SpeedControl extends StatefulWidget {
   const _SpeedControl({
     required this.model,
@@ -3278,27 +3366,35 @@ class _SpeedControlState extends State<_SpeedControl> {
     super.dispose();
   }
 
-  double _positionForSpeed(double speed) => speed <= 1
-      ? (speed - widget.minSpeed) / (1 - widget.minSpeed) * .5
-      : .5 + (speed - 1) / (widget.maxSpeed - 1) * .5;
+  double _positionForSpeed(double speed) =>
+      speedSliderPosition(speed, widget.minSpeed, widget.maxSpeed);
 
-  double _speedForPosition(double position) {
-    // A small resting zone makes returning to the original speed feel precise.
-    if ((position - .5).abs() <= .035) return 1;
-    return position < .5
-        ? widget.minSpeed + (1 - widget.minSpeed) * position * 2
-        : 1 + (widget.maxSpeed - 1) * (position - .5) * 2;
+  double _speedForPosition(double position) =>
+      speedForSliderPosition(position, widget.minSpeed, widget.maxSpeed);
+
+  /// Keeps the released value on screen until the model reports it (or 5 s
+  /// pass), so the thumb does not jump back to the old speed meanwhile.
+  void _release(double target) {
+    setState(() {
+      _dragSpeed = null;
+      _pendingSpeed = target;
+    });
+    _pendingSpeedTimeout?.cancel();
+    _pendingSpeedTimeout = Timer(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _pendingSpeed = null);
+    });
+    widget.model.changeSpeed(target);
   }
 
   @override
   Widget build(BuildContext context) {
     final bool enabled = widget.enabled && widget.model.canSpeed;
+    if (_pendingSpeed != null &&
+        (widget.model.speed - _pendingSpeed!).abs() < .005) {
+      _pendingSpeed = null;
+      _pendingSpeedTimeout?.cancel();
+    }
     if (widget.compact) {
-      if (_pendingSpeed != null &&
-          (widget.model.speed - _pendingSpeed!).abs() < .005) {
-        _pendingSpeed = null;
-        _pendingSpeedTimeout?.cancel();
-      }
       final speed = (_dragSpeed ?? _pendingSpeed ?? widget.model.speed).clamp(
         widget.minSpeed,
         widget.maxSpeed,
@@ -3362,21 +3458,7 @@ class _SpeedControlState extends State<_SpeedControl> {
                       }
                     : null,
                 onChangeEnd: enabled
-                    ? (position) {
-                        final target = _speedForPosition(position);
-                        setState(() {
-                          _dragSpeed = null;
-                          _pendingSpeed = target;
-                        });
-                        _pendingSpeedTimeout?.cancel();
-                        _pendingSpeedTimeout = Timer(
-                          const Duration(seconds: 5),
-                          () {
-                            if (mounted) setState(() => _pendingSpeed = null);
-                          },
-                        );
-                        widget.model.changeSpeed(target);
-                      }
+                    ? (position) => _release(_speedForPosition(position))
                     : null,
               ),
             ),
@@ -3406,6 +3488,8 @@ class _SpeedControlState extends State<_SpeedControl> {
         ],
       );
     }
+    // 0.5–1.5× is linear yet already puts 1× in the centre.
+    final double shown = _dragSpeed ?? _pendingSpeed ?? widget.model.speed;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -3416,7 +3500,7 @@ class _SpeedControlState extends State<_SpeedControl> {
           children: <Widget>[
             const _Label('VELOCIDADE'),
             Text(
-              '${(_dragSpeed ?? widget.model.speed).toStringAsFixed(2)}×',
+              '${shown.toStringAsFixed(2)}×',
               key: const Key('visualPlayerSpeedValue'),
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
             ),
@@ -3424,7 +3508,7 @@ class _SpeedControlState extends State<_SpeedControl> {
         ),
         Slider(
           key: const Key('visualPlayerSpeed'),
-          value: (_dragSpeed ?? widget.model.speed).clamp(.5, 1.5),
+          value: shown.clamp(.5, 1.5),
           min: .5,
           max: 1.5,
           divisions: 20,
@@ -3433,14 +3517,15 @@ class _SpeedControlState extends State<_SpeedControl> {
           semanticFormatterCallback: (double value) =>
               '${value.toStringAsFixed(2)} vezes',
           onChanged: enabled
-              ? (double value) => setState(() => _dragSpeed = value)
-              : null,
-          onChangeEnd: enabled
               ? (double value) {
-                  setState(() => _dragSpeed = null);
-                  widget.model.changeSpeed(value);
+                  _pendingSpeedTimeout?.cancel();
+                  setState(() {
+                    _pendingSpeed = null;
+                    _dragSpeed = value;
+                  });
                 }
               : null,
+          onChangeEnd: enabled ? _release : null,
         ),
         Wrap(
           spacing: 8,

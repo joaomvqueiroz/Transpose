@@ -1211,6 +1211,80 @@
       window.__transponoOpenSeq = (window.__transponoOpenSeq || 0) + 1;
     }, true);
   }
+  // Two-page mode, player page: a search made in its top bar is handed to
+  // the app, which shows the results in the browse page behind the mini
+  // player. Done here the results replaced the video (it stopped) and the
+  // browse page kept the previous search.
+  if (!window.__transponoPlayerSearch && typeof document.addEventListener === 'function') {
+    window.__transponoPlayerSearch = true;
+    const playerPage = () => !window.__transponoBrowseOnly &&
+      !!window.__transponoAppMini && plainYouTube();
+    const inTopBar = node => !!node && !!node.closest &&
+      !!node.closest('ytm-mobile-topbar-renderer');
+    const typed = () => {
+      const field = document.querySelector(
+        'ytm-mobile-topbar-renderer input.ytSearchboxComponentInput') ||
+        document.querySelector('ytm-mobile-topbar-renderer input');
+      return field ? String(field.value || '').trim() : '';
+    };
+    const hand = (event, query) => {
+      if (!query) return false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.__transponoSearchRequest = query;
+      window.__transponoSearchSeq = (window.__transponoSearchSeq || 0) + 1;
+      try {
+        const field = document.activeElement;
+        if (field && field.blur) field.blur();
+        if (typeof window.__transponoLeaveSearch === 'function') window.__transponoLeaveSearch();
+      } catch (_) {}
+      if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+      return true;
+    };
+    document.addEventListener('keydown', event => {
+      if (!playerPage() || event.key !== 'Enter' && event.keyCode !== 13) return;
+      if (!inTopBar(event.target)) return;
+      hand(event, typed());
+    }, true);
+    document.addEventListener('submit', event => {
+      if (!playerPage() || !inTopBar(event.target)) return;
+      hand(event, typed());
+    }, true);
+    document.addEventListener('click', event => {
+      if (!playerPage() || !event.target || !event.target.closest) return;
+      if (event.target.closest('.ytSearchboxComponentSearchButton')) {
+        hand(event, typed());
+        return;
+      }
+      const suggestion = event.target.closest('.ytSuggestionComponentSuggestion');
+      // The arrow (put it in the field) and "Remover" keep their own job.
+      if (!suggestion ||
+          event.target.closest('.ytSuggestionComponentRightContainer') ||
+          event.target.closest('.ytSuggestionComponentRemoveLink')) return;
+      const text = suggestion.querySelector('.ytSuggestionComponentText');
+      hand(event, String((text || suggestion).textContent || '').trim());
+    }, true);
+  }
+  // Player page: YouTube's own fullscreen button only enlarges the video
+  // inside the page (upright, cut off, controls under Android's buttons): a
+  // WebView has no real fullscreen here. It is left at once and the app is
+  // asked for its own landscape fullscreen instead.
+  if (!window.__transponoFullscreen && typeof document.addEventListener === 'function') {
+    window.__transponoFullscreen = true;
+    const leaveFullscreen = () => {
+      const inside = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!inside || window.__transponoBrowseOnly || !window.__transponoAppMini ||
+          !plainYouTube()) return;
+      try {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      } catch (_) {}
+      window.__transponoFullscreenSeq = (window.__transponoFullscreenSeq || 0) + 1;
+      if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
+    };
+    document.addEventListener('fullscreenchange', leaveFullscreen);
+    document.addEventListener('webkitfullscreenchange', leaveFullscreen);
+  }
   // Mini player, as in the YouTube app: drag the watch-page video DOWN and it
   // shrinks to a small video in a corner, the space it used is released so
   // the video list moves up; tapping the small video restores the full
@@ -1550,7 +1624,29 @@
   // Enabled only by the isolated generated-tone integration fixture.
   const probeEnabled = window.__transponoAudioProbe === true;
   const minLoopSeconds = 0.25;
+  const loopEndMargin = 0.3;
   let audioContext = null;
+  // The tone/EQ graph carries the video's sound. Android suspends the
+  // AudioContext after losing audio focus (a call, another app playing) and
+  // iOS marks it 'interrupted': the video then goes on in silence. Wake it
+  // whenever media plays again, the page shows again, or now and then.
+  const wakeAudio = () => {
+    try {
+      if (!audioContext || audioContext.state === 'running' ||
+          audioContext.state === 'closed') return;
+      const media = document.querySelector('video.html5-main-video') ||
+        document.querySelector('video, audio');
+      if (media && !media.paused && typeof audioContext.resume === 'function') {
+        const resumed = audioContext.resume();
+        if (resumed && typeof resumed.catch === 'function') resumed.catch(() => {});
+      }
+    } catch (_) {}
+  };
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('playing', wakeAudio, true);
+    document.addEventListener('visibilitychange', wakeAudio);
+  }
+  setInterval(wakeAudio, 2000);
   let video = null;
   let videoId = null;
   let pitch = 0;
@@ -1723,6 +1819,20 @@
     graph.audible = true;
   }
 
+  function boosted() {
+    return !isAd && (bass > 0 || mid > 0 || treble > 0 || gain > 0 ||
+      chorus > 0 || feedback > 0 || delay > 0 || reverb > 0);
+  }
+
+  function syncLimiter(graph) {
+    if (!graph || !graph.limiter || graph.retired) return;
+    const limited = boosted();
+    if (graph.limited === limited) return;
+    setGain(graph.directSend, limited ? 0 : 1);
+    setGain(graph.limiterSend, limited ? 1 : 0);
+    graph.limited = limited;
+  }
+
   function impulseResponse() {
     if (reverbImpulse) return reverbImpulse;
     const length = Math.floor(audioContext.sampleRate * 1.15);
@@ -1743,8 +1853,16 @@
 
   function connectEffects(graph) {
     graph.low.connect(graph.mid).connect(graph.high).connect(graph.master);
-    if (graph.probeFinal) graph.master.connect(graph.probeFinal).connect(audioContext.destination);
-    else graph.master.connect(audioContext.destination);
+    // Boosted EQ, gain and effects can exceed full scale. The limiter is
+    // switched in only while something boosts: the compressor's automatic
+    // makeup gain would otherwise change the level of untouched audio.
+    const mix = graph.limiter ? graph.limiterOut : graph.master;
+    if (graph.limiter) {
+      graph.master.connect(graph.directSend).connect(graph.limiterOut);
+      graph.master.connect(graph.limiterSend).connect(graph.limiter).connect(graph.limiterOut);
+    }
+    if (graph.probeFinal) mix.connect(graph.probeFinal).connect(audioContext.destination);
+    else mix.connect(audioContext.destination);
     graph.high.connect(graph.echoDelay);
     graph.echoDelay.connect(graph.echoGain).connect(graph.master);
     graph.echoDelay.connect(graph.feedbackGain).connect(graph.echoDelay);
@@ -1765,6 +1883,12 @@
     graph.mid.disconnect();
     graph.high.disconnect();
     graph.master.disconnect();
+    if (graph.limiter) {
+      graph.directSend.disconnect();
+      graph.limiterSend.disconnect();
+      graph.limiter.disconnect();
+      graph.limiterOut.disconnect();
+    }
     if (graph.probeFinal) graph.probeFinal.disconnect();
     graph.echoDelay.disconnect();
     graph.echoGain.disconnect();
@@ -1919,6 +2043,21 @@
     pitchMessage = message;
   }
 
+  // A timeout or a silent first activation is not a property of the source:
+  // 'failed' keeps the original audio but leaves the Tom controls enabled,
+  // and the next pitch command rebuilds the route. 'unavailable' stays for
+  // sources and browsers that can never be pitched.
+  function pitchFailed(message, element = video) {
+    unavailable(message, element);
+    pitchStatus = 'failed';
+  }
+
+  function blockedPitch(message) {
+    const error = new Error(message);
+    error.code = 'pitch-blocked';
+    return error;
+  }
+
   function invalidateLoopObservation() {
     loopEpoch += 1;
     discardLoopReturn();
@@ -2045,6 +2184,16 @@
       emptied() {
         if (element !== video || disposed) return;
         invalidateLoopObservation();
+        post();
+      },
+      ended() {
+        if (element !== video || disposed) return;
+        refresh();
+        // Fast speeds can cross the margin before B between two polls.
+        if (loopWanted && loopA !== null && loopB !== null && !isAd && !pendingLoopReturn) {
+          returnLoopToStart();
+          void playCurrentVideo().catch(() => {});
+        }
         post();
       },
       ratechange() {
@@ -2200,6 +2349,7 @@
       }
     }
     restoreEffects();
+    syncLimiter(graph);
     const duration = durationOf(video);
     if (!isAd && loopB !== null && (duration === 0 || loopB > duration)) {
       loopB = null;
@@ -2289,6 +2439,9 @@
       bars: pageBars() || musicBars(),
       songTabs: songTabs(),
       musicTint: musicTint(),
+      // Where this page is: the browse page remembers its last list (search
+      // results) to go back to it after handing a video over.
+      pageUrl: String(window.location.href),
       // The site's vertical Shorts player is on screen.
       shortsPage: /^\/shorts(\/|$)/.test(window.location.pathname),
       // Counters, not one-shot flags: any snapshot (there are several
@@ -2298,6 +2451,10 @@
       openSeq: window.__transponoOpenSeq || 0,
       openRequest: typeof window.__transponoOpenRequest === 'string'
         ? window.__transponoOpenRequest : '',
+      searchSeq: window.__transponoSearchSeq || 0,
+      fullscreenSeq: window.__transponoFullscreenSeq || 0,
+      searchRequest: typeof window.__transponoSearchRequest === 'string'
+        ? window.__transponoSearchRequest : '',
       hasVideo: !!video && !disposed,
       playing: !!video && !video.paused && !video.ended && !disposed,
       seeking: !!video && video.seeking,
@@ -2367,9 +2524,9 @@
     }
     const id = videoId;
     const pending = (async () => {
-      if (!safeSource(element)) throw new Error('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
+      if (!safeSource(element)) throw blockedPitch('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
       const Context = window.AudioContext || window.webkitAudioContext;
-      if (!Context) throw new Error('O equalizador não está disponível neste navegador.');
+      if (!Context) throw blockedPitch('O equalizador não está disponível neste navegador.');
       if (!audioContext) audioContext = new Context({latencyHint: 'interactive'});
       await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio e tente novamente.');
       let stretch;
@@ -2383,7 +2540,7 @@
         }
         if (disposed || video !== element || videoId !== id || isAd || (needsPitch && pitch === 0))
           throw new Error('A seleção de vídeo mudou. Tente novamente.');
-        if (!safeSource(element)) throw new Error('Esta fonte de áudio não permite alterar o tom.');
+        if (!safeSource(element)) throw blockedPitch('Esta fonte de áudio não permite alterar o tom.');
         requireSound(element);
         const input = audioContext.createAnalyser();
         const output = audioContext.createAnalyser();
@@ -2427,6 +2584,21 @@
         reverbGain.gain.value = reverb;
         const master = audioContext.createGain();
         master.gain.value = decibelGain(gain);
+        // Brick-wall safety limiter, high enough to leave normal audio alone.
+        const limiter = audioContext.createDynamicsCompressor
+          ? audioContext.createDynamicsCompressor() : null;
+        const directSend = limiter ? audioContext.createGain() : null;
+        const limiterSend = limiter ? audioContext.createGain() : null;
+        const limiterOut = limiter ? audioContext.createGain() : null;
+        if (limiter) {
+          limiter.threshold.value = -1;
+          limiter.knee.value = 0;
+          limiter.ratio.value = 20;
+          limiter.attack.value = 0.003;
+          limiter.release.value = 0.25;
+          directSend.gain.value = 1;
+          limiterSend.gain.value = 0;
+        }
         // Test-only observation of the actual mixed output, including bypass/EQ.
         const probeFinal = probeEnabled ? audioContext.createAnalyser() : null;
         if (probeFinal) {
@@ -2448,6 +2620,7 @@
           stretch, dry: dryGain, wet: wetGain,
           low, mid: midFilter, high, master, echoDelay, echoGain, feedbackGain,
           chorusDelay, chorusGain, chorusLfo, chorusDepth, convolver, reverbGain,
+          limiter, directSend, limiterSend, limiterOut, limited: false,
           retired: false, lfoStarted: false,
           samples: new Float32Array(512), audible: false, failed: false, dspConnected: !!stretch,
           appliedPitch: pitch, acknowledged: false, silentSince: null,
@@ -2488,7 +2661,7 @@
   async function createStretchNode() {
     const createStretch = window.TransponoCreateStretch || globalThis.SignalsmithStretch || window.SignalsmithStretch;
     if (typeof createStretch !== 'function')
-      throw new Error('A alteração de tom não está disponível neste navegador.');
+      throw blockedPitch('A alteração de tom não está disponível neste navegador.');
     const creation = Promise.resolve(createStretch(audioContext, {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
     }));
@@ -2547,10 +2720,10 @@
     }
     try {
       requireSound(element);
-      if (!safeSource(element)) throw new Error('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
+      if (!safeSource(element)) throw blockedPitch('Este vídeo não disponibiliza áudio para alterar o tom neste dispositivo.');
       const graph = await prepareGraph(element);
       if (token !== revision || disposed || element !== video || isAd) return;
-      if (graph.failed) throw new Error('O processamento parou. Reabra o vídeo para tentar novamente.');
+      if (graph.failed) throw blockedPitch('O processamento parou. Reabra o vídeo para tentar novamente.');
       await timeout(audioContext.resume(), 4000, 'Toque no vídeo para ativar o áudio e tente novamente.');
       if (!graph.dspConnected) {
         graph.input.connect(graph.stretch);
@@ -2580,7 +2753,8 @@
       }
     } catch (error) {
       if (token === revision && !disposed && element === video && !isAd) {
-        unavailable(error.message || 'Não foi possível alterar o tom.');
+        if (error.code === 'pitch-blocked') unavailable(error.message);
+        else pitchFailed(error.message || 'Não foi possível alterar o tom.');
         if (error.code === 'sound-muted') pitchStatus = 'idle';
       }
     }
@@ -2654,7 +2828,7 @@
       }
       if (graph && graph.acknowledged && !graph.failed && pitch !== 0 && graph.appliedPitch === pitch &&
           safeSource(video) && !video.paused && audioContext.state === 'running' &&
-          now() >= graph.checkAfter && pitchStatus !== 'unavailable') {
+          now() >= graph.checkAfter && pitchStatus !== 'unavailable' && pitchStatus !== 'failed') {
         if (hasSignal(graph.output, graph.samples)) {
           if (!graph.audible) wet(graph);
           graph.silentSince = null;
@@ -2666,7 +2840,7 @@
         } else if (hasSignal(graph.input, graph.samples)) {
           if (graph.silentSince === null) graph.silentSince = now();
           if (now() - graph.silentSince >= 2500) {
-            unavailable('O processador não produziu áudio. O áudio original foi mantido.');
+            pitchFailed('O processador não produziu áudio. O áudio original foi mantido.');
           }
         } else {
           graph.silentSince = null; // Genuine quiet passages are not DSP failures.
@@ -2677,7 +2851,7 @@
             }
             graph.lastConfirmationTick = now();
             if (graph.noSignalPlayingMs >= 10000) {
-              unavailable('Não foi possível confirmar áudio processável neste vídeo. Tente novamente durante a reprodução.');
+              pitchFailed('Não foi possível confirmar áudio processável neste vídeo. Tente novamente durante a reprodução.');
             }
           }
         }
@@ -2890,7 +3064,9 @@
         break;
       case 'markB': {
         requireTimeline();
-        const candidate = Math.min(positionOf(video), durationOf(video));
+        // Keep B clear of the end: at EOF the page pauses before the 200 ms
+        // loop poll sees B, so the pass would never repeat.
+        const candidate = Math.min(positionOf(video), durationOf(video) - loopEndMargin);
         if (loopA === null || candidate - loopA < minLoopSeconds) {
           throw new Error('Marque A primeiro e coloque B pelo menos 0,25 s depois de A.');
         }

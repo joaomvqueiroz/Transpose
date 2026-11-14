@@ -13,6 +13,23 @@ Uri youtubeSearchUri(String query) {
   });
 }
 
+/// A YouTube / YouTube Music page that lists videos (search results, home, a
+/// channel…), not a video's own page: where the browse page goes back to
+/// after handing a video to the player page.
+bool isBrowseListUri(Uri uri) =>
+    uri.scheme == 'https' &&
+    (uri.host == 'youtube.com' || uri.host.endsWith('.youtube.com')) &&
+    uri.path != '/watch' &&
+    !uri.path.startsWith('/shorts');
+
+/// The same list page: same site, path and search words (other parameters,
+/// such as YouTube's own tracking ones, do not matter).
+bool sameBrowseList(Uri a, Uri b) =>
+    a.host == b.host &&
+    a.path == b.path &&
+    a.queryParameters['search_query'] == b.queryParameters['search_query'] &&
+    a.queryParameters['q'] == b.queryParameters['q'];
+
 /// Main-frame destinations allowed in the embedded browser. Subresources are
 /// loaded normally by WebView, including YouTube's media and image CDNs.
 bool isYouTubeBrowserUri(Uri uri) =>

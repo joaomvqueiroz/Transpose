@@ -360,6 +360,39 @@ void main() {
   );
 
   test(
+    'a transient browser pitch failure stays retryable, a blocked source not',
+    () async {
+      final youtube = _YouTube(<String>[])
+        ..state = const YouTubeMediaState(
+          videoId: _id,
+          title: 'Song',
+          hasVideo: true,
+          duration: 120,
+          pitchStatus: 'failed',
+        );
+      final player = MainPlayerController(
+        local: _Local(<String>[]),
+        youtubeFactory: () => youtube,
+      );
+      await player.openYouTube();
+      expect(player.canPitch, isTrue);
+      await player.changePitch(2);
+      expect(youtube.commands.single, ('pitch', 2));
+      youtube
+        ..state = const YouTubeMediaState(
+          videoId: _id,
+          title: 'Song',
+          hasVideo: true,
+          duration: 120,
+          pitchStatus: 'unavailable',
+        )
+        ..notifyListeners();
+      expect(player.canPitch, isFalse);
+      player.dispose();
+    },
+  );
+
+  test(
     'pending browser pitch can be cancelled without claiming it applied',
     () async {
       final youtube = _YouTube(<String>[])

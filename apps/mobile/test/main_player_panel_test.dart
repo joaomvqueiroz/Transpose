@@ -19,6 +19,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  test('1× fica no centro da barra de velocidade de 0,25× a 2×', () {
+    expect(speedSliderPosition(1, .25, 2), .5);
+    expect(speedSliderPosition(.25, .25, 2), 0);
+    expect(speedSliderPosition(2, .25, 2), 1);
+    expect(speedSliderPosition(.625, .25, 2), closeTo(.25, 1e-9));
+    expect(speedSliderPosition(1.5, .25, 2), closeTo(.75, 1e-9));
+    expect(speedForSliderPosition(.52, .25, 2), 1);
+    expect(speedForSliderPosition(.25, .25, 2), closeTo(.625, 1e-9));
+    expect(speedForSliderPosition(.75, .25, 2), closeTo(1.5, 1e-9));
+  });
+
   testWidgets('video and first chord lines fit together in portrait', (
     tester,
   ) async {

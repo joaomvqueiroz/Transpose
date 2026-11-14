@@ -166,6 +166,33 @@ void main() {
     await tap(tester, 'practiceMetronome');
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a barra mantém a velocidade largada até o motor a confirmar', (
+    tester,
+  ) async {
+    final model = _SlowSpeedModel();
+    await tester.pumpWidget(app(model));
+    Slider slider() =>
+        tester.widget<Slider>(find.byKey(const Key('practiceSpeed')));
+    slider().onChanged!(1.25);
+    await tester.pump();
+    slider().onChangeEnd!(1.25);
+    await tester.pump();
+    expect(model.requested, 1.25);
+    expect(model.speed, 1);
+    expect(slider().value, 1.25);
+    model
+      ..speed = 1.25
+      ..notifyListeners();
+    await tester.pump();
+    expect(slider().value, 1.25);
+  });
+}
+
+class _SlowSpeedModel extends _Model {
+  double? requested;
+  @override
+  Future<void> changeSpeed(double value) async => requested = value;
 }
 
 class _Model extends PlayerPanelModel {

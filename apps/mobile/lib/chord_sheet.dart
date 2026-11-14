@@ -127,15 +127,15 @@ class ChordSheetStore {
   Future<void> save(String source, ChordSheet sheet) async {
     if (source.isEmpty ||
         sheet.timeline.length > 60000 ||
-        sheet.notes.length > 10000 ||
+        sheet.notes.length > 60000 ||
         sheet.sourceTitle.length > 240 ||
         sheet.sourceUrl.length > 2048 ||
         sheet.transpose.abs() > 48) {
       throw const FormatException('Dados fora do limite permitido.');
     }
     parseChordCues(sheet.timeline);
-    // Refuse to overwrite an unreadable record; keep it available for recovery.
-    await read(source);
+    // A corrupt record would otherwise block every later save for this song;
+    // read() still reports it, but a valid new sheet replaces it.
     await _preferences.setString(
       _key(source),
       jsonEncode({
@@ -524,7 +524,7 @@ class _ChordEditorState extends State<_ChordEditor> {
                 enabled: !_saving,
                 minLines: 3,
                 maxLines: 6,
-                maxLength: 10000,
+                maxLength: 60000,
                 decoration: const InputDecoration(labelText: 'Notas pessoais'),
               ),
               if (_error != null)

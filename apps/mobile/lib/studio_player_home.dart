@@ -30,6 +30,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final ChordSheetStore _chords = ChordSheetStore();
   int _collectionsRevision = 0;
   String? _selectedPresetId;
+  // Where the current song was in the setlist (see _moveSetlist).
+  int? _setlistIndex;
   final GlobalKey _mediaKey = GlobalKey(debugLabel: 'shared-player-surface');
   final GlobalKey<PlayerChordSheetState> _unifiedChordKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
@@ -289,7 +291,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (!player.appMini) {
       player
         ..appMini = true
-        ..onMinimizeRequest = _minimize;
+        ..onMinimizeRequest = _minimize
+        ..onSearchRequest = _searchFromPlayer
+        ..onFullscreenRequest = _toggleForcedLandscape;
       unawaited(player.applyPageRoles());
     }
   }
@@ -316,6 +320,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void _playChosen(Uri watch) {
     if (!mounted) return;
     final player = _player.youtube;
+    // The video already playing was chosen again: it comes back to full size
+    // as it is (same place, tone and A–B), instead of loading from 0:00.
+    final String chosen = watch.queryParameters['v'] ?? '';
+    if (chosen.isNotEmpty &&
+        _browsing &&
+        _player.loaded &&
+        player != null &&
+        player.media.videoId == chosen) {
+      _expandMini();
+      if (!_player.playing) unawaited(_player.playPause());
+      return;
+    }
     if (player != null) unawaited(player.setAppMiniSurface(false));
     // The page that takes over starts at its top: nothing is hidden for a
     // scroll made on the other page.
@@ -330,6 +346,51 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     });
     _syncPageRoles();
     unawaited(_player.playWatch(watch));
+  }
+
+  /// Landscape asked for with YouTube's fullscreen button (not by turning
+  /// the phone): the same button, or back, returns to portrait.
+  bool _forcedLandscape = false;
+
+  void _toggleForcedLandscape() {
+    if (!mounted) return;
+    if (_forcedLandscape) {
+      _leaveForcedLandscape();
+      return;
+    }
+    if (_browsing) return;
+    _forcedLandscape = true;
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]),
+    );
+  }
+
+  void _leaveForcedLandscape() {
+    if (!_forcedLandscape) return;
+    _forcedLandscape = false;
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]).then((_) async {
+        // Back to portrait first, then the phone may turn freely again.
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (!_forcedLandscape) {
+          await SystemChrome.setPreferredOrientations(const []);
+        }
+      }),
+    );
+  }
+
+  /// A search made in the player page's top bar: the video shrinks to the
+  /// mini player (it keeps playing) and the results open in the browse page.
+  void _searchFromPlayer(String query) {
+    final browse = _browse;
+    if (browse == null || !mounted) return;
+    _minimize();
+    unawaited(browse.search(query).catchError((Object _) {}));
   }
 
   /// The video shrinks to the app's mini player and the browse page (with
@@ -349,6 +410,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     _minimizeWhenReleased = false;
+    // The mini player lives in portrait: a fullscreen asked for with
+    // YouTube's button ends here.
+    _leaveForcedLandscape();
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(true));
     setState(() {
@@ -484,6 +548,23 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       unawaited(
         player.setAppMiniSurface(inPictureInPicture.value || _browsing),
       );
+    }
+    // The small window was closed with its X (the app did not come back to
+    // the screen): the video stops too. It used to go on playing with no
+    // window and no controls to stop it.
+    if (!inPictureInPicture.value) {
+      Future<void>.delayed(const Duration(milliseconds: 1200), () {
+        if (!mounted || inPictureInPicture.value) return;
+        final state = WidgetsBinding.instance.lifecycleState;
+        if (state != AppLifecycleState.resumed &&
+            state != AppLifecycleState.inactive &&
+            _player.isYouTube &&
+            _player.playing &&
+            !studioMusicSource &&
+            !studioSpotifySource) {
+          unawaited(_player.pause());
+        }
+      });
     }
     if (mounted) setState(() {});
   }
@@ -754,6 +835,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_immersiveLandscape) {
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
+    if (_forcedLandscape) {
+      unawaited(SystemChrome.setPreferredOrientations(const []));
+    }
     WidgetsBinding.instance.removeObserver(this);
     _player.removeListener(_changed);
     inPictureInPicture.removeListener(_pipChanged);
@@ -873,7 +957,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _tabJump = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _tabJump = false);
     }
+    // Opened from the mini player's state (a home-screen widget button): the
+    // player page leaves its mini surface, as when the mini is expanded.
+    final bool fromMini = _browsing && _twoPages;
+    if (fromMini) {
+      final player = _player.youtube;
+      if (player != null) unawaited(player.setAppMiniSurface(false));
+      pageScrolledDown.value = false;
+    }
     setState(() {
+      if (fromMini) {
+        _miniFull = false;
+        _miniExpanding = false;
+        _miniClosed = false;
+      }
       _previousTab = _tab;
       _tabDirection = (_tabOrder(tab) - _tabOrder(_tab)).sign;
       _tab = tab == StudioTab.stage || tab == StudioTab.instruments
@@ -886,6 +983,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       _browsing = false;
       _mainControlsExpanded = true;
     });
+    if (fromMini) _syncPageRoles();
     if (tab == StudioTab.tuner) unawaited(_player.pause());
   }
 
@@ -1270,6 +1368,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ? 'Música adicionada à setlist neste dispositivo.'
             : 'Tom, velocidade e A/B guardados neste dispositivo.',
       );
+    } on AlreadyInSetlist {
+      _notice('Esta música já está na setlist.');
     } on Object {
       _notice('Não foi possível guardar. Os ajustes atuais continuam ativos.');
     }
@@ -1299,6 +1399,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       if (!mounted) return false;
       setState(() => _selectedPresetId = preset.id);
     }
+    // Opened from the list or elsewhere: its place is looked up again.
+    _setlistIndex = null;
     return _player.lastRestoreSucceeded;
   }
 
@@ -1334,17 +1436,26 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       final current = entries.indexWhere(
         (entry) => entry.id == _selectedPresetId,
       );
-      final target = current < 0
+      // The current song was removed from the setlist: go on from where it
+      // was (the next one moved into its place), not from the first one.
+      final int? removedAt = current < 0 ? _setlistIndex : null;
+      final target = removedAt != null
+          ? (direction > 0 ? removedAt : removedAt - 1)
+          : current < 0
           ? (direction > 0 ? 0 : entries.length - 1)
           : current + direction;
       if (target < 0 || target >= entries.length) {
         _notice(direction > 0 ? 'Fim da setlist.' : 'Início da setlist.');
         return;
       }
+      // Counted as the current one even if it cannot be opened (a removed
+      // video): the next press goes past it instead of retrying it.
+      _selectedPresetId = entries[target].id;
       final restored = await _applyPreset(
         entries[target],
         returnToPlayer: true,
       );
+      _setlistIndex = target;
       if (!restored && mounted) _notice('Não foi possível abrir esta música.');
     } on Object {
       _notice('Não foi possível ler a setlist.');
@@ -2245,7 +2356,19 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       screen.height - padding.bottom - 76 - height,
     );
     final Offset at = _miniOffset ?? fallback;
-    return Rect.fromLTWH(at.dx, at.dy, width, height);
+    // A place chosen on another screen size (the phone was turned) is kept
+    // inside this one: the mini player is never left out of reach.
+    final double maxLeft = (screen.width - width).clamp(0.0, double.infinity);
+    final double maxTop = (screen.height - height).clamp(
+      padding.top,
+      double.infinity,
+    );
+    return Rect.fromLTWH(
+      at.dx.clamp(0.0, maxLeft),
+      at.dy.clamp(padding.top, maxTop),
+      width,
+      height,
+    );
   }
 
   /// Settles the mini player against the nearest side, inside the screen.
@@ -2472,6 +2595,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             : Icons.play_arrow_rounded,
                         onPressed: () {
                           _showMiniControls();
+                          // Resuming: a Short left playing in the browse page
+                          // stops, so the two are never heard together.
+                          if (!_player.playing) {
+                            unawaited(
+                              _browse
+                                      ?.command('pause')
+                                      .catchError((Object _) {}) ??
+                                  Future<void>.value(),
+                            );
+                          }
                           unawaited(_player.playPause());
                         },
                       ),
@@ -4754,6 +4887,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     double topGap = 0,
     double viewportHeight = 0,
   }) {
+    // Lists that end at the screen's bottom stop above Android's navigation
+    // buttons (the panel's colour still goes on under them).
+    final double navBottom = MediaQuery.viewPaddingOf(context).bottom;
     if (_chordSearching) {
       return ColoredBox(
         color: _background,
@@ -4771,6 +4907,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 onSelected: _acceptChord,
               ),
             ),
+            SizedBox(height: navBottom),
           ],
         ),
       );
@@ -4805,6 +4942,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               ),
             ),
           ),
+          SizedBox(height: navBottom),
         ],
       );
     }
@@ -5071,13 +5209,20 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         SizedBox(width: studioSpotifySkin ? 8 : 6),
                         Flexible(
                           fit: _chordActive ? FlexFit.loose : FlexFit.tight,
-                          child: Text(
-                            _chordActive ? 'Trocar cifra' : 'Escolher cifra',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: studioSpotifySkin ? 15 : 11,
-                              fontWeight: FontWeight.w700,
+                          // Shrinks a little on narrow phones instead of
+                          // cutting the label to «Trocar ci…».
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: _chordActive
+                                ? Alignment.center
+                                : Alignment.centerLeft,
+                            child: Text(
+                              _chordActive ? 'Trocar cifra' : 'Escolher cifra',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: studioSpotifySkin ? 15 : 11,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ),
@@ -5378,10 +5523,18 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         canPop:
             !_browsing &&
             !(_mainControlsExpanded && !_isLandscapePlayer) &&
-            !(_twoPages && _player.loaded) &&
+            // Two pages: back shrinks the video, also while the chosen one
+            // is still loading (it is not "loaded" yet, but leaving the
+            // studio then lost the list and the video).
+            !(_twoPages && (_player.loaded || _player.youtube != null)) &&
             pageYouTubeBars.value?.searching != true,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) return;
+          // Out of the fullscreen asked for with YouTube's button.
+          if (_forcedLandscape) {
+            _leaveForcedLandscape();
+            return;
+          }
           final browse = _browse;
           // The adjustments sheet is open: back closes it (it has no close
           // button; the grabber does the same).

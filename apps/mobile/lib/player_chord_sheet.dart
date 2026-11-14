@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'chord_sheet.dart';
 import 'player_panel_model.dart';
 import 'studio_native_pages.dart';
-import 'study_tools.dart';
 import 'studio_appearance.dart';
 
 /// Chord sheet text: smaller than before (it looked too big on the iPhone)
@@ -18,8 +17,10 @@ import 'studio_appearance.dart';
 const double _chordFontMax = 13;
 const List<String> _chordMonoFallback = ['Menlo', 'Courier New', 'Courier'];
 
-const int playerChordTextLimit = 10000;
-const int _fileByteLimit = 40000;
+/// Long songs with many verses exceed 10.000 characters on Cifras.com.br.
+const int playerChordTextLimit = 60000;
+const int playerChordLineLimit = 3000;
+const int _fileByteLimit = 240000;
 const LinearGradient playerChordDarkGradient = LinearGradient(
   begin: Alignment.topRight,
   end: Alignment.bottomLeft,
@@ -43,9 +44,9 @@ String validatePlayerChordText(String text) {
     throw const FormatException('Escreva ou importe uma cifra primeiro.');
   }
   if (normalized.length > playerChordTextLimit ||
-      '\n'.allMatches(normalized).length >= 500) {
+      '\n'.allMatches(normalized).length >= playerChordLineLimit) {
     throw const FormatException(
-      'A cifra pode ter até 10.000 caracteres e 500 linhas.',
+      'A cifra pode ter até 60.000 caracteres e 3.000 linhas.',
     );
   }
   if (RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]').hasMatch(normalized)) {
@@ -57,7 +58,7 @@ String validatePlayerChordText(String text) {
 String decodePlayerChordFile(List<int> bytes) {
   if (bytes.length > _fileByteLimit) {
     throw const FormatException(
-      'O ficheiro é demasiado grande (máximo 40 KB).',
+      'O ficheiro é demasiado grande (máximo 240 KB).',
     );
   }
   final String text;
@@ -69,9 +70,56 @@ String decodePlayerChordFile(List<int> bytes) {
   return validatePlayerChordText(text);
 }
 
+/// Brazilian cifras write extensions after a slash (C7/9, D6/9) and use the
+/// ordinal º for diminished; only a slash followed by a note is a bass.
 final _chordSymbol = RegExp(
-  r'^([A-G])([#b♯♭]?)((?:(?:maj|min|dim|aug|sus|add|m|M|Δ|ø|°|\+|-)\d*|\d+|[#b♯♭]\d+|\([^\s()]*\))*)(?:/([A-G])([#b♯♭]?))?$',
+  r'^([A-G])([#b♯♭]?)((?:(?:maj|min|dim|aug|sus|add|m|M|Δ|ø|°|º|\+|-)\d*|\d+|[#b♯♭]\d+|\([^\s()]*\)|/[#b♯♭+-]?\d+)*)(?:/([A-G])([#b♯♭]?))?$',
 );
+
+const _sharpNames = [
+  'C',
+  'C#',
+  'D',
+  'D#',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'G#',
+  'A',
+  'A#',
+  'B',
+];
+const _flatNames = [
+  'C',
+  'Db',
+  'D',
+  'Eb',
+  'E',
+  'F',
+  'Gb',
+  'G',
+  'Ab',
+  'A',
+  'Bb',
+  'B',
+];
+
+/// Local transposer: the shared one in study_tools does not know the
+/// Brazilian forms above, so it would leave C7/9 or Bº untouched.
+String _transposePlayerChord(String chord, int semitones) {
+  final match = _chordSymbol.firstMatch(chord);
+  if (match == null) return chord;
+  // Only the root/bass spelling picks flats: the b in Bm7(b5) is no key hint.
+  final flats = '${match[2]}${match[5] ?? ''}'.contains(RegExp('[b♭]'));
+  String note(String root, String accidental) {
+    final index = (playerChordPitchClass('$root$accidental')! + semitones) % 12;
+    return (flats ? _flatNames : _sharpNames)[index];
+  }
+
+  final bass = match[4] == null ? '' : '/${note(match[4]!, match[5]!)}';
+  return '${note(match[1]!, match[2]!)}${match[3]}$bass';
+}
 
 const playerChordNoteColors = <Color>[
   Color(0xFF5CA9FF), // C: azul
@@ -202,7 +250,7 @@ String transposePlayerChordText(String text, int semitones) => text
         return line.replaceAllMapped(
           RegExp(r'\[([^\[\]]+)\]'),
           (match) => _chordSymbol.hasMatch(match[1]!)
-              ? '[${transposeChordProgression(match[1]!, semitones)}]'
+              ? '[${_transposePlayerChord(match[1]!, semitones)}]'
               : match[0]!,
         );
       }
@@ -226,7 +274,7 @@ String transposePlayerChordText(String text, int semitones) => text
         final token = match[0]!;
         result.write(
           _chordSymbol.hasMatch(token)
-              ? transposeChordProgression(token, semitones)
+              ? _transposePlayerChord(token, semitones)
               : token,
         );
         previousEnd = match.end;
@@ -995,14 +1043,14 @@ class _ChordChooserState extends State<_ChordChooser> {
       }
       if ((picked.lengthSync() ?? 0) > _fileByteLimit) {
         throw const FormatException(
-          'O ficheiro é demasiado grande (máximo 40 KB).',
+          'O ficheiro é demasiado grande (máximo 240 KB).',
         );
       }
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in picked.readAsByteStream()) {
         if (bytes.length + chunk.length > _fileByteLimit) {
           throw const FormatException(
-            'O ficheiro é demasiado grande (máximo 40 KB).',
+            'O ficheiro é demasiado grande (máximo 240 KB).',
           );
         }
         bytes.add(chunk);

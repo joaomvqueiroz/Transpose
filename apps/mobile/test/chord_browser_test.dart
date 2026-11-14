@@ -104,9 +104,30 @@ void main() {
       expect(
         () => ImportedChord.decode({
           ...payload,
-          'text': 'C' * 10001,
+          'text': 'C' * 60001,
         }, expectedUrl: url),
         throwsFormatException,
+      );
+      final long = 'C   G/B   Am   F\nUma letra comprida de estudo\n' * 900;
+      expect(
+        ImportedChord.decode(
+          jsonEncode(jsonEncode({...payload, 'text': long})),
+          expectedUrl: url,
+        ).text,
+        long,
+      );
+      expect(
+        () => ImportedChord.decode({
+          ...payload,
+          'error': 'too-long',
+        }, expectedUrl: url),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            'Esta cifra é demasiado longa para importar.',
+          ),
+        ),
       );
       expect(
         () => ImportedChord.decode({

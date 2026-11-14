@@ -127,6 +127,9 @@ class NativeYouTubeAudioFollower {
     _videoId = id;
     _status = NativeFollowStatus.idle;
     _message = '';
+    // A new video starts neutral, as the web bridge resets its practice
+    // values; otherwise pitch and EQ carried over to the next track.
+    _settings = const NativeAudioSettings();
     await _audio.stop();
     await _mute(false);
     if (id.isEmpty) {

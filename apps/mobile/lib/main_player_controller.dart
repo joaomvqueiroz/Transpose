@@ -82,6 +82,9 @@ class MainPlayerController extends PlayerPanelModel {
   bool get muted => _online && _media.muted;
   @override
   bool get pitchPending => _online && _media.pitchStatus == 'loading';
+
+  /// 'unavailable' means the source can never be pitched. A transient
+  /// failure reports 'failed' and keeps Tom enabled so the user can retry.
   @override
   bool get canPitch =>
       loaded &&

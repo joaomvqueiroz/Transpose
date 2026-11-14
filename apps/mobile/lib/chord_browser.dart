@@ -102,7 +102,8 @@ class ImportedChord {
   factory ImportedChord.decode(Object raw, {required Uri expectedUrl}) {
     dynamic value = raw;
     for (var i = 0; i < 2 && value is String; i++) {
-      if (value.length > 100000) {
+      // Room for a 60.000-character cifra after double JSON escaping.
+      if (value.length > 300000) {
         throw const FormatException('Página demasiado grande.');
       }
       value = jsonDecode(value);
@@ -116,6 +117,11 @@ class ImportedChord {
       );
     }
     if (value['error'] == 'challenge') throw const ChordSiteCheckException();
+    if (value['error'] == 'too-long') {
+      throw const FormatException(
+        'Esta cifra é demasiado longa para importar.',
+      );
+    }
     if (value['error'] != null) {
       final detail = '${value['error']}';
       throw FormatException(
@@ -185,7 +191,8 @@ const chordExtractionScript = r'''(() => {
     const all = document.querySelectorAll('pre, .cifra_cnt, .cifra-content, #cifra').length;
     result.error = `sem acordes visíveis: ${all} bloco(s) de cifra, ${candidates.length} visível(eis), página «${(document.title || '').slice(0, 60)}», ${innerWidth}x${innerHeight}`;
   }
-  else if (chosen.length > 10000) result.error = 'too-long';
+  // Same limit as playerChordTextLimit.
+  else if (chosen.length > 60000) result.error = 'too-long';
   else result.text = chosen;
   return JSON.stringify(result);
 })()''';

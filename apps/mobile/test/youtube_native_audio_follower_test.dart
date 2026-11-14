@@ -14,7 +14,12 @@ void main() {
   setUp(() {
     calls = [];
     failLoad = false;
-    native = {'ready': true, 'playing': false, 'position': 0.0, 'duration': 200.0};
+    native = {
+      'ready': true,
+      'playing': false,
+      'position': 0.0,
+      'duration': 200.0,
+    };
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
@@ -24,13 +29,15 @@ void main() {
               return {'duration': 200.0};
             case 'play':
               native['playing'] = true;
-              native['position'] = (call.arguments as Map)['position'] as double;
+              native['position'] =
+                  (call.arguments as Map)['position'] as double;
               return native;
             case 'pause':
               native['playing'] = false;
               return native;
             case 'seek':
-              native['position'] = (call.arguments as Map)['position'] as double;
+              native['position'] =
+                  (call.arguments as Map)['position'] as double;
               return native;
             case 'state':
               return native;
@@ -75,13 +82,17 @@ void main() {
 
     await follower.sync(media(position: 10));
     expect(muted.last, isTrue);
-    expect(calls.where((c) => c.method == 'play').single.arguments, {'position': 10.0});
+    expect(calls.where((c) => c.method == 'play').single.arguments, {
+      'position': 10.0,
+    });
 
     // Within tolerance: no seek. Beyond: seek to the web position.
     await follower.sync(media(position: 10.2, muted: true));
     expect(calls.where((c) => c.method == 'seek'), isEmpty);
     await follower.sync(media(position: 42, muted: true));
-    expect(calls.where((c) => c.method == 'seek').single.arguments, {'position': 42.0});
+    expect(calls.where((c) => c.method == 'seek').single.arguments, {
+      'position': 42.0,
+    });
 
     await follower.sync(media(playing: false, position: 42, muted: true));
     expect(calls.last.method, 'pause');
@@ -105,6 +116,31 @@ void main() {
     expect(shown.pitchStatus, 'active');
   });
 
+  test('a new video starts with neutral pitch and effects', () async {
+    final follower = NativeYouTubeAudioFollower(
+      setWebMuted: (_) async {},
+      onChanged: () {},
+    );
+    await follower.sync(media());
+    await settle();
+    await follower.command('pitch', 3);
+    await follower.command('bass', 6);
+    const next = YouTubeMediaState(
+      videoId: 'zyxwvutsrqp',
+      hasVideo: true,
+      playing: true,
+      position: 0,
+    );
+    await follower.sync(next);
+    await settle();
+    expect(follower.status, NativeFollowStatus.ready);
+    expect(follower.settings.pitch, 0);
+    final configure = calls.lastWhere((c) => c.method == 'configure');
+    expect((configure.arguments as Map)['pitch'], 0.0);
+    expect((configure.arguments as Map)['bass'], 0.0);
+    expect(follower.overlay(next).pitch, 0);
+  });
+
   test('speed follows the web player rate', () async {
     final follower = NativeYouTubeAudioFollower(
       setWebMuted: (_) async {},
@@ -117,20 +153,23 @@ void main() {
     expect((configure.arguments as Map)['rate'], 0.75);
   });
 
-  test('a failed load keeps YouTube audio and leaves commands to the web', () async {
-    failLoad = true;
-    final muted = <bool>[];
-    final follower = NativeYouTubeAudioFollower(
-      setWebMuted: (value) async => muted.add(value),
-      onChanged: () {},
-    );
-    await follower.sync(media());
-    await settle();
-    expect(follower.status, NativeFollowStatus.failed);
-    expect(follower.handles('pitch'), isFalse);
-    expect(muted, isNot(contains(true)));
-    expect(follower.overlay(media()).pitchMessage, contains('indisponível'));
-  });
+  test(
+    'a failed load keeps YouTube audio and leaves commands to the web',
+    () async {
+      failLoad = true;
+      final muted = <bool>[];
+      final follower = NativeYouTubeAudioFollower(
+        setWebMuted: (value) async => muted.add(value),
+        onChanged: () {},
+      );
+      await follower.sync(media());
+      await settle();
+      expect(follower.status, NativeFollowStatus.failed);
+      expect(follower.handles('pitch'), isFalse);
+      expect(muted, isNot(contains(true)));
+      expect(follower.overlay(media()).pitchMessage, contains('indisponível'));
+    },
+  );
 
   test('ads pause the native track and restore web audio', () async {
     final muted = <bool>[];

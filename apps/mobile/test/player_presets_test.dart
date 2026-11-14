@@ -199,13 +199,28 @@ void main() {
       }
     },
   );
+  test('the same song is added to the setlist only once', () async {
+    final store = PlayerPresetStore();
+    await store.save(_preset('first'), setlist: true);
+    final again = PlayerPreset.parse({
+      ..._preset('second').toJson(),
+      'sourceId': 'video-first',
+    })!;
+    await expectLater(
+      store.save(again, setlist: true),
+      throwsA(isA<AlreadyInSetlist>()),
+    );
+    // Saved presets (not the setlist) may repeat a song with other settings.
+    await store.save(again);
+    expect((await store.list(setlist: true)).map((p) => p.id), ['first']);
+  });
 }
 
 PlayerPreset _preset(String id) => PlayerPreset(
   id: id,
   name: 'My $id',
   title: 'Song',
-  sourceId: 'video-id',
+  sourceId: 'video-$id',
   locator: 'aqz-KE-bpKQ',
   youtube: true,
   pitch: -2,

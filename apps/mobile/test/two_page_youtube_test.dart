@@ -32,6 +32,13 @@ class _PointerCountingSession extends FakeYouTubeSession {
 
 class _InteractivePlayerSession extends FakeYouTubeSession {
   int videoTaps = 0;
+  int watches = 0;
+
+  @override
+  Future<void> playWatch(Uri watch) async {
+    watches++;
+    startedUri = watch;
+  }
 
   @override
   Widget buildView() => GestureDetector(
@@ -46,6 +53,133 @@ void main() {
     SharedPreferencesAsyncPlatform.instance =
         InMemorySharedPreferencesAsync.empty();
   });
+
+  testWidgets(
+    'duas páginas: escolher outra vez o vídeo que já toca não o recomeça',
+    (tester) async {
+      tester.view.physicalSize = const Size(1179, 2556);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final browse = _BrowseSession();
+      final player = _InteractivePlayerSession();
+      await tester.pumpWidget(
+        StudioVisualApp(
+          openSearchWhenEmpty: true,
+          youtubeSessionFactory: () => player,
+          browseSessionFactory: () => browse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final watch = Uri.https('m.youtube.com', '/watch', {'v': 'abcdefghijk'});
+      browse.onOpenRequest!(watch);
+      await tester.pumpAndSettle();
+      player.state = const YouTubeMediaState(
+        videoId: 'abcdefghijk',
+        title: 'Música',
+        hasVideo: true,
+        playing: true,
+        duration: 200,
+      );
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      player.onMinimizeRequest!();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('appMiniPlayer')), findsOneWidget);
+
+      browse.onOpenRequest!(watch);
+      await tester.pumpAndSettle();
+      expect(player.watches, 0);
+      expect(find.byKey(const Key('appMiniPlayer')), findsNothing);
+      expect(find.text('Página de pesquisa'), findsNothing);
+
+      // Another video does load.
+      player.onMinimizeRequest!();
+      await tester.pumpAndSettle();
+      browse.onOpenRequest!(
+        Uri.https('m.youtube.com', '/watch', {'v': 'zyxwvutsrqp'}),
+      );
+      await tester.pumpAndSettle();
+      expect(player.watches, 1);
+    },
+  );
+
+  testWidgets(
+    'duas páginas: voltar enquanto o vídeo carrega volta à pesquisa',
+    (tester) async {
+      tester.view.physicalSize = const Size(1179, 2556);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final browse = _BrowseSession();
+      final player = _InteractivePlayerSession();
+      await tester.pumpWidget(
+        StudioVisualApp(
+          openSearchWhenEmpty: true,
+          youtubeSessionFactory: () => player,
+          browseSessionFactory: () => browse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      browse.onOpenRequest!(
+        Uri.https('m.youtube.com', '/watch', {'v': 'abcdefghijk'}),
+      );
+      await tester.pumpAndSettle();
+      // Still loading: no video reported yet.
+      expect(find.text('Página de pesquisa'), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Página de pesquisa'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'duas páginas: pesquisar no leitor abre os resultados na pesquisa e o vídeo continua',
+    (tester) async {
+      tester.view.physicalSize = const Size(1179, 2556);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      final browse = _BrowseSession();
+      final player = _InteractivePlayerSession();
+      await tester.pumpWidget(
+        StudioVisualApp(
+          openSearchWhenEmpty: true,
+          youtubeSessionFactory: () => player,
+          browseSessionFactory: () => browse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      browse.onOpenRequest!(
+        Uri.https('m.youtube.com', '/watch', {'v': 'abcdefghijk'}),
+      );
+      await tester.pumpAndSettle();
+      player.state = const YouTubeMediaState(
+        videoId: 'abcdefghijk',
+        title: 'Música',
+        hasVideo: true,
+        playing: true,
+        duration: 200,
+      );
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('Página de pesquisa'), findsNothing);
+
+      // Each search typed in the player page goes to the browse page.
+      for (final query in ['eu te busco', 'promessas']) {
+        player.onSearchRequest!(query);
+        await tester.pumpAndSettle();
+        expect(browse.lastQuery, query);
+        expect(find.text('Página de pesquisa'), findsOneWidget);
+        expect(find.byKey(const Key('appMiniPlayer')), findsOneWidget);
+        expect(player.commands.where((c) => c.$1 == 'pause'), isEmpty);
+        // Back to the full player for the next one.
+        await tester.tapAt(
+          tester.getCenter(find.byKey(const Key('appMiniPlayerTouch'))) +
+              const Offset(0, 20),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('appMiniPlayer')), findsNothing);
+      }
+    },
+  );
 
   testWidgets(
     'duas páginas: escolher na pesquisa toca no leitor, encolher mostra a pesquisa',
