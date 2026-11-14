@@ -101,7 +101,37 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   final Set<int> _mediaPointers = <int>{};
   bool _minimizeWhenReleased = false;
 
+  // Where each finger touched the video while the adjustments are open
+  // (see _mediaPointerMoved).
+  final Map<int, Offset> _mediaDragStart = <int, Offset>{};
+
+  void _mediaPointerDown(PointerDownEvent event) {
+    _mediaPointers.add(event.pointer);
+    // Only on the video itself (the top of the page), adjustments open.
+    final double videoBottom = _lastScreen.width * 9 / 16 + 48;
+    if (_mainControlsExpanded &&
+        !_adjustmentsCoverVideo &&
+        event.localPosition.dy < videoBottom) {
+      _mediaDragStart[event.pointer] = event.position;
+    }
+  }
+
+  /// With the adjustments open, a drag down on the video shrinks it to the
+  /// mini player too (the adjustments close with it), as with them closed.
+  /// Seen here, by the app: the page's own drag-down did not always reach
+  /// it while the adjustments were up.
+  void _mediaPointerMoved(PointerMoveEvent event) {
+    final Offset? start = _mediaDragStart[event.pointer];
+    if (start == null) return;
+    final Offset moved = event.position - start;
+    if (moved.dy > 60 && moved.dy > moved.dx.abs() * 1.4) {
+      _mediaDragStart.remove(event.pointer);
+      if (_twoPages && !_browsing && _player.isYouTube) _minimize();
+    }
+  }
+
   void _mediaPointerReleased(PointerEvent event) {
+    _mediaDragStart.remove(event.pointer);
     _mediaPointers.remove(event.pointer);
     if (_mediaPointers.isNotEmpty || !_minimizeWhenReleased) return;
     // After this event finished its dispatch (the platform view gets its
@@ -154,6 +184,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _player.addListener(_changed);
     _practice.addListener(_practiceChanged);
     inPictureInPicture.addListener(_pipChanged);
+    // iPhone's small window (experimental): its setting, then the player
+    // page is told.
+    unawaited(
+      IosSmallWindow.load().then((_) {
+        if (mounted && iosSmallWindow.value) {
+          unawaited(_player.youtube?.applyPageRoles());
+        }
+      }),
+    );
     PictureInPicture.onAction = _pipButton;
     final browseFactory = widget.browseSessionFactory;
     if (browseFactory != null && widget.playerController == null) {
@@ -510,6 +549,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _leaveForcedLandscape();
     final player = _player.youtube;
     if (player != null) unawaited(player.setAppMiniSurface(true));
+    // The adjustments close with it: the page is told, as when they are
+    // closed by hand.
+    if (_mainControlsExpanded && player != null) {
+      unawaited(player.adjustmentsShown(false));
+    }
     setState(() {
       _browsing = true;
       // Starts where the full-size video was and moves to its corner.
@@ -1204,12 +1248,76 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   // How far the finger has dragged the adjustments' bar (null: no drag).
   double? _sheetDrag;
 
-  /// The finger let go of the bar: settle on the nearest height.
+  // A finger on the adjustments themselves (not their bar): with their list
+  // at its top, going down moves the whole sheet, as the bar does.
+  bool _sheetListAtTop = true;
+  int? _sheetFinger;
+  Offset _sheetFingerStart = Offset.zero;
+  bool _sheetFromContent = false;
+  VelocityTracker? _sheetVelocity;
+
+  void _sheetPointerDown(PointerDownEvent event) {
+    if (_sheetFinger != null) return;
+    _sheetFinger = event.pointer;
+    _sheetFingerStart = event.position;
+    _sheetFromContent = false;
+    _sheetVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+  }
+
+  void _sheetPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _sheetFinger) return;
+    _sheetVelocity?.addPosition(event.timeStamp, event.position);
+    if (!_sheetFromContent) {
+      if (_sheetDrag != null) return; // the bar is being dragged
+      final Offset moved = event.position - _sheetFingerStart;
+      if (moved.dy < kTouchSlop ||
+          moved.dy < moved.dx.abs() * 1.4 ||
+          event.delta.dy <= 0 ||
+          !_sheetListAtTop) {
+        return;
+      }
+      _sheetFromContent = true;
+      setState(() => _sheetDrag = 0);
+    }
+    setState(() => _sheetDrag = (_sheetDrag ?? 0) + event.delta.dy);
+  }
+
+  void _sheetPointerUp(PointerEvent event) {
+    if (event.pointer != _sheetFinger) return;
+    final bool dragging = _sheetFromContent;
+    final double vy =
+        _sheetVelocity?.getVelocity().pixelsPerSecond.dy ?? 0;
+    _sheetFinger = null;
+    _sheetFromContent = false;
+    _sheetVelocity = null;
+    if (dragging) _endSheetDrag(event is PointerCancelEvent ? 0 : vy);
+  }
+
+  // The bar's own drag; ignored while a finger on the adjustments already
+  // moves the sheet (one finger, one movement).
+  void _handleDragStart() {
+    if (!_sheetFromContent) setState(() => _sheetDrag = 0);
+  }
+
+  void _handleDragUpdate(double dy) {
+    if (!_sheetFromContent) setState(() => _sheetDrag = (_sheetDrag ?? 0) + dy);
+  }
+
+  void _handleDragEnd(double velocity) {
+    if (!_sheetFromContent) _endSheetDrag(velocity);
+  }
+
+  /// The finger let go: the sheet goes on the way the finger was going
+  /// (up: higher; down: lower or closed) and stops there, with a little
+  /// spring; never back the other way. Barely moved, it stays.
   void _endSheetDrag(double velocity) {
     final double moved = _sheetDrag ?? 0;
     setState(() => _sheetDrag = null);
-    final bool up = moved < -40 || (moved <= 0 && velocity < -500);
-    final bool down = moved > 40 || (moved >= 0 && velocity > 500);
+    // The finger's last direction first (it may have come back), then
+    // how far it went.
+    final bool up = velocity < -150 || (velocity.abs() <= 150 && moved < -40);
+    final bool down = velocity > 150 || (velocity.abs() <= 150 && moved > 40);
     // The floating sheet has one more height, the low one, between the
     // medium height and closed.
     final bool floating = _floatingSheet;
@@ -1399,7 +1507,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       child: _player.isYouTube || _browsing
           ? Listener(
               // Observes only (see _minimize): which fingers are down here.
-              onPointerDown: (event) => _mediaPointers.add(event.pointer),
+              onPointerDown: _mediaPointerDown,
+              onPointerMove: _mediaPointerMoved,
               onPointerUp: _mediaPointerReleased,
               onPointerCancel: _mediaPointerReleased,
               child:
@@ -1907,7 +2016,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     );
   }
 
-  Widget _appearanceSettingsContent() => studioSpotifySkin
+  Widget _appearanceSettingsContent() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _appearanceSettingsMain(),
+      if (IosSmallWindow.supported) _smallWindowSetting(),
+    ],
+  );
+
+  /// iPhone, experimental: the video in the system's small window when
+  /// leaving the app. Off unless turned on here.
+  Widget _smallWindowSetting() => Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: ValueListenableBuilder<bool>(
+      valueListenable: iosSmallWindow,
+      builder: (context, on, _) => SwitchListTile.adaptive(
+        key: const Key('iosSmallWindowSwitch'),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        title: const Text('Janela pequena (experimental)'),
+        subtitle: const Text(
+          'Ao sair da app, o vídeo do YouTube continua numa janela pequena '
+          'do iPhone. Pode gastar mais bateria.',
+        ),
+        value: on,
+        onChanged: (value) {
+          IosSmallWindow.set(value);
+          unawaited(_player.youtube?.applyPageRoles());
+        },
+      ),
+    ),
+  );
+
+  Widget _appearanceSettingsMain() => studioSpotifySkin
       ? _spotifyAppearanceSettings()
       : Container(
           key: const Key('appearanceSettings'),
@@ -2350,7 +2490,15 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   ) {
     final enabled = _player.isYouTube && _player.loaded;
     final isDecibels = min < 0;
-    if (studioSpotifySkin) {
+    // YouTube and YouTube Music (any theme): Spotify's bars, in red.
+    final bool youtubeLook = !studioSpotifySkin && _player.isYouTube;
+    if (studioSpotifySkin || youtubeLook) {
+      final Color? ink = studioSpotifySkin ? Colors.white : null;
+      // Light themes: the same bars on a light page.
+      final bool light = Theme.of(context).brightness == Brightness.light;
+      final Color faint = light
+          ? const Color(0x33000000)
+          : const Color(0x33FFFFFF);
       final shown = isDecibels
           ? '${value > 0 ? '+' : ''}${value.toStringAsFixed(0)} dB'
           : '${(value * 100).round()}%';
@@ -2364,24 +2512,38 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: ink,
                 ),
               ),
             ),
             Expanded(
-              child: Slider(
-                key: Key(key),
-                min: min,
-                max: max,
-                divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
-                value: value,
-                onChanged: enabled
-                    ? (next) => setState(() => preview(next))
-                    : null,
-                onChangeEnd: enabled ? apply : null,
+              child: SliderTheme(
+                data: youtubeLook
+                    ? SliderTheme.of(context).copyWith(
+                        activeTrackColor: const Color(0xFFFF0033),
+                        inactiveTrackColor: faint,
+                        thumbColor: const Color(0xFFFF0033),
+                        overlayColor: const Color(0x29FF0033),
+                        activeTickMarkColor: const Color(0x80FFFFFF),
+                        inactiveTickMarkColor: light
+                            ? const Color(0x55000000)
+                            : const Color(0x66FFFFFF),
+                      )
+                    : SliderTheme.of(context),
+                child: Slider(
+                  key: Key(key),
+                  min: min,
+                  max: max,
+                  divisions: ((max - min) * (isDecibels ? 1 : 100)).round(),
+                  value: value,
+                  onChanged: enabled
+                      ? (next) => setState(() => preview(next))
+                      : null,
+                  onChangeEnd: enabled ? apply : null,
+                ),
               ),
             ),
             SizedBox(
@@ -2389,9 +2551,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
               child: Text(
                 shown,
                 textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13, color: Color(0xBFFFFFFF)),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: light && !studioSpotifySkin
+                      ? const Color(0xBF000000)
+                      : const Color(0xBFFFFFFF),
+                ),
               ),
             ),
+            // YouTube keeps its per-row reset (Spotify's has one per
+            // section, in its title).
+            if (youtubeLook)
+              IconButton(
+                key: Key('${key}Reset'),
+                tooltip: 'Repor $label a zero',
+                onPressed: enabled && value != 0 ? () => apply(0) : null,
+                icon: const Icon(Icons.restart_alt, size: 16),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 30,
+                  height: 30,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
           ],
         ),
       );
@@ -3242,6 +3424,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   // lowers the adjustments instead).
   bool _panelAtTop = true;
 
+  // This finger scrolls the adjustments' list (vertically): reaching its
+  // top and going on down, it lowers the adjustments.
+  bool _panelListDrag = false;
+
   // How far the adjustments' list is scrolled (up to 60): their bar on top
   // goes up and fades with it.
   final ValueNotifier<double> _handleScroll = ValueNotifier<double>(0);
@@ -3261,12 +3447,28 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _pullPointer = event.pointer;
     _pullStart = event.position;
     _pulling = null;
+    _panelListDrag = false;
     _pullVelocity = VelocityTracker.withKind(event.kind)
       ..addPosition(event.timeStamp, event.position);
   }
 
   void _panelPointerMove(PointerMoveEvent event) {
-    if (event.pointer != _pullPointer || _pulling == false) return;
+    if (event.pointer != _pullPointer) return;
+    // The list was being scrolled down to its top and the finger goes on
+    // down: from here, the same finger lowers the adjustments (they fade
+    // as they go), and back up raises them again.
+    // Only a vertical scroll of the list (never a slider's sideways drag).
+    if (_pulling == false &&
+        _panelListDrag &&
+        _pull.value >= .999 &&
+        event.delta.dy > 0 &&
+        _panelAtTop) {
+      _pulling = true;
+      _pull.stop();
+      _pullVelocity = VelocityTracker.withKind(event.kind)
+        ..addPosition(event.timeStamp, event.position);
+    }
+    if (_pulling == false) return;
     _pullVelocity?.addPosition(event.timeStamp, event.position);
     if (_pulling == null) {
       final Offset moved = event.position - _pullStart;
@@ -3275,6 +3477,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       final bool vertical = moved.dy.abs() > moved.dx.abs() * 1.4;
       _pulling =
           vertical && (_pull.value < .999 || (moved.dy > 0 && _panelAtTop));
+      _panelListDrag = vertical && _pulling != true;
       if (_pulling != true) return;
       _pull.stop();
     }
@@ -3436,10 +3639,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     // Not all the way up: the finger moves the adjustments,
                     // not their list.
                     child: ScrollConfiguration(
+                      // All the way up: no bounce nor stretch at the ends
+                      // (the list stops where it ends, on every source).
                       behavior: ScrollConfiguration.of(context).copyWith(
                         physics: _pull.value < .999
                             ? const NeverScrollableScrollPhysics()
-                            : null,
+                            : const ClampingScrollPhysics(),
+                        overscroll: false,
                       ),
                       child: Theme(
                         data: studioColumnTheme(
@@ -3465,7 +3671,13 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                 // adjustments under Android's buttons.
                                 child: Offstage(
                                   offstage: header > 0 && pull <= header,
-                                  child: content,
+                                  // Lowered by the finger, they fade out
+                                  // as they go (all there when up).
+                                  child: Opacity(
+                                    opacity: ((_pull.value - .25) / .7)
+                                        .clamp(0.0, 1.0),
+                                    child: content,
+                                  ),
                                 ),
                               ),
                               if (header > 0)
@@ -3855,9 +4067,10 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                 // Between the tone tab and the others only the frame
                 // changes, not what is seen: no glide there either.
                 duration: _sheetDrag == null && !_tabJump
-                    ? const Duration(milliseconds: 240)
+                    ? const Duration(milliseconds: 340)
                     : Duration.zero,
-                curve: Curves.easeOutCubic,
+                // A little spring when it settles, then it stays.
+                curve: Curves.easeOutBack,
                 top: shownTop,
                 left: sheetSide,
                 right: sheetSide,
@@ -3874,12 +4087,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                       Theme.of(context),
                       mode: widget.appearance.mode,
                     ),
-                    child: NotificationListener<ScrollNotification>(
+                    child: Listener(
+                      onPointerDown: _sheetPointerDown,
+                      onPointerMove: _sheetPointerMove,
+                      onPointerUp: _sheetPointerUp,
+                      onPointerCancel: _sheetPointerUp,
+                      child: ScrollConfiguration(
+                      // While the finger moves the sheet, its list holds
+                      // still.
+                      behavior: ScrollConfiguration.of(context).copyWith(
+                        physics: _sheetFromContent
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
+                      ),
+                      child: NotificationListener<ScrollNotification>(
                       // How far the adjustments are scrolled: their bar
                       // goes up with them instead of staying put.
                       onNotification: (note) {
                         if (note.metrics.axis == Axis.vertical &&
                             note.depth == 0) {
+                          _sheetListAtTop = note.metrics.pixels <=
+                              note.metrics.minScrollExtent + .5;
                           _handleScroll.value = note.metrics.pixels.clamp(
                             0.0,
                             60.0,
@@ -4013,12 +4241,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                 child: Center(
                                   child: AdjustmentsHandle(
                                     light: light,
-                                    onDragStart: () =>
-                                        setState(() => _sheetDrag = 0),
-                                    onDragUpdate: (dy) => setState(
-                                      () => _sheetDrag = (_sheetDrag ?? 0) + dy,
-                                    ),
-                                    onDragEnd: _endSheetDrag,
+                                    onDragStart: _handleDragStart,
+                                    onDragUpdate: _handleDragUpdate,
+                                    onDragEnd: _handleDragEnd,
                                   ),
                                 ),
                               ),
@@ -4054,18 +4279,17 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   gestureKey: const Key('adjustmentsGrabber'),
                                   alwaysVisible: true,
                                   light: light,
-                                  onDragStart: () =>
-                                      setState(() => _sheetDrag = 0),
-                                  onDragUpdate: (dy) => setState(
-                                    () => _sheetDrag = (_sheetDrag ?? 0) + dy,
-                                  ),
-                                  onDragEnd: _endSheetDrag,
+                                  onDragStart: _handleDragStart,
+                                  onDragUpdate: _handleDragUpdate,
+                                  onDragEnd: _handleDragEnd,
                                 ),
                               ),
                             ),
                           ],
                         ],
                       ),
+                    ),
+                    ),
                     ),
                   ),
                 ),
@@ -5086,6 +5310,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_tab == StudioTab.audioSettings) {
       return SingleChildScrollView(
         key: const Key('unifiedAudioSettingsScroll'),
+        physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 88),
         child: Column(
           children: [
@@ -5111,6 +5336,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         top: false,
         child: SingleChildScrollView(
           key: const Key('unifiedAppearanceSettingsScroll'),
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.only(bottom: 88),
           child: Column(
             children: [
@@ -5127,6 +5353,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     if (_tab == StudioTab.practice) {
       return SingleChildScrollView(
         key: const Key('unifiedPracticeScroll'),
+        physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 88),
         child: Column(
           children: [
@@ -5507,6 +5734,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         NestedScrollView(
           key: const Key('unifiedChordScroll'),
           controller: _scroll,
+          physics: const ClampingScrollPhysics(),
           headerSliverBuilder: (context, innerScrolled) => [
             SliverToBoxAdapter(
               child: Column(
@@ -5571,6 +5799,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                                   child: SingleChildScrollView(
                                     key: const Key('unifiedChordTextScroll'),
                                     primary: true,
+                                    physics: const ClampingScrollPhysics(),
                                     child: PlayerChordSheet(
                                       key: _unifiedChordKey,
                                       model: _player,
@@ -5601,6 +5830,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       SingleChildScrollView(
         key: const Key('unifiedChordScroll'),
         controller: _scroll,
+        physics: const ClampingScrollPhysics(),
         child: Column(
           children: [
             if (topGap > 0) SizedBox(height: topGap),
@@ -5886,9 +6116,57 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                             ),
                           ),
                         ),
+                      _adPill(),
                     ],
                   ),
                 ),
+        ),
+      ),
+    );
+  }
+
+  /// While the YouTube being heard plays an ad (also the hidden one behind
+  /// Spotify), a small pill says so: the player has not frozen. Only a
+  /// label: the ad itself is never muted, hidden or skipped from here (the
+  /// page presses YouTube's own «Ignorar» when YouTube offers it).
+  Widget _adPill() {
+    final YouTubeBrowserSession? session = _player.youtube;
+    if (session == null) return const SizedBox.shrink();
+    return Positioned(
+      top: 8,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: ListenableBuilder(
+          listenable: session,
+          builder: (context, _) {
+            final YouTubeMediaState media = session.media;
+            if (!media.isAd) return const SizedBox.shrink();
+            return Center(
+              child: Container(
+                key: const Key('studioAdPill'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xE6212121),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: const Color(0x33FFFFFF)),
+                ),
+                child: Text(
+                  media.adSkippable
+                      ? 'Publicidade em curso · a saltar…'
+                      : 'Publicidade em curso…',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

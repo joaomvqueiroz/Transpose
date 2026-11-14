@@ -832,9 +832,12 @@
         border-radius: 0 !important;
       }
       /* Without the site's tab row the player sits lower: no empty band
-         under its buttons. */
-      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #music-player-wrapper,
-      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"] #player-controls {
+         under its buttons. Only with the song's screen open: shrunk to the
+         bar, the page keeps saying FULL_PLAYER_VIEW, and a transform here
+         would hold the bar's cover (position: fixed, inside this wrapper)
+         in the middle of the page instead of in the bar. */
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"]:not([player-ui-state="PLAYER_BAR_ONLY"]) #music-player-wrapper,
+      ytmusic-player-page[player-page-ui-state="FULL_PLAYER_VIEW"]:not([player-ui-state="PLAYER_BAR_ONLY"]) #player-controls {
         transform: translateY(var(--tp-player-drop, 0px)) !important;
       }
       /* "Abrir no app YouTube Music": never shown. */
@@ -951,6 +954,82 @@
     };
     setInterval(hideAppPrompts, 1000);
     hideAppPrompts();
+  }
+  // Presses YouTube's own «Ignorar» / «Skip» button as soon as YouTube
+  // shows it, on youtube.com and music.youtube.com alike.
+  // Terms-of-service boundary: this only does what the user could do with
+  // one tap on the button YouTube itself offers. It never blocks, hides,
+  // mutes, seeks or speeds up an ad, and never touches playbackRate or
+  // currentTime; an ad without a skip button plays normally to its end.
+  if (/(^|\.)youtube\.com$/i.test(window.location.hostname) &&
+      !window.__transponoAdSkip) {
+    window.__transponoAdSkip = true;
+    const skipSelectors = '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, ' +
+      '.ytp-skip-ad-button, .ytp-ad-skip-button-container button';
+    const skipText = /^\s*(Ignorar|Skip)/i;
+    const shown = el => {
+      if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' &&
+        Number(style.opacity || '1') > 0.05;
+    };
+    const findSkip = () => {
+      for (const el of document.querySelectorAll(skipSelectors)) {
+        if (shown(el)) return el;
+      }
+      // Only inside an ad: a plain «Skip»-labelled button elsewhere on the
+      // page is not YouTube's ad button.
+      if (!document.querySelector('.ad-showing, .ad-interrupting')) return null;
+      const player = document.querySelector('#movie_player, .html5-video-player') || document;
+      for (const el of player.querySelectorAll('button')) {
+        if (skipText.test(el.textContent || '') && shown(el)) return el;
+      }
+      return null;
+    };
+    let lastSkip = 0;
+    const pressSkip = () => {
+      const button = findSkip();
+      window.__transponoAdSkipVisible = !!button;
+      if (!button) return;
+      const now = Date.now();
+      if (now - lastSkip < 400) return;
+      lastSkip = now;
+      // A real tap's sequence, then click(): the button reacts to either.
+      const opts = { bubbles: true, cancelable: true, view: window };
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        try {
+          const Ctor = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
+          button.dispatchEvent(new Ctor(type, opts));
+        } catch (_) {}
+      }
+      try { button.click(); } catch (_) {}
+    };
+    let skipQueued = false;
+    const queueSkip = () => {
+      if (skipQueued) return;
+      skipQueued = true;
+      setTimeout(() => { skipQueued = false; pressSkip(); }, 50);
+    };
+    const startSkipWatch = () => {
+      const root = document.documentElement;
+      if (!root) return;
+      try {
+        new MutationObserver(queueSkip).observe(root, {
+          subtree: true, childList: true, attributes: true,
+          // Not 'style': the page changes it all the time (thumbnails,
+          // progress bar); the 500 ms backstop covers style-only changes.
+          attributeFilter: ['class', 'disabled', 'aria-disabled'],
+        });
+      } catch (_) {}
+      // A light backstop for changes the observer misses (e.g. opacity
+      // animations that end without an attribute change).
+      setInterval(pressSkip, 500);
+      pressSkip();
+    };
+    if (document.documentElement) startSkipWatch();
+    else document.addEventListener('DOMContentLoaded', startSkipWatch, { once: true });
   }
   // The notification's next / previous on YouTube Music.
   window.__transponoMusicSkip = forward => {
@@ -1454,9 +1533,13 @@
       root.style.setProperty('--transpono-mini-x', `${x}px`);
       root.style.setProperty('--transpono-mini-y', `${y}px`);
     };
+    // Walks for the sticky bars per entry into the mini player: a few, not
+    // forever (each walks up to 6000 nodes).
+    let liftTries = 0;
     const setMini = mini => {
       if (root.classList.contains('transpono-mini') === mini) return;
       root.classList.toggle('transpono-mini', mini);
+      liftTries = 0;
       if (mini) {
         liftStickyBars();
       } else {
@@ -1556,8 +1639,9 @@
       if (!root.classList.contains('transpono-mini')) return;
       if (!playerOf() || window.location.pathname !== '/watch') {
         setMini(false);
-      } else if (!lifted.length) {
+      } else if (!lifted.length && liftTries < 6) {
         // Only until the bar is found: walking the page is not free.
+        liftTries++;
         liftStickyBars();
       }
     }, 500);
@@ -2507,6 +2591,9 @@
         (loopB === null || loopB < durationOf(video)),
       playbackReady: playbackReady(),
       isAd,
+      // YouTube shows its own «Ignorar» / «Skip» on this ad (see the
+      // ad-skip watcher above); the app only reports it.
+      adSkippable: isAd && window.__transponoAdSkipVisible === true,
       ...(probeEnabled ? {probe: probeSnapshot()} : {}),
     };
   }
@@ -2525,6 +2612,11 @@
   }
 
   function post() {
+    // Pushed snapshots only when asked for (window.__transponoPush): the
+    // app reads them itself (its poll), and nothing listens to this
+    // channel, while each snapshot measures the page's bars (layout) up to
+    // five times a second.
+    if (window.__transponoPush !== true) return;
     const json = JSON.stringify(snapshot());
     if (json === lastPosted) return;
     lastPosted = json;

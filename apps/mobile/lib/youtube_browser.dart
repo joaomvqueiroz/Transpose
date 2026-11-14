@@ -6,9 +6,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'home_button_visibility.dart';
+import 'picture_in_picture.dart';
 
 import 'package:flutter/services.dart';
 import 'package:gecko_view/gecko_view.dart';
+
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
@@ -223,6 +225,7 @@ class YouTubeMediaState {
     this.loopB,
     this.loopEnabled = false,
     this.isAd = false,
+    this.adSkippable = false,
     this.loopCount = 0,
     this.loopEpoch = 0,
     this.loopEventsSupported = false,
@@ -287,6 +290,7 @@ class YouTubeMediaState {
       loopB: number('loopB'),
       loopEnabled: json['loopEnabled'] == true,
       isAd: json['isAd'] == true,
+      adSkippable: json['isAd'] == true && json['adSkippable'] == true,
       loopCount: loopCount ?? 0,
       loopEpoch: loopEpoch ?? 0,
       loopEventsSupported:
@@ -325,6 +329,7 @@ class YouTubeMediaState {
     loopB: loopB,
     loopEnabled: loopEnabled,
     isAd: isAd,
+    adSkippable: adSkippable,
     loopCount: loopCount,
     loopEpoch: loopEpoch,
     loopEventsSupported: loopEventsSupported,
@@ -337,6 +342,10 @@ class YouTubeMediaState {
 
   final String videoId, title, pitchStatus, pitchMessage;
   final bool hasVideo, playing, muted, loopEnabled, isAd;
+
+  /// During an ad, YouTube shows its own «Ignorar» / «Skip» button (which
+  /// the page script presses); unskippable ads play normally.
+  final bool adSkippable;
   final bool loopEventsSupported, playbackReady;
   final int loopCount, loopEpoch;
   final double position, duration, speed, pitch;
@@ -663,6 +672,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   bool _checkingContent = false;
   String? _error;
   bool _canGoBack = false;
+  int _backTick = 0;
   bool _disposed = false;
   bool _refreshing = false;
   int _document = 0;
@@ -850,6 +860,31 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       unawaited(_checkContentReady());
     });
     await controller.loadRequest(uri);
+    if (usesGecko) unawaited(_reloadIfStuck(uri));
+  }
+
+  /// Gecko, first open: the page sometimes never starts (left on its empty
+  /// first document), with no error, until the app was opened again. If no
+  /// YouTube page is there after a while, the address is loaded again (at
+  /// most twice).
+  Future<void> _reloadIfStuck(Uri uri) async {
+    for (int tries = 0; tries < 2; tries++) {
+      await Future<void>.delayed(const Duration(seconds: 10));
+      if (_disposed || _contentReady || _error != null) return;
+      String current = '';
+      try {
+        current = await controller.currentUrl() ?? '';
+      } on Object {
+        current = '';
+      }
+      if (_disposed) return;
+      if (current.startsWith('http')) return;
+      try {
+        await controller.loadRequest(uri);
+      } on Object {
+        return;
+      }
+    }
   }
 
   Future<void> _checkContentReady() async {
@@ -864,8 +899,9 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
           const body = document.body;
           if (!body || document.readyState !== 'complete') return false;
           const hasVideo = !!body.querySelector('a[href*="/watch"]');
-          const hasReadablePage = (body.innerText || '').trim().length > 150;
-          return hasVideo || hasReadablePage;
+          if (hasVideo) return true;
+          // textContent, not innerText: no layout of the whole page.
+          return (body.textContent || '').trim().length > 150;
         })()
       ''');
       if (_disposed || document != _document) return;
@@ -918,7 +954,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         final bool noContext =
             failure.message.startsWith('NO_CONTEXT') ||
             failure.message == 'JS timeout';
-        if (noContext && attempt < attempts) {
+        // The engine's relay is still installing (first run after an
+        // install or update): keep waiting, up to 30 s.
+        final bool installing = failure.message.contains('a instalar');
+        if (noContext && (attempt < attempts || (installing && attempt < 30))) {
           await Future<void>.delayed(const Duration(seconds: 1));
           if (_disposed || generation != _document) return;
           continue;
@@ -976,7 +1015,11 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       for (int count = 0; decoded is String && count < 2; count++) {
         decoded = jsonDecode(decoded);
       }
-      final bool back = await controller.canGoBack();
+      // Asked every 4th read, as on Spotify: each call to the page costs
+      // the phone's main thread.
+      final bool back = _backTick++ % 4 == 0
+          ? await controller.canGoBack()
+          : _canGoBack;
       if (_disposed ||
           generation != _document ||
           pausedVideoId != _pauseOnReadyVideoId) {
@@ -1354,6 +1397,10 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         'window.__transponoNativeBar = ${nativeGlassBar.value};'
         'window.__transponoBrowseOnly = $browseOnly;'
         'window.__transponoLowVideo = $lowVideo;'
+        // iPhone's small window (experimental): only the playing video's
+        // page sends its frames, never the browse page nor Spotify's
+        // hidden one.
+        'window.__transponoPipFrames = ${usesGecko && iosSmallWindow.value && !browseOnly && !lowVideo};'
         'window.__transponoAutoSound = ${!browseOnly && _native == null};'
         'window.__transponoAppMini = $appMini;'
         'window.__transponoAppMiniSurface = $appMiniSurface;'
@@ -1433,7 +1480,12 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   @override
   Future<void> playWatch(Uri watch) async {
     if (!isYouTubeBrowserUri(watch)) throw ArgumentError.value(watch);
-    await command('pause');
+    try {
+      await command('pause');
+    } on Object {
+      // Nothing to pause (no bridge on this page yet, or Gecko's relay
+      // still connecting): the new video opens anyway.
+    }
     if (_disposed) return;
     _timeline.reset();
     _pauseOnReadyVideoId = null;

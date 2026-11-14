@@ -1015,6 +1015,8 @@ class _VideoSettings extends StatelessWidget {
         Expanded(
           child: SingleChildScrollView(
             key: const Key('visualPlayerSettingsScroll'),
+            // No bounce at the ends (iPhone): the list stops where it ends.
+            physics: const ClampingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: ListenableBuilder(
               listenable: model,
@@ -1264,97 +1266,26 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     ),
   );
 
-  /// The YouTube app's minus|plus pill.
-  Widget _youtubeSegment(
-    Key downKey,
-    Key upKey,
-    VoidCallback? down,
-    VoidCallback? up,
-  ) => Container(
-    height: 40,
-    decoration: BoxDecoration(
-      color: skinChip,
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 56,
-          child: IconButton(
-            key: downKey,
-            tooltip: 'Baixar o tom',
-            onPressed: down,
-            icon: const Icon(Icons.remove, size: 20),
-            color: const Color(0xFFF1F1F1),
-          ),
-        ),
-        Container(width: 1, height: 24, color: const Color(0x33FFFFFF)),
-        SizedBox(
-          width: 56,
-          child: IconButton(
-            key: upKey,
-            tooltip: 'Subir o tom',
-            onPressed: up,
-            icon: const Icon(Icons.add, size: 20),
-            color: const Color(0xFFF1F1F1),
-          ),
-        ),
-      ],
-    ),
-  );
-
-  /// The tone in the YouTube app's look: title, key, the semitones with a
-  /// minus|plus pill, and quick chips around the original.
+  /// The tone on YouTube and YouTube Music: the same look as Spotify's tone
+  /// panel (label, flat card, outlined round buttons, large semitones), in
+  /// YouTube's red where Spotify has its green. Only the tone panel changes;
+  /// the quick chips around the original stay under it.
   Widget _youtubePitch(bool ready) {
     final int value = model.pitch.round();
     final bool can = ready && model.canPitch;
     void set(int v) => model.changePitch(v.clamp(-12, 12).toDouble());
-    return Padding(
-      padding: const EdgeInsets.only(top: 18, bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          skinLabel('Modulação cromática'),
-          const SizedBox(height: 2),
-          Text(
-            _detectedKeyLabel(),
-            key: const Key('unifiedDetectedKey'),
-            style: const TextStyle(fontSize: 12, color: Color(0xFFAAAAAA)),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text(
-                value > 0 ? '+$value' : '$value',
-                key: const Key('unifiedPitchHeadline'),
-                style: const TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w700,
-                  height: 1,
-                  color: Color(0xFFF1F1F1),
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'semitons',
-                style: TextStyle(fontSize: 16, color: Color(0xFFAAAAAA)),
-              ),
-              const Spacer(),
-              _youtubeSegment(
-                const Key('unifiedPitchDown'),
-                const Key('unifiedPitchUp'),
-                can && value > -12 ? () => set(value - 1) : null,
-                can && value < 12 ? () => set(value + 1) : null,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _spotifyPitch(ready, accent: const Color(0xFFFF0033)),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Wrap(
+            alignment: WrapAlignment.center,
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final v in const [-2, -1, 0, 1, 2])
+              for (final v in const [-3, -2, -1, 0, 1, 2, 3])
                 _youtubeChip(
                   Key('youtubePitchQuick$v'),
                   v == 0 ? 'Original' : (v > 0 ? '+$v' : '$v'),
@@ -1363,8 +1294,8 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                 ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1450,7 +1381,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
 
   /// The tone on Spotify: a label over a flat card, outlined round buttons
   /// and the semitones in large type, as in Spotify's own player.
-  Widget _spotifyPitch(bool ready) {
+  Widget _spotifyPitch(bool ready, {Color accent = spotifyGreen}) {
     final int value = model.pitch.round();
     Widget round(Key key, String tip, IconData icon, VoidCallback? onTap) =>
         Tooltip(
@@ -1535,8 +1466,8 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                         height: 1,
                         letterSpacing: -1,
-                        // Green once the tone moves; white at the original.
-                        color: value == 0 ? Colors.white : spotifyGreen,
+                        // Accent once the tone moves; white at the original.
+                        color: value == 0 ? Colors.white : accent,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -2609,6 +2540,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                   key: const Key(
                                     'visualFullscreenControlsScroll',
                                   ),
+                                  physics: const ClampingScrollPhysics(),
                                   child: Padding(
                                     padding: const EdgeInsets.fromLTRB(
                                       16,

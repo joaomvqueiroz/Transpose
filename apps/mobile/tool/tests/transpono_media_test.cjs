@@ -157,6 +157,7 @@ function fixture(options = {}) {
       return node;
     },
     TransponoBridge: {messages: [], postMessage(value) { this.messages.push(JSON.parse(value)); }},
+    __transponoPush: true,
   };
   window.top = options.frame ? {} : window;
   const document = {
@@ -175,6 +176,8 @@ function fixture(options = {}) {
         return options.metaTitle ? {getAttribute: () => options.metaTitle} : null;
       return null;
     },
+    // The ad Skip button watcher looks for buttons: none on this page.
+    querySelectorAll() { return []; },
     // The mini player and the focus report attach page listeners and a style.
     documentElement: {
       classList: {
