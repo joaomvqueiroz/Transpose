@@ -18,6 +18,7 @@ import 'main_player_controller.dart';
 import 'main_player_panel.dart';
 import 'player_chord_sheet.dart';
 import 'player_presets.dart';
+import 'last_song.dart';
 import 'study_tools.dart';
 import 'band_session.dart';
 import 'chord_sheet.dart';

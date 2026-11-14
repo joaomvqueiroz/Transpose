@@ -128,6 +128,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     super.initState();
     _applySystemBarsStyle();
     _importCleanup = Timer(const Duration(seconds: 20), _removeUnusedImports);
+    _songMemory = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => unawaited(_rememberSong()),
+    );
+    _songOffer = Timer(const Duration(seconds: 4), _offerLastSong);
     WidgetsBinding.instance.addObserver(this);
     pageAdjustRequests.addListener(_pageAdjust);
     BackgroundPlayback.listen(_backgroundAction);
@@ -172,6 +177,61 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   }
 
   Timer? _importCleanup;
+  Timer? _songMemory;
+  Timer? _songOffer;
+  final LastSong _lastSong = LastSong();
+
+  /// Where the song can be opened again: the site this studio shows.
+  String get _songPlace => widget.youtubeHome?.host ?? 'm.youtube.com';
+
+  /// While a YouTube song plays, it is kept every few seconds.
+  Future<void> _rememberSong() async {
+    if (!mounted ||
+        studioSpotifySource ||
+        !_player.isYouTube ||
+        !_player.loaded ||
+        !_player.playing ||
+        !_player.canSaveCurrent) {
+      return;
+    }
+    final PlayerPreset? song = _player.snapshot(_player.title);
+    if (song == null) return;
+    try {
+      await _lastSong.remember(song, _songPlace);
+    } on Object {
+      // Not kept this time.
+    }
+  }
+
+  /// Opened again with nothing playing: offer the song from last time, once.
+  Future<void> _offerLastSong() async {
+    if (!mounted || studioSpotifySource || _player.loaded) return;
+    final PlayerPreset? song = await _lastSong.read(_songPlace);
+    if (song == null || !mounted || _player.loaded) return;
+    unawaited(_lastSong.forget().catchError((Object _) {}));
+    final String title = song.title.trim().characters.take(40).toString();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Continuar «$title»?'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 8),
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 72),
+        action: SnackBarAction(
+          label: 'Continuar',
+          onPressed: () async {
+            final bool restored = await _applyPreset(
+              song,
+              returnToPlayer: true,
+            );
+            if (!restored && mounted) {
+              _notice('Não foi possível abrir esta música.');
+            }
+          },
+        ),
+      ),
+    );
+  }
 
   /// Copies of picked files that no saved preset or setlist entry uses any
   /// more are removed (a while after start, out of the way).
@@ -889,6 +949,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _miniControlsTimer?.cancel();
     _backgroundStopTimer?.cancel();
     _importCleanup?.cancel();
+    _songMemory?.cancel();
+    _songOffer?.cancel();
     _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();
