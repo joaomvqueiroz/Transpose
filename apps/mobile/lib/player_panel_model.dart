@@ -11,6 +11,9 @@ abstract class PlayerPanelModel extends ChangeNotifier {
   bool get canPitch;
   bool get pitchPending => false;
   bool get canSpeed;
+
+  /// An ad is playing (tone and speed come back after it).
+  bool get adPlaying => false;
   bool get canLoop;
   bool get canSeek => loaded && duration > Duration.zero;
   bool get muted;

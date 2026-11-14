@@ -14,6 +14,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'youtube_native_audio_follower.dart';
+import 'external_links.dart';
 import 'youtube_search.dart';
 import 'web_media_command.dart';
 import 'studio_appearance.dart';
@@ -793,14 +794,28 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
         },
         onWebResourceError: (WebResourceError failure) {
           if (failure.isForMainFrame != true) return;
-          _error = 'Não foi possível carregar o YouTube. Verifique a ligação.';
+          _error =
+              'Não foi possível carregar ${_soundCloud ? 'o SoundCloud' : 'o YouTube'}. Verifique a ligação.';
           _progress = 100;
           _notify();
         },
         onNavigationRequest: (NavigationRequest request) {
           if (!request.isMainFrame) return NavigationDecision.navigate;
+          final Uri? asked = Uri.tryParse(request.url);
+          // A link in a video's description: YouTube's "leave YouTube" page
+          // and the site it leads to open in the phone's browser.
+          final Uri? redirect = asked == null
+              ? null
+              : youtubeRedirectTarget(asked);
+          if (redirect != null) {
+            unawaited(openOutside(redirect));
+            return NavigationDecision.prevent;
+          }
           final Uri? uri = embeddedYouTubeUri(request.url);
-          if (uri == null) return NavigationDecision.prevent;
+          if (uri == null) {
+            if (asked != null) unawaited(openOutside(asked));
+            return NavigationDecision.prevent;
+          }
           if (uri.toString() != request.url) {
             unawaited(controller.loadRequest(uri));
             return NavigationDecision.prevent;

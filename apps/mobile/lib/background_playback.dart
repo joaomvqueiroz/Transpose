@@ -12,6 +12,7 @@ class BackgroundPlayback {
 
   /// "play", "pause", "next", "previous" or "seek:" followed by milliseconds.
   static void listen(void Function(String action) onAction) {
+    _owner = onAction;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'action' && call.arguments is String) {
         onAction(call.arguments as String);
@@ -19,7 +20,16 @@ class BackgroundPlayback {
     });
   }
 
-  static void unlisten() => _channel.setMethodCallHandler(null);
+  static void Function(String action)? _owner;
+
+  /// Stops listening, only if [onAction] is still the one listening: when
+  /// the source changes the new studio starts listening before the old one
+  /// is closed, and the old one used to switch the new one's controls off.
+  static void unlisten([void Function(String action)? onAction]) {
+    if (onAction != null && _owner != onAction) return;
+    _owner = null;
+    _channel.setMethodCallHandler(null);
+  }
 
   /// Sent when the song or play/pause changes, and every few seconds for
   /// the position.
@@ -29,8 +39,9 @@ class BackgroundPlayback {
     required bool playing,
     required Duration position,
     required Duration duration,
+    double speed = 1,
   }) async {
-    final String key = '$title|$artist|$playing';
+    final String key = '$title|$artist|$playing|$speed';
     final DateTime now = DateTime.now();
     if (key == _lastKey && now.difference(_lastSent).inSeconds < 5) return;
     if (!_shown && !playing) return;
@@ -44,6 +55,7 @@ class BackgroundPlayback {
         'playing': playing,
         'position': position.inMilliseconds,
         'duration': duration.inMilliseconds,
+        'speed': speed,
       });
     } on Object {
       // No notification on this system: the song still plays.

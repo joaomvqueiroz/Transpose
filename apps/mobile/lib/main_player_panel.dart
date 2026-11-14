@@ -675,7 +675,7 @@ class _PlayerControlCardsState extends State<_PlayerControlCards> {
                       children: <Widget>[
                         _ToolButton(
                           icon: Icons.timer_outlined,
-                          label: 'Metrônomo',
+                          label: 'Metrónomo',
                           tool: 'metronome',
                           onTool: widget.onTool,
                         ),
@@ -935,7 +935,7 @@ class _FullscreenStyleControlsState extends State<_FullscreenStyleControls> {
                   children: [
                     _ToolButton(
                       icon: Icons.timer_outlined,
-                      label: 'Metrônomo',
+                      label: 'Metrónomo',
                       tool: 'metronome',
                       onTool: widget.onTool,
                     ),
@@ -2094,7 +2094,9 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
               ),
             if (model.loaded && !model.canPitch)
               Text(
-                'Tom indisponível nesta fonte.',
+                model.adPlaying
+                    ? 'Tom e velocidade voltam depois do anúncio.'
+                    : 'Tom indisponível nesta fonte.',
                 style: TextStyle(color: studioMuted),
               ),
             if (showPracticeControls && !studioSpotifySkin)
@@ -2506,7 +2508,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                       ),
                                       const PopupMenuItem<String>(
                                         value: 'metronome',
-                                        child: Text('Metrônomo'),
+                                        child: Text('Metrónomo'),
                                       ),
                                       const PopupMenuItem<String>(
                                         value: 'chords',
@@ -2776,7 +2778,9 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                             !model.canPitch &&
                                             !model.pitchPending)
                                           Text(
-                                            'Tom indisponível nesta fonte.',
+                                            model.adPlaying
+                                                ? 'Tom e velocidade voltam depois do anúncio.'
+                                                : 'Tom indisponível nesta fonte.',
                                             style: TextStyle(
                                               color: studioMuted,
                                               fontSize: 12,

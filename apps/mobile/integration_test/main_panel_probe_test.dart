@@ -320,13 +320,13 @@ void main() {
         );
         await tapKey('metronomePlayback');
         await waitFor(
-          () => find.text('Parar metrônomo').evaluate().isNotEmpty,
+          () => find.text('Parar metrónomo').evaluate().isNotEmpty,
           'real metronome playback',
         );
         await Future<void>.delayed(const Duration(milliseconds: 800));
         await tapKey('metronomePlayback');
         await waitFor(
-          () => find.text('Iniciar metrônomo').evaluate().isNotEmpty,
+          () => find.text('Iniciar metrónomo').evaluate().isNotEmpty,
           'metronome stop',
         );
         await closeTool();

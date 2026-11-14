@@ -372,7 +372,7 @@ void main() {
         sameSource();
         report('more-save-persists-real-adjustments-reset-clears-processing');
 
-        await more('Metrônomo');
+        await more('Metrónomo');
         await waitFor(
           () =>
               find.byKey(const Key('metronomePlayback')).evaluate().isNotEmpty,
@@ -380,12 +380,12 @@ void main() {
         );
         await tapKey('metronomePlayback');
         await waitFor(
-          () => find.text('Parar metrônomo').evaluate().isNotEmpty,
+          () => find.text('Parar metrónomo').evaluate().isNotEmpty,
           'metronome started',
         );
         await tapKey('metronomePlayback');
         await waitFor(
-          () => find.text('Iniciar metrônomo').evaluate().isNotEmpty,
+          () => find.text('Iniciar metrónomo').evaluate().isNotEmpty,
           'metronome stopped',
         );
         await closeTool();

@@ -558,6 +558,29 @@ void main() {
       player.dispose();
     },
   );
+  test('a saved SoundCloud or Spotify song answers at once', () async {
+    final youtube = _YouTube(<String>[])..state = _video();
+    final player = MainPlayerController(
+      local: _RestorableLocal(),
+      youtubeFactory: () => youtube,
+    );
+    final started = DateTime.now();
+    await player.restore(_preset(id: 'soundcloud-1a2b3c'));
+    expect(
+      DateTime.now().difference(started),
+      lessThan(const Duration(seconds: 2)),
+    );
+    expect(player.lastRestoreSucceeded, isFalse);
+    expect(player.message, contains('não é do YouTube'));
+    expect(youtube.commands, isEmpty);
+    player.dispose();
+  });
+
+  test('isYouTubeVideoId accepts only 11-character ids', () {
+    expect(isYouTubeVideoId('aqz-KE-bpKQ'), isTrue);
+    expect(isYouTubeVideoId('soundcloud-1a2b'), isFalse);
+    expect(isYouTubeVideoId('4uLU6hMCjMI75M1A2tKUQC'), isFalse);
+  });
 }
 
 YouTubeMediaState _video({

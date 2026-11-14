@@ -30,6 +30,7 @@ class HomeWidgetBridge {
 
   static Future<void> listenForSources() async {
     _sourcesWanted = true;
+    _owner = null;
     _channel.setMethodCallHandler((call) async {
       if (call.method != 'action' || call.arguments is! String) return;
       final action = call.arguments as String;
@@ -63,7 +64,11 @@ class HomeWidgetBridge {
   bool _disposed = false;
   bool _missingPlugin = false;
 
+  // The bridge that listens now (see [dispose]).
+  static HomeWidgetBridge? _owner;
+
   Future<void> initialize() async {
+    _owner = this;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'action' && call.arguments is String) {
         _dispatch(call.arguments as String);
@@ -151,6 +156,9 @@ class HomeWidgetBridge {
   void dispose() {
     _disposed = true;
     _pending?.cancel();
+    // A newer studio (the source was changed) already listens: leave it.
+    if (!identical(_owner, this)) return;
+    _owner = null;
     _channel.setMethodCallHandler(null);
     if (_sourcesWanted) unawaited(listenForSources());
   }

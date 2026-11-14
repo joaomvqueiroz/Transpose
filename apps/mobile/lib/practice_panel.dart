@@ -401,7 +401,7 @@ class _PracticePanelState extends State<PracticePanel> {
                       key: const Key('practiceMetronome'),
                       onPressed: widget.onMetronome,
                       icon: const Icon(Icons.timer_outlined),
-                      label: const Text('Metrônomo'),
+                      label: const Text('Metrónomo'),
                     ),
                   ],
                 ),

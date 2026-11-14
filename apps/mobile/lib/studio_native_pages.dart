@@ -1354,7 +1354,7 @@ class StudioNativeSidebar extends StatelessWidget {
                   (Icons.repeat, 'Loops Salvos', '12 trechos'),
                   (Icons.tune, 'Predefinições de Afinação', 'E♭, D'),
                   (Icons.mic_none, 'Gravações de Ensaio', '●'),
-                  (Icons.speed, 'Afinador & Metrônomo', 'Tap'),
+                  (Icons.speed, 'Afinador & Metrónomo', 'Tap'),
                   (Icons.show_chart, 'Progresso e Prática', '14.2h'),
                 ])
               _sidebarRow(icon, title, trailing),

@@ -364,7 +364,7 @@ class _StagePanelState extends State<StagePanel> {
                   key: const Key('stageMetronome'),
                   onPressed: _locked ? null : () => widget.onTool('metronome'),
                   icon: const Icon(Icons.timer_outlined),
-                  label: const Text('Metrônomo'),
+                  label: const Text('Metrónomo'),
                 ),
                 if (_error != null)
                   TextButton(

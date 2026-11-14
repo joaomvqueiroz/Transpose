@@ -1,3 +1,5 @@
+import 'external_links.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -216,7 +218,8 @@ const String _spotifyHomeButtonJs = r'''
   }
 ''';
 
-const String _dressScript = '''
+const String _dressScript =
+    '''
 (() => {
   const S = window.__transponoSp || (window.__transponoSp = {adjust: 0, home: 0});
   const tune = '<path fill="currentColor" d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/>';
@@ -384,20 +387,24 @@ $_spotifyHomeButtonJs
 
 /// Keeps Spotify's own sound off while the same song plays from YouTube
 /// (where the tone works). Volume only: nothing is read from the audio.
-const String _muteScript = '''
+/// Spotify's own sound off ([mute]) while the YouTube copy plays the song,
+/// or back on when there is no copy to hear.
+String _muteScriptFor(bool mute) =>
+    '''
 (() => {
+  window.__transponoSilent = $mute;
   if (!window.__transponoMuteHook) {
     window.__transponoMuteHook = true;
     window.__transponoMedia = new Set();
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
       window.__transponoMedia.add(this);
-      this.muted = true;
+      this.muted = !!window.__transponoSilent;
       return play.apply(this, arguments);
     };
   }
-  for (const m of document.querySelectorAll('audio, video')) m.muted = true;
-  for (const m of window.__transponoMedia) m.muted = true;
+  for (const m of document.querySelectorAll('audio, video')) m.muted = $mute;
+  for (const m of window.__transponoMedia) m.muted = $mute;
   return true;
 })()
 ''';
@@ -469,6 +476,9 @@ String _holdScript(double seconds) =>
 /// The first video of a YouTube results page (never a Short).
 const String _firstVideoScript = '''
 (() => {
+  // Only on the results page: right after a new search the previous song's
+  // page (its related videos) or the home feed may still be showing.
+  if (location.pathname !== '/results') return '';
   for (const a of document.querySelectorAll('a[href*="/watch?v="]')) {
     const href = a.href || '';
     if (href.indexOf('list=') < 0) return href;
@@ -643,6 +653,8 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   String? _shadowSearchFor;
   int _shadowSearchTicks = 0;
   bool _shadowLoaded = false;
+  // When the current song's YouTube copy started being looked for.
+  DateTime _shadowSince = DateTime.fromMillisecondsSinceEpoch(0);
   bool _advancing = false;
   bool _disposed = false;
   bool _started = false;
@@ -821,9 +833,18 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       // The sound stays off once set: checked every few reads, and on a
       // new song.
       final bool mute = _tick % 4 == 0 || track?.id != _shadowTrackId;
+      // Spotify stays silent only while the YouTube copy plays the song, or
+      // for a few seconds while it is being found. Without a copy (YouTube
+      // did not start, consent page, song not found) Spotify is heard: it
+      // used to stay muted and the song played in silence.
+      final bool copyPlays =
+          _shadowLoaded && shadow.media.hasVideo && shadow.error == null;
+      final bool finding =
+          DateTime.now().difference(_shadowSince) < const Duration(seconds: 8);
+      final String sound = _muteScriptFor(copyPlays || finding);
       if (awake || mute) {
         await _controller.runJavaScript(
-          awake ? '$_muteScript;$keepAwakeScript' : _muteScript,
+          awake ? '$sound;$keepAwakeScript' : sound,
         );
       }
       if (awake) await shadow.controller.runJavaScript(keepAwakeScript);
@@ -838,7 +859,12 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       _shadowSearchTicks = 0;
       _shadowLoaded = false;
       _advancing = false;
-      await shadow.command('pause');
+      _shadowSince = DateTime.now();
+      try {
+        await shadow.command('pause');
+      } on Object {
+        // The page is changing; the search below still runs.
+      }
       await shadow.controller.loadRequest(youtubeSearchUri(track.query));
       return;
     }
@@ -946,10 +972,13 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
         spotifySignInRequests.value++;
         return NavigationDecision.prevent;
       }
-      // "Abrir app", spotify: links and other sites stay out of the player.
-      return uri != null && isSpotifyBrowserUri(uri)
-          ? NavigationDecision.navigate
-          : NavigationDecision.prevent;
+      if (uri != null && isSpotifyBrowserUri(uri)) {
+        return NavigationDecision.navigate;
+      }
+      // "Abrir app" and spotify: links stay out (the Spotify app would take
+      // the music); other sites and email links open in the phone's browser.
+      if (uri != null) unawaited(openOutside(uri));
+      return NavigationDecision.prevent;
     }
 
     if (_gecko != null) {
@@ -1038,6 +1067,17 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       await _controller.runJavaScript(_previousScript);
     } on Object {
       // The page may be navigating.
+    }
+    // Spotify's "previous" restarts the same song when it is past its
+    // start: the track does not change, so the YouTube copy is taken back
+    // to the start too (a new track is followed as usual).
+    final shadow = _shadow;
+    if (shadow != null && _shadowLoaded) {
+      try {
+        await shadow.command('seekTo', 0);
+      } on Object {
+        // The copy may be changing song.
+      }
     }
   }
 

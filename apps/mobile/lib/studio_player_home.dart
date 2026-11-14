@@ -126,6 +126,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   @override
   void initState() {
     super.initState();
+    _applySystemBarsStyle();
     WidgetsBinding.instance.addObserver(this);
     pageAdjustRequests.addListener(_pageAdjust);
     BackgroundPlayback.listen(_backgroundAction);
@@ -168,22 +169,29 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _homeWidgets.schedule(_lastForegroundWidgetState!);
   }
 
+  /// Clock and battery icons dark on the light look, light otherwise. Also
+  /// at start: the app opened in the light look used to show white icons on
+  /// white until the look was changed.
+  void _applySystemBarsStyle() {
+    final light = widget.appearance.mode == StudioAppearanceMode.light;
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: light ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: light
+            ? Brightness.dark
+            : Brightness.light,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
+  }
+
   @override
   void didUpdateWidget(covariant StudioVisualHome oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.appearance.mode != widget.appearance.mode) {
-      final light = widget.appearance.mode == StudioAppearanceMode.light;
-      SystemChrome.setSystemUIOverlayStyle(
-        SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: light ? Brightness.dark : Brightness.light,
-          systemNavigationBarColor: Colors.transparent,
-          systemNavigationBarIconBrightness: light
-              ? Brightness.dark
-              : Brightness.light,
-          systemNavigationBarContrastEnforced: false,
-        ),
-      );
+      _applySystemBarsStyle();
       final session = _player.youtube;
       if (session != null) {
         unawaited(session.setAppearanceMode(widget.appearance.mode));
@@ -826,7 +834,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void dispose() {
     adjustmentsCoverScreen.value = false;
     pageAdjustRequests.removeListener(_pageAdjust);
-    BackgroundPlayback.unlisten();
+    BackgroundPlayback.unlisten(_backgroundAction);
     musicSongTabs.removeListener(_songTabsChanged);
     musicPlayerTint.removeListener(_musicTintChanged);
     unawaited(BackgroundPlayback.stop());
@@ -851,6 +859,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _practice.dispose();
     _bandSession.dispose();
     _miniControlsTimer?.cancel();
+    _backgroundStopTimer?.cancel();
     _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();
@@ -996,12 +1005,27 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   bool _sheetLow = false;
 
   /// The page's own adjustments button (Spotify's bottom bar) was tapped.
+  // Between two songs the player is briefly empty. Stopping the background
+  // service then lost it for good: Android does not let an app in the
+  // background start it again (no notification, the app could be closed).
+  Timer? _backgroundStopTimer;
+
   void _updateBackground() {
     if (!Platform.isAndroid) return;
-    if (!(studioSpotifySource || studioMusicSource) || !_player.loaded) {
+    if (!(studioSpotifySource || studioMusicSource)) {
+      _backgroundStopTimer?.cancel();
       unawaited(BackgroundPlayback.stop());
       return;
     }
+    if (!_player.loaded) {
+      _backgroundStopTimer ??= Timer(const Duration(seconds: 30), () {
+        _backgroundStopTimer = null;
+        if (!_player.loaded) unawaited(BackgroundPlayback.stop());
+      });
+      return;
+    }
+    _backgroundStopTimer?.cancel();
+    _backgroundStopTimer = null;
     final String title = _player.title;
     final int dash = title.lastIndexOf(' - ');
     unawaited(
@@ -1011,6 +1035,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         playing: _player.playing,
         position: _player.position,
         duration: _player.duration,
+        speed: _player.speed,
       ),
     );
   }
@@ -1327,6 +1352,12 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     }
     if (_player.isRhythmPreview) {
       _notice('Prévia temporária não pode ser guardada.');
+      return;
+    }
+    if (!_player.canSaveCurrent) {
+      _notice(
+        'Por agora só se guardam vídeos do YouTube e ficheiros: esta música não poderia ser aberta outra vez.',
+      );
       return;
     }
     // Capture before opening the dialog: a changing YouTube page cannot silently
@@ -5030,7 +5061,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                         _practiceToolRow(
                           key: const Key('practiceMetronome'),
                           icon: Icons.timer_outlined,
-                          title: 'Metrônomo inteligente',
+                          title: 'Metrónomo inteligente',
                           subtitle: studioSpotifySkin && !studioYouTubeSkin
                               ? 'Compasso e andamento'
                               : null,

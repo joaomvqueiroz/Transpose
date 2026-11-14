@@ -78,6 +78,25 @@ class MainActivity : FlutterActivity() {
         qaPhoneRhythm = PhoneRhythmFeatureCapture.attach(
             applicationContext, flutterEngine.dartExecutor.binaryMessenger,
         )
+        // Links to other sites (a video's description, an email address) open
+        // in the phone's browser or app.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "transpono/external")
+            .setMethodCallHandler { call, result ->
+                val url = call.argument<String>("url")
+                if (call.method != "open" || url == null) {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    result.success(true)
+                } catch (_: Throwable) {
+                    result.success(false)
+                }
+            }
         pipChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "transpono/pip").also {
             it.setMethodCallHandler { call, result ->
                 if (call.method == "setVideoPlaying") {
@@ -115,6 +134,7 @@ class MainActivity : FlutterActivity() {
                             playing,
                             (args?.get("position") as? Number)?.toLong() ?: 0L,
                             (args?.get("duration") as? Number)?.toLong() ?: 0L,
+                            (args?.get("speed") as? Number)?.toFloat() ?: 1f,
                         )
                         result.success(null)
                     }

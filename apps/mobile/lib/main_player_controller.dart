@@ -6,6 +6,7 @@ import 'package:player_core/player_core.dart';
 import 'media/local_player_controller.dart';
 import 'player_panel_model.dart';
 import 'player_presets.dart';
+import 'studio_appearance.dart' show studioSpotifySource;
 import 'youtube_browser.dart';
 import 'loop_observation.dart';
 
@@ -95,6 +96,8 @@ class MainPlayerController extends PlayerPanelModel {
           : local.canPitch);
   @override
   bool get canSpeed => loaded && (_online ? !_media.isAd : local.canSpeed);
+  @override
+  bool get adPlaying => loaded && _online && _media.isAd;
   @override
   bool get canLoop =>
       loaded && (_online ? !_media.isAd && _media.duration > 0 : local.canLoop);
@@ -428,6 +431,10 @@ class MainPlayerController extends PlayerPanelModel {
     }
   });
 
+  /// SoundCloud and Spotify songs cannot be opened again from a saved
+  /// entry (only YouTube video ids can), so they are not saved.
+  bool get canSaveCurrent => !_online || isYouTubeVideoId(_media.videoId);
+
   PlayerPreset? snapshot(String name) {
     if (!loaded ||
         isRhythmPreview ||
@@ -503,6 +510,19 @@ class MainPlayerController extends PlayerPanelModel {
     bool active() => !_disposed && !cancellation.isCompleted;
     return _run(() async {
       if (!active()) return;
+      // Only YouTube videos can be opened again from their id (SoundCloud and
+      // Spotify ids cannot), and not from inside Spotify's player: answer at
+      // once instead of waiting 25 s for a page that never comes.
+      if (preset.youtube && !isYouTubeVideoId(preset.locator)) {
+        _message = 'Esta música não é do YouTube e ainda não pode ser aberta a partir da setlist.';
+        _changed();
+        return;
+      }
+      if (preset.youtube && studioSpotifySource) {
+        _message = 'Abra o YouTube no Transpono para tocar esta música.';
+        _changed();
+        return;
+      }
       await local.pause();
       if (!active()) return;
       // Let an already-running ad finish while restoring this same video.
@@ -725,3 +745,7 @@ class MainPlayerController extends PlayerPanelModel {
     super.dispose();
   }
 }
+
+/// An 11-character YouTube video id.
+bool isYouTubeVideoId(String value) =>
+    RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(value);

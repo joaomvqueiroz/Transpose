@@ -18,7 +18,7 @@ Future<void> showStudyTool(
   required double pitch,
 }) async {
   final (String, Widget) content = switch (tool) {
-    'metronome' => ('Metrônomo', const _MetronomeTool()),
+    'metronome' => ('Metrónomo', const _MetronomeTool()),
     'tuner' => ('Afinador', const _InstrumentTunerTool()),
     'chords' => ('Acordes', _ChordTool(pitch: pitch.round())),
     _ => throw ArgumentError.value(tool, 'tool'),
@@ -516,8 +516,8 @@ class _MetronomeToolState extends State<_MetronomeTool> {
             _sound.busy
                 ? 'A preparar…'
                 : _playing
-                ? 'Parar metrônomo'
-                : 'Iniciar metrônomo',
+                ? 'Parar metrónomo'
+                : 'Iniciar metrónomo',
           ),
         ),
         if (_sound.error != null) Text(_sound.error!),

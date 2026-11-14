@@ -96,7 +96,7 @@ void main() {
       await tester.pumpWidget(_app(model, onTool: tools.add));
       for (final item in <(String, String)>[
         ('Guardar ajustes', 'save'),
-        ('Metrônomo', 'metronome'),
+        ('Metrónomo', 'metronome'),
         ('Acordes', 'chords'),
         ('Afinador por referência', 'tuner'),
         ('Ferramentas de áudio', 'advanced'),

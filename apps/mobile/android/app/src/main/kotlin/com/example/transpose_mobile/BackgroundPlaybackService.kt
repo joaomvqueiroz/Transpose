@@ -12,7 +12,9 @@ import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 
 /**
  * Keeps the song going with the app in the background, the way Spotify's own
@@ -23,6 +25,17 @@ import android.os.IBinder
  */
 class BackgroundPlaybackService : Service() {
     private var session: MediaSession? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Paused for a long time: the service stops being "foreground" (the
+    // notification can then be swiped away and Android may close the app),
+    // as music apps do after ~10 minutes. Playing again brings it back.
+    private val pausedTooLong = Runnable {
+        if (!playing) {
+            if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH)
+            else @Suppress("DEPRECATION") stopForeground(false)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,6 +71,7 @@ class BackgroundPlaybackService : Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(pausedTooLong)
         session?.isActive = false
         session?.release()
         session = null
@@ -98,7 +112,9 @@ class BackgroundPlaybackService : Service() {
                 .setState(
                     if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
                     position,
-                    if (playing) 1f else 0f,
+                    // The real speed: at 0.75x the lock screen's bar used to
+                    // run ahead of the song.
+                    if (playing) speed else 0f,
                 )
                 .build(),
         )
@@ -135,12 +151,15 @@ class BackgroundPlaybackService : Service() {
         } else {
             startForeground(ID, notification)
         }
+        handler.removeCallbacks(pausedTooLong)
+        if (!playing) handler.postDelayed(pausedTooLong, PAUSED_LIMIT_MS)
     }
 
     companion object {
         private const val CHANNEL = "transpono_playback"
         private const val ID = 4711
         private const val EXTRA_ACTION = "action"
+        private const val PAUSED_LIMIT_MS = 10 * 60 * 1000L
 
         /** Taps on the notification or the lock screen go to the Dart side. */
         var listener: ((String) -> Unit)? = null
@@ -151,6 +170,7 @@ class BackgroundPlaybackService : Service() {
         private var playing = false
         private var position = 0L
         private var duration = 0L
+        private var speed = 1f
 
         fun update(
             context: Context,
@@ -159,12 +179,14 @@ class BackgroundPlaybackService : Service() {
             playing: Boolean,
             position: Long,
             duration: Long,
+            speed: Float = 1f,
         ) {
             this.title = title
             this.artist = artist
             this.playing = playing
             this.position = position
             this.duration = duration
+            this.speed = if (speed > 0f) speed else 1f
             val running = instance
             if (running != null) {
                 running.refresh()
@@ -183,7 +205,9 @@ class BackgroundPlaybackService : Service() {
         }
 
         fun stop(context: Context) {
-            if (instance == null) return
+            // Also when it is still starting (no instance yet): otherwise the
+            // start finished later and left a notification with dead buttons.
+            playing = false
             context.stopService(Intent(context, BackgroundPlaybackService::class.java))
         }
     }
