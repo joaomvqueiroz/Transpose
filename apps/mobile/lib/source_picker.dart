@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'google_sign_in_probe.dart';
 import 'spotify_sign_in.dart';
@@ -32,9 +33,16 @@ typedef StudioBuilder = Widget Function(
 /// a button hands the song to YouTube, where pitch works.
 /// Everything is drawn as vectors, so it stays sharp on any screen.
 class TransponoSourcePicker extends StatefulWidget {
-  const TransponoSourcePicker({super.key, required this.studioBuilder});
+  const TransponoSourcePicker({
+    super.key,
+    required this.studioBuilder,
+    this.preferences,
+  });
 
   final StudioBuilder studioBuilder;
+
+  /// Where the last source is kept (tests pass their own).
+  final SharedPreferencesAsync? preferences;
 
   @override
   State<TransponoSourcePicker> createState() => _TransponoSourcePickerState();
@@ -47,9 +55,17 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   SpotifyStudioSession? _spotify;
   final GoogleSignInGate _google = GoogleSignInGate();
 
+  static const String _lastSourceKey = 'transpono.lastSource';
+  late final SharedPreferencesAsync _preferences =
+      widget.preferences ?? SharedPreferencesAsync();
+
+  /// Reading the last source: the start screen is not shown meanwhile.
+  bool _restoring = true;
+
   @override
   void initState() {
     super.initState();
+    unawaited(_openLastSource());
     widgetSourceRequest.addListener(_widgetSource);
     pageHomeRequests.addListener(_pageHome);
     spotifySignInRequests.addListener(_spotifySignIn);
@@ -79,6 +95,31 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
       );
     } finally {
       _spotifySigningIn = false;
+    }
+  }
+
+  /// The app opens straight in the source used last time (the start screen
+  /// stays one tap away, on the Transpono icon). A home-screen widget
+  /// shortcut that already chose a source wins.
+  Future<void> _openLastSource() async {
+    ListeningSource? last;
+    try {
+      final String? name = await _preferences
+          .getString(_lastSourceKey)
+          .timeout(const Duration(seconds: 2));
+      last = ListeningSource.values.where((s) => s.name == name).firstOrNull;
+    } on Object {
+      last = null;
+    }
+    if (!mounted) return;
+    final bool untouched = _source == null && _generation == 0;
+    setState(() => _restoring = false);
+    if (last == null || !untouched) return;
+    if (last == ListeningSource.youtube ||
+        last == ListeningSource.youtubeMusic) {
+      unawaited(_chooseGoogle(last));
+    } else {
+      _choose(last);
     }
   }
 
@@ -119,7 +160,15 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   }
 
   void _choose(ListeningSource? source, [String? query]) {
+    if (source != null) {
+      unawaited(
+        _preferences
+            .setString(_lastSourceKey, source.name)
+            .catchError((Object _) {}),
+      );
+    }
     setState(() {
+      _restoring = false;
       _source = source;
       _query = query;
       // A new studio (and player) for every choice; the old one is disposed.
@@ -143,6 +192,9 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   @override
   Widget build(BuildContext context) {
     final source = _source;
+    if (source == null && _restoring) {
+      return const ColoredBox(color: Colors.black);
+    }
     if (source == null) {
       return _PickerScreen(
         onYouTube: () => _chooseGoogle(ListeningSource.youtube),
