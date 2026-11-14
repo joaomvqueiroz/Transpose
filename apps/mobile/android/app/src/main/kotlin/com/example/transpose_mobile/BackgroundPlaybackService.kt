@@ -31,11 +31,15 @@ class BackgroundPlaybackService : Service() {
     // notification can then be swiped away and Android may close the app),
     // as music apps do after ~10 minutes. Playing again brings it back.
     private val pausedTooLong = Runnable {
-        if (!playing) {
+        if (!playing && foreground) {
             if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH)
             else @Suppress("DEPRECATION") stopForeground(false)
+            foreground = false
         }
     }
+
+    // Whether the service is "foreground" now (see [pausedTooLong]).
+    private var foreground = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,12 +70,21 @@ class BackgroundPlaybackService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.getStringExtra(EXTRA_ACTION)?.let { send(it) }
-        refresh()
+        // A start always becomes foreground at once (Android requires it),
+        // even when a stop already arrived meanwhile.
+        refresh(forceForeground = true)
+        if (stopWhenStarted) {
+            stopWhenStarted = false
+            stopSelf()
+        }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(pausedTooLong)
+        // A detached notification (paused for long) is not removed with the
+        // service by itself.
+        getSystemService(NotificationManager::class.java).cancel(ID)
         session?.isActive = false
         session?.release()
         session = null
@@ -93,7 +106,7 @@ class BackgroundPlaybackService : Service() {
         ).build()
     }
 
-    fun refresh() {
+    fun refresh(forceForeground: Boolean = false) {
         val session = session ?: return
         session.setMetadata(
             MediaMetadata.Builder()
@@ -146,13 +159,26 @@ class BackgroundPlaybackService : Service() {
                     .setShowActionsInCompactView(0, 1, 2),
             )
             .build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        if (playing || foreground || forceForeground) {
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                } else {
+                    startForeground(ID, notification)
+                }
+                foreground = true
+            } catch (_: RuntimeException) {
+                // Not allowed from the background right now: the notification
+                // is still updated below and the next play from the app retries.
+                getSystemService(NotificationManager::class.java).notify(ID, notification)
+            }
         } else {
-            startForeground(ID, notification)
+            // Paused for long (no longer foreground): only the notification is
+            // updated, so the timeout is not undone by the next update.
+            getSystemService(NotificationManager::class.java).notify(ID, notification)
         }
         handler.removeCallbacks(pausedTooLong)
-        if (!playing) handler.postDelayed(pausedTooLong, PAUSED_LIMIT_MS)
+        if (!playing && foreground) handler.postDelayed(pausedTooLong, PAUSED_LIMIT_MS)
     }
 
     companion object {
@@ -171,6 +197,7 @@ class BackgroundPlaybackService : Service() {
         private var position = 0L
         private var duration = 0L
         private var speed = 1f
+        private var stopWhenStarted = false
 
         fun update(
             context: Context,
@@ -194,6 +221,7 @@ class BackgroundPlaybackService : Service() {
             }
             // Only started while something plays (the app is then in front).
             if (!playing) return
+            stopWhenStarted = false
             val intent = Intent(context, BackgroundPlaybackService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
@@ -205,9 +233,14 @@ class BackgroundPlaybackService : Service() {
         }
 
         fun stop(context: Context) {
-            // Also when it is still starting (no instance yet): otherwise the
-            // start finished later and left a notification with dead buttons.
             playing = false
+            if (instance == null) {
+                // Still starting: stopping it now would break Android's rule
+                // that a started service must become foreground; it stops
+                // itself right after (see onStartCommand).
+                stopWhenStarted = true
+                return
+            }
             context.stopService(Intent(context, BackgroundPlaybackService::class.java))
         }
     }

@@ -446,13 +446,22 @@ class LocalPlayerController extends ChangeNotifier {
   // not asked to redraw (it used to rebuild 4 times a second for nothing).
   Duration? _tickPosition;
   bool? _tickPlaying;
+  Object? _tickState;
+  Duration? _tickDuration;
 
   void _tick() {
     if (_disposed) return;
     final Duration now = position;
-    if (playing || now != _tickPosition || playing != _tickPlaying) {
+    final Object state = _session.state;
+    if (playing ||
+        now != _tickPosition ||
+        playing != _tickPlaying ||
+        state != _tickState ||
+        duration != _tickDuration) {
       _tickPosition = now;
       _tickPlaying = playing;
+      _tickState = state;
+      _tickDuration = duration;
       _notify();
     }
     if (_pending > 0 ||

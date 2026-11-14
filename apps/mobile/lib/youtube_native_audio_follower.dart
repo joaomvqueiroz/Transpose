@@ -40,6 +40,8 @@ class NativeYouTubeAudioFollower {
   NativeFollowStatus _status = NativeFollowStatus.idle;
   NativeFollowStatus get status => _status;
   NativeAudioSettings _settings = const NativeAudioSettings();
+  // The video [_settings] were last set for.
+  String _settingsVideo = '';
   NativeAudioSettings get settings => _settings;
   String _videoId = '';
   String _message = '';
@@ -53,8 +55,10 @@ class NativeYouTubeAudioFollower {
       _videoId.isNotEmpty &&
       _status != NativeFollowStatus.failed;
 
-  Future<void> command(String action, num value) async {
+  /// [videoId]: the video the value is for (the page's current one).
+  Future<void> command(String action, num value, {String? videoId}) async {
     _settings = _settings.withValue(action, value.toDouble());
+    _settingsVideo = videoId ?? _videoId;
     if (_status == NativeFollowStatus.ready) await _audio.configure(_settings);
     _changed();
   }
@@ -129,7 +133,12 @@ class NativeYouTubeAudioFollower {
     _message = '';
     // A new video starts neutral, as the web bridge resets its practice
     // values; otherwise pitch and EQ carried over to the next track.
-    _settings = const NativeAudioSettings();
+    // Unless they were already set for this video (a setlist song applies
+    // its tone as soon as the page reports it, which can come first).
+    if (_settingsVideo != id) {
+      _settings = const NativeAudioSettings();
+      _settingsVideo = id;
+    }
     await _audio.stop();
     await _mute(false);
     if (id.isEmpty) {

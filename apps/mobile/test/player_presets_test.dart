@@ -214,6 +214,20 @@ void main() {
     await store.save(again);
     expect((await store.list(setlist: true)).map((p) => p.id), ['first']);
   });
+  test('the same song added again updates its entry in place', () async {
+    final store = PlayerPresetStore();
+    await store.save(_preset('a'), setlist: true);
+    await store.save(_preset('b'), setlist: true);
+    final again = PlayerPreset.parse({
+      ..._preset('new').toJson(),
+      'sourceId': 'video-a',
+      'pitch': 3,
+    })!;
+    await store.replaceInSetlist(again);
+    final list = await store.list(setlist: true);
+    expect(list.map((p) => p.id), ['a', 'b']);
+    expect(list.first.pitch, 3);
+  });
 }
 
 PlayerPreset _preset(String id) => PlayerPreset(

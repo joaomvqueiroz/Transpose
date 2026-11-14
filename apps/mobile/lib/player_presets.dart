@@ -194,6 +194,24 @@ class PlayerPresetStore {
         entries.add(preset.toJson());
       });
 
+  /// The setlist already has this song (same video or file): its entry
+  /// takes the new settings (tone, speed, A–B), keeping its place and id.
+  Future<void> replaceInSetlist(PlayerPreset preset) => _edit(true, (entries) {
+    if (PlayerPreset.parse(preset.toJson()) == null) {
+      throw ArgumentError('Os ajustes a guardar são inválidos.');
+    }
+    for (int i = 0; i < entries.length; i++) {
+      final PlayerPreset? other = PlayerPreset.parse(entries[i]);
+      if (other != null &&
+          other.youtube == preset.youtube &&
+          other.sourceId == preset.sourceId) {
+        entries[i] = <String, dynamic>{...preset.toJson(), 'id': other.id};
+        return;
+      }
+    }
+    throw StateError('O item já não está nesta coleção. Atualize a lista.');
+  });
+
   int _indexOf(List<Object?> entries, String id) {
     final indices = <int>[
       for (var i = 0; i < entries.length; i++)

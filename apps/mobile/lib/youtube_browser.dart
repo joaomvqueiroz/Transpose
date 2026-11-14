@@ -808,7 +808,24 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
               ? null
               : youtubeRedirectTarget(asked);
           if (redirect != null) {
-            unawaited(openOutside(redirect));
+            final Uri? inside = youtubeInAppTarget(redirect);
+            final Uri? embedded = inside == null
+                ? null
+                : embeddedYouTubeUri(inside.toString());
+            if (embedded != null) {
+              unawaited(controller.loadRequest(embedded));
+            } else {
+              unawaited(openOutside(redirect));
+            }
+            return NavigationDecision.prevent;
+          }
+          // An http:// YouTube link stays in the app (as https).
+          final Uri? upgraded = asked == null || asked.scheme != 'http'
+              ? null
+              : youtubeInAppTarget(asked);
+          if (upgraded != null &&
+              embeddedYouTubeUri(upgraded.toString()) != null) {
+            unawaited(controller.loadRequest(upgraded));
             return NavigationDecision.prevent;
           }
           final Uri? uri = embeddedYouTubeUri(request.url);
@@ -1101,6 +1118,8 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
       final String missed = page != null && page.path == '/results'
           ? (page.queryParameters['search_query'] ?? '').trim()
           : '';
+      // Off the results page: the same search may be handed over again.
+      if (page != null && page.path != '/results') _handedSearchUrl = null;
       if (missed.isNotEmpty && pageUrl != _handedSearchUrl) {
         _handedSearchUrl = pageUrl as String;
         onSearchRequest?.call(missed);
@@ -1299,18 +1318,30 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
   /// list, that list is loaded.
   Future<void> _returnToList() async {
     final Uri? list = _lastListUri;
+    final String? before = await controller.currentUrl();
     await goBack();
     if (list == null) return;
-    for (int i = 0; i < 12; i++) {
+    // Wait for the page to leave the video (a slow phone can take a while).
+    Uri? here;
+    for (int i = 0; i < 30; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       if (_disposed) return;
-      final Uri? here = Uri.tryParse(await controller.currentUrl() ?? '');
-      if (here != null && isBrowseListUri(here)) {
-        if (sameBrowseList(here, list)) return;
-        break;
-      }
+      final String? now = await controller.currentUrl();
+      if (now == null || now == before) continue;
+      here = Uri.tryParse(now);
+      if (here != null && isBrowseListUri(here)) break;
     }
-    if (!_disposed) await controller.loadRequest(list);
+    if (_disposed) return;
+    // Back on a list: kept as it is (with its scroll), unless it is an older
+    // search than the latest one (the site's history can skip a search).
+    if (here != null && isBrowseListUri(here)) {
+      final bool olderSearch =
+          here.path == '/results' &&
+          list.path == '/results' &&
+          !sameBrowseList(here, list);
+      if (!olderSearch) return;
+    }
+    await controller.loadRequest(list);
   }
 
   @override
@@ -1346,7 +1377,7 @@ class WebViewYouTubeSession extends YouTubeBrowserSession {
     if (action == 'pause') _unmuteOnReadyVideoId = null;
     final native = _native;
     if (native != null && value != null && native.handles(action)) {
-      await native.command(action, value);
+      await native.command(action, value, videoId: _media.videoId);
       return;
     }
     final generation = _document;

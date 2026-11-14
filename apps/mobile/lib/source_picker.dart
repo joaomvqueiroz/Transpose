@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -115,12 +116,11 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     final bool untouched = _source == null && _generation == 0;
     setState(() => _restoring = false);
     if (last == null || !untouched) return;
-    if (last == ListeningSource.youtube ||
-        last == ListeningSource.youtubeMusic) {
-      unawaited(_chooseGoogle(last));
-    } else {
-      _choose(last);
-    }
+    // On iPhone a signed-out Spotify would open its sign-in at every start:
+    // there the start screen is shown instead.
+    if (Platform.isIOS && last == ListeningSource.spotify) return;
+    // Opened by itself: the Google sign-in offer is kept for a real tap.
+    _choose(last);
   }
 
   /// The start-screen icon the page draws in its top bar was tapped.
@@ -159,8 +159,8 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
     if (mounted) _choose(source);
   }
 
-  void _choose(ListeningSource? source, [String? query]) {
-    if (source != null) {
+  void _choose(ListeningSource? source, [String? query, bool remember = true]) {
+    if (source != null && remember) {
       unawaited(
         _preferences
             .setString(_lastSourceKey, source.name)
@@ -186,7 +186,9 @@ class _TransponoSourcePickerState extends State<TransponoSourcePicker> {
   void _playOnYouTube() {
     final track = _spotify?.track;
     if (track == null || track.isEmpty) return;
-    _choose(ListeningSource.youtube, track.query);
+    // Hearing a Spotify song on YouTube is not choosing YouTube as the
+    // source to open next time.
+    _choose(ListeningSource.youtube, track.query, false);
   }
 
   @override

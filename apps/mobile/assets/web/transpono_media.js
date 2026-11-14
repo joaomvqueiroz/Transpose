@@ -1236,7 +1236,11 @@
       try {
         const field = document.activeElement;
         if (field && field.blur) field.blur();
-        if (typeof window.__transponoLeaveSearch === 'function') window.__transponoLeaveSearch();
+        // Close the search with its back arrow only: the fallback reload of
+        // the leave-search helper would restart the video playing here.
+        const back = document.querySelector(
+          'ytm-mobile-topbar-renderer .mobile-topbar-back-arrow');
+        if (back && typeof back.click === 'function') back.click();
       } catch (_) {}
       if (typeof window.__transponoPostFocus === 'function') window.__transponoPostFocus();
       return true;

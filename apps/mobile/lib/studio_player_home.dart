@@ -391,6 +391,9 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     if (_browsing) return;
+    // Turned sideways already: YouTube asks for fullscreen by itself when the
+    // phone turns; that is not a press of its button, so nothing is locked.
+    if (MediaQuery.orientationOf(context) == Orientation.landscape) return;
     _forcedLandscape = true;
     unawaited(
       SystemChrome.setPreferredOrientations(const [
@@ -1431,7 +1434,16 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             : 'Tom, velocidade e A/B guardados neste dispositivo.',
       );
     } on AlreadyInSetlist {
-      _notice('Esta música já está na setlist.');
+      // Same song again: its entry takes the settings in use now.
+      try {
+        await _presets.replaceInSetlist(preset);
+        if (mounted) setState(() => _collectionsRevision++);
+        _notice(
+          'Esta música já está na setlist: os ajustes foram atualizados.',
+        );
+      } on Object {
+        _notice('Esta música já está na setlist.');
+      }
     } on Object {
       _notice('Não foi possível guardar. Os ajustes atuais continuam ativos.');
     }
