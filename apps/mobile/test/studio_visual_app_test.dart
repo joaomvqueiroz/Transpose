@@ -590,7 +590,7 @@ void main() {
     );
     expect(tester.getRect(chooseCard).top, tester.getRect(autoCard).top);
     expect(tester.getRect(chooseCard).height, tester.getRect(autoCard).height);
-    expect(find.text('Deslocar'), findsOneWidget);
+    expect(find.text('Rolar'), findsOneWidget);
     expect(
       tester.widget<DecoratedBox>(chooseCard).decoration,
       tester.widget<DecoratedBox>(autoCard).decoration,

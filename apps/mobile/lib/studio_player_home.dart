@@ -4749,7 +4749,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         children: [
           const Expanded(
             child: Text(
-              'Deslocar',
+              'Rolar',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -5334,7 +5334,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     const SizedBox(width: 3),
                     const Expanded(
                       child: Text(
-                        'Deslocar',
+                        'Rolar',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
