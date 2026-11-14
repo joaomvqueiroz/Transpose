@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'player_presets.dart';
 import 'studio_native_pages.dart';
 import 'studio_appearance.dart';
+import 'user_message.dart';
 
 /// User-owned, persistent collections. Choosing an entry asks the existing
 /// player to restore it; this screen never creates a second media session.
@@ -57,7 +58,7 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Não foi possível ler a coleção. $error';
+          _error = 'Não foi possível ler a coleção. ${userMessage(error)}';
         });
       }
     }
@@ -73,7 +74,11 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
       await action();
       await _load();
     } on Object catch (error) {
-      if (mounted) setState(() => _error = 'Não foi possível guardar. $error');
+      if (mounted) {
+        setState(
+          () => _error = 'Não foi possível guardar. ${userMessage(error)}',
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -90,7 +95,10 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
       if (mounted && !widget.embedded) Navigator.of(context).pop();
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _error = 'Não foi possível abrir este item. $error');
+        setState(
+          () => _error =
+              'Não foi possível abrir este item. ${userMessage(error)}',
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -428,7 +436,7 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
-              'Mantenha pressionado para ordenar ou remover.',
+              'Mantenha premido para ordenar ou remover.',
               style: TextStyle(fontSize: 12, color: Color(0xBFFFFFFF)),
             ),
           ),
@@ -538,7 +546,7 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Text(
               'Toque num item para abrir com os ajustes guardados, sem reprodução automática.'
-              '${widget.setlist ? ' Mantenha pressionado para ordenar ou remover.' : ''}',
+              '${widget.setlist ? ' Mantenha premido para ordenar ou remover.' : ''}',
             ),
           ),
         Expanded(
@@ -686,7 +694,7 @@ class _PlayerCollectionsPageState extends State<PlayerCollectionsPage> {
                     const Padding(
                       padding: EdgeInsets.fromLTRB(24, 2, 24, 4),
                       child: Text(
-                        'Toque num item para abrir com os ajustes guardados, sem reprodução automática. Mantenha pressionado para ordenar ou remover.',
+                        'Toque num item para abrir com os ajustes guardados, sem reprodução automática. Mantenha premido para ordenar ou remover.',
                         style: TextStyle(
                           fontSize: 11,
                           color: Color(0xFFB7B7BD),

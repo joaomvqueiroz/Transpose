@@ -133,6 +133,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     musicSongTabs.addListener(_songTabsChanged);
     musicPlayerTint.addListener(_musicTintChanged);
     spotifyPlayerOpen.addListener(_spotifyPlayerChanged);
+    spotifyNotice.addListener(_spotifyNotice);
     _homeWidgets = HomeWidgetBridge(onAction: _onWidgetAction);
     // iPhone's own glass for the bottom bar, where the system has it.
     unawaited(
@@ -721,7 +722,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         ? _widgetChordPreview
         : _widgetChordTitle.isNotEmpty
         ? 'Cifra: $_widgetChordTitle'
-        : 'Abra a cifra no app';
+        : 'Abra a cifra na app';
     final markerA = _player.markerA;
     final markerB = _player.markerB;
     final loop = markerA == null
@@ -839,6 +840,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     musicPlayerTint.removeListener(_musicTintChanged);
     unawaited(BackgroundPlayback.stop());
     spotifyPlayerOpen.removeListener(_spotifyPlayerChanged);
+    spotifyNotice.removeListener(_spotifyNotice);
     _pull.dispose();
     if (_immersiveLandscape) {
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
@@ -912,6 +914,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       );
       _chordTextScroll!.jumpTo(next);
     });
+  }
+
+  void _spotifyNotice() {
+    final String? message = spotifyNotice.value;
+    if (message != null) _notice(message);
   }
 
   void _notice(String message) {
@@ -1351,7 +1358,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
       return;
     }
     if (_player.isRhythmPreview) {
-      _notice('Prévia temporária não pode ser guardada.');
+      _notice('Pré-visualização temporária não pode ser guardada.');
       return;
     }
     if (!_player.canSaveCurrent) {
@@ -1932,7 +1939,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         Align(
           alignment: Alignment.centerRight,
           child: IconButton(
-            tooltip: 'Fechar configurações de áudio',
+            tooltip: 'Fechar definições de áudio',
             onPressed: onClose,
             icon: const Icon(Icons.close),
           ),
@@ -4579,7 +4586,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           // The app's settings ("Mais"): a gear, icon only.
           IconButton(
             key: const Key('unifiedSectionappearanceSettings'),
-            tooltip: 'Configurações',
+            tooltip: 'Definições',
             onPressed: () => _select(StudioTab.appearanceSettings),
             style: IconButton.styleFrom(
               backgroundColor: settings ? selectedFill : Colors.transparent,
@@ -4706,7 +4713,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
         children: [
           const Expanded(
             child: Text(
-              'Rolar',
+              'Deslocar',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -4718,7 +4725,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           ),
           small(
             const Key('chordAutoScrollSlower'),
-            'Rolar cifra mais devagar',
+            'Deslocar a cifra mais devagar',
             Icons.remove,
             _chordScrollSpeed > .5
                 ? () => setState(
@@ -4740,7 +4747,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
           ),
           small(
             const Key('chordAutoScrollFaster'),
-            'Rolar cifra mais depressa',
+            'Deslocar a cifra mais depressa',
             Icons.add,
             _chordScrollSpeed < 2
                 ? () => setState(
@@ -4767,8 +4774,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                   size: 20,
                   color: Colors.black,
                   semanticLabel: _chordAutoScroll
-                      ? 'Pausar rolagem da cifra'
-                      : 'Iniciar rolagem da cifra',
+                      ? 'Pausar o deslocamento da cifra'
+                      : 'Iniciar o deslocamento da cifra',
                 ),
               ),
             ),
@@ -4990,7 +4997,11 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _enter(StemPanel(onBeforePreview: _player.pause)),
+              // Separating stems runs only on Android (native engine); on
+              // iPhone the panel only said it was unavailable.
+              child: Platform.isAndroid
+                  ? _enter(StemPanel(onBeforePreview: _player.pause))
+                  : const SizedBox.shrink(),
             ),
           ],
         ),
@@ -5287,7 +5298,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     const SizedBox(width: 3),
                     const Expanded(
                       child: Text(
-                        'Rolar',
+                        'Deslocar',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -5298,7 +5309,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     ),
                     IconButton(
                       key: const Key('chordAutoScrollSlower'),
-                      tooltip: 'Rolar cifra mais devagar',
+                      tooltip: 'Deslocar a cifra mais devagar',
                       constraints: const BoxConstraints.tightFor(
                         width: 28,
                         height: 36,
@@ -5320,7 +5331,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     ),
                     IconButton(
                       key: const Key('chordAutoScrollFaster'),
-                      tooltip: 'Rolar cifra mais depressa',
+                      tooltip: 'Deslocar a cifra mais depressa',
                       constraints: const BoxConstraints.tightFor(
                         width: 28,
                         height: 36,
@@ -5338,8 +5349,8 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
                     IconButton.filledTonal(
                       key: const Key('chordAutoScrollToggle'),
                       tooltip: _chordAutoScroll
-                          ? 'Pausar rolagem da cifra'
-                          : 'Iniciar rolagem da cifra',
+                          ? 'Pausar o deslocamento da cifra'
+                          : 'Iniciar o deslocamento da cifra',
                       constraints: const BoxConstraints.tightFor(
                         width: 36,
                         height: 36,
@@ -6088,7 +6099,7 @@ class _ShortsBottomBar extends StatelessWidget {
       Expanded(
         child: IconButton(
           key: const Key('shortsBarYou'),
-          tooltip: 'Você',
+          tooltip: 'Tu',
           onPressed: onYou,
           icon: avatar.isEmpty
               ? Icon(Icons.account_circle_outlined, size: 28, color: ink)

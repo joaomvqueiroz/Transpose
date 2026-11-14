@@ -446,8 +446,8 @@ class _MainPlayerMediaSurfaceState extends State<MainPlayerMediaSurface> {
               child: IconButton.filledTonal(
                 key: const Key('visualPlayerPinVideo'),
                 tooltip: widget.videoPinned
-                    ? 'Soltar vídeo da tela'
-                    : 'Fixar vídeo durante a rolagem',
+                    ? 'Soltar vídeo do ecrã'
+                    : 'Fixar vídeo ao deslocar',
                 onPressed: widget.onPinToggle,
                 style: IconButton.styleFrom(
                   backgroundColor: Colors.black.withValues(alpha: .72),
@@ -1283,6 +1283,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
           width: 56,
           child: IconButton(
             key: downKey,
+            tooltip: 'Baixar o tom',
             onPressed: down,
             icon: const Icon(Icons.remove, size: 20),
             color: const Color(0xFFF1F1F1),
@@ -1293,6 +1294,7 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
           width: 56,
           child: IconButton(
             key: upKey,
+            tooltip: 'Subir o tom',
             onPressed: up,
             icon: const Icon(Icons.add, size: 20),
             color: const Color(0xFFF1F1F1),
@@ -1569,17 +1571,22 @@ class UnifiedPlayerAdjustments extends StatelessWidget {
     final double min = youtubeNativeTransport ? .25 : .5;
     void set(double v) =>
         model.changeSpeed((v.clamp(min, 2.0) * 100).roundToDouble() / 100);
-    Widget round(Key key, IconData icon, VoidCallback? onTap) => Material(
-      color: skinChip,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: key,
-        onTap: onTap,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(icon, size: 20, color: const Color(0xFFF1F1F1)),
+    Widget round(Key key, IconData icon, VoidCallback? onTap) => Semantics(
+      button: true,
+      enabled: onTap != null,
+      label: icon == Icons.add ? 'Mais rápido' : 'Mais lento',
+      child: Material(
+        color: skinChip,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: key,
+          onTap: onTap,
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(icon, size: 20, color: const Color(0xFFF1F1F1)),
+          ),
         ),
       ),
     );
@@ -2421,14 +2428,14 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                               children: <Widget>[
                                 IconButton(
                                   key: const Key('visualFullscreenBack'),
-                                  tooltip: 'Sair da tela cheia',
+                                  tooltip: 'Sair do ecrã inteiro',
                                   onPressed: _locked ? null : widget.onExit,
                                   icon: const Icon(Icons.arrow_back),
                                 ),
                                 Expanded(
                                   child: Text(
                                     _locked
-                                        ? 'Bloqueado · mantenha o cadeado pressionado'
+                                        ? 'Bloqueado · mantenha o cadeado premido'
                                         : model.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -2437,7 +2444,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                 IconButton(
                                   key: const Key('visualFullscreenLock'),
                                   tooltip: _locked
-                                      ? 'Mantenha pressionado para desbloquear'
+                                      ? 'Mantenha premido para desbloquear'
                                       : 'Bloquear toques',
                                   // A non-null tap keeps the underlying button enabled
                                   // for its long-press recognizer. A short tap never
@@ -2458,8 +2465,8 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                                   IconButton(
                                     key: const Key('visualPlayerPinVideo'),
                                     tooltip: widget.videoPinned
-                                        ? 'Soltar vídeo da tela'
-                                        : 'Fixar vídeo durante a rolagem',
+                                        ? 'Soltar vídeo do ecrã'
+                                        : 'Fixar vídeo ao deslocar',
                                     onPressed: _locked
                                         ? null
                                         : widget.onPinToggle,
@@ -2538,8 +2545,8 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                       child: IconButton.filledTonal(
                         key: const Key('visualPlayerPinVideo'),
                         tooltip: widget.videoPinned
-                            ? 'Soltar vídeo da tela'
-                            : 'Fixar vídeo durante a rolagem',
+                            ? 'Soltar vídeo do ecrã'
+                            : 'Fixar vídeo ao deslocar',
                         onPressed: _locked ? null : widget.onPinToggle,
                         style: IconButton.styleFrom(
                           backgroundColor: Colors.black.withValues(alpha: .72),
@@ -3154,7 +3161,7 @@ class _MainPlayerFullscreenState extends State<MainPlayerFullscreen> {
                       alignment: Alignment.bottomRight,
                       child: IconButton.filledTonal(
                         key: const Key('visualFullscreenReveal'),
-                        tooltip: 'Mostrar controles',
+                        tooltip: 'Mostrar controlos',
                         onPressed: _reveal,
                         icon: const Icon(Icons.tune),
                       ),

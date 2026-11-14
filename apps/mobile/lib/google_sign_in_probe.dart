@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'youtube_search.dart';
+import 'user_message.dart';
 
 /// Google sign-in on iPhone ("two engines, one browser").
 ///
@@ -116,7 +117,8 @@ class _GoogleSignInProbePageState extends State<GoogleSignInProbePage> {
       if (!mounted) return;
       setState(() {
         _handingOver = false;
-        _error = 'Não foi possível usar a sessão no Transpono ($error).';
+        _error =
+            'Não foi possível usar a sessão no Transpono. ${userMessage(error)}';
       });
     }
   }

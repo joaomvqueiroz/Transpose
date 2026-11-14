@@ -39,7 +39,7 @@ import 'adjustments_handle.dart';
 import 'tab_entrance.dart';
 import 'ambient_rhythm_trial.dart';
 import 'background_playback.dart';
-import 'spotify_browser.dart' show SpotifyStudioSession;
+import 'spotify_browser.dart' show SpotifyStudioSession, spotifyNotice;
 
 part 'studio_player_home.dart';
 part 'youtube_bar_icons.dart';

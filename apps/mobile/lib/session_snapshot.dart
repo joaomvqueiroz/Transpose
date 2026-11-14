@@ -130,7 +130,7 @@ class UnsupportedSessionSnapshotVersion implements Exception {
   @override
   String toString() =>
       'Esta sessão foi guardada por uma versão mais recente do Transpono. '
-      'Atualize o app para a recuperar; os dados foram preservados.';
+      'Atualize a app para a recuperar; os dados foram preservados.';
 }
 
 class SessionRecoveryResult {

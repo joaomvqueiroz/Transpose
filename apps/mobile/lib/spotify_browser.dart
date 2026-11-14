@@ -37,6 +37,18 @@ bool isSpotifyBrowserUri(Uri uri) {
 /// sign-in in Safari's engine instead (see `spotify_sign_in.dart`).
 final ValueNotifier<int> spotifySignInRequests = ValueNotifier<int>(0);
 
+/// A message for the studio to show (the latest; set again to repeat).
+final ValueNotifier<String?> spotifyNotice = ValueNotifier<String?>(null);
+
+/// Google and Facebook refuse to sign in inside another app's page on
+/// Android ("disallowed_useragent"): their sign-in is not opened, and the
+/// user is told to use Spotify's own email sign-in.
+bool isBlockedSocialSignIn(Uri uri) =>
+    uri.scheme == 'https' &&
+    (uri.host == 'accounts.google.com' ||
+        uri.host == 'www.facebook.com' ||
+        uri.host == 'm.facebook.com');
+
 /// Spotify's own sign-in pages.
 bool isSpotifySignInUri(Uri uri) =>
     uri.scheme == 'https' && uri.host == 'accounts.spotify.com';
@@ -970,6 +982,13 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       // answers "Ocorreu um problema" to this one.
       if (_gecko != null && uri != null && isSpotifySignInUri(uri)) {
         spotifySignInRequests.value++;
+        return NavigationDecision.prevent;
+      }
+      if (_gecko == null && uri != null && isBlockedSocialSignIn(uri)) {
+        spotifyNotice.value = null;
+        spotifyNotice.value =
+            'A Google e o Facebook não deixam iniciar sessão dentro de outras apps. '
+            'Entre no Spotify com o email (ou o código enviado por email).';
         return NavigationDecision.prevent;
       }
       if (uri != null && isSpotifyBrowserUri(uri)) {

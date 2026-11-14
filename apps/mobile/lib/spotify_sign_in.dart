@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'google_sign_in_probe.dart';
 import 'spotify_browser.dart';
+import 'user_message.dart';
 
 /// Spotify sign-in on iPhone, the same way as the Google one
 /// ([GoogleSignInProbePage]): Spotify's sign-in check refuses the Gecko
@@ -84,7 +85,8 @@ class _SpotifySignInPageState extends State<SpotifySignInPage> {
       if (!mounted) return;
       setState(() {
         _handingOver = false;
-        _error = 'Não foi possível usar a sessão no Transpono ($error).';
+        _error =
+            'Não foi possível usar a sessão no Transpono. ${userMessage(error)}';
       });
     }
   }

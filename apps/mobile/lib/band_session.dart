@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'band_audio.dart';
 import 'band_clock.dart';
 import 'native_beat_audio_arbiter.dart';
+import 'user_message.dart';
 
 class BandSession extends ChangeNotifier with WidgetsBindingObserver {
   BandSession({
@@ -104,7 +105,15 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
         final interfaces = await NetworkInterface.list(
           type: InternetAddressType.IPv4,
         );
-        address = interfaces
+        // The Wi-Fi address first: mobile data can also have a private
+        // (10.x) address, which the other phones on the Wi-Fi cannot reach.
+        bool wifi(NetworkInterface i) =>
+            i.name.startsWith('wlan') || i.name.startsWith('ap');
+        final ordered = <NetworkInterface>[
+          ...interfaces.where(wifi),
+          ...interfaces.where((i) => !wifi(i)),
+        ];
+        address = ordered
             .expand((i) => i.addresses)
             .where((a) => localAddress(a) && !a.isLoopback)
             .firstOrNull;
@@ -428,7 +437,7 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
   void _fail(Object e) {
     error = e is FormatException
         ? e.message
-        : 'Não foi possível manter a sessão: $e';
+        : 'Não foi possível manter a sessão: ${userMessage(e)}';
     _notify();
   }
 
@@ -465,7 +474,11 @@ class BandSession extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _trace('lifecycle', {'state': state.name});
-    if (state != AppLifecycleState.resumed) {
+    // Only when the app really leaves the screen: a permission dialog,
+    // the notification shade or the small video window make it "inactive"
+    // for a moment and used to drop the band (and its invite code).
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       unawaited(leave(reason: 'lifecycle:${state.name}'));
     }
   }

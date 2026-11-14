@@ -26,10 +26,13 @@ void main() {
       '{"title":"What A Beautiful Name","artist":"Hillsong Worship",'
       '"documentTitle":"Spotify – Web Player"}',
     );
-    expect(track, const SpotifyTrack(
-      title: 'What A Beautiful Name',
-      artist: 'Hillsong Worship',
-    ));
+    expect(
+      track,
+      const SpotifyTrack(
+        title: 'What A Beautiful Name',
+        artist: 'Hillsong Worship',
+      ),
+    );
     expect(track!.query, 'What A Beautiful Name Hillsong Worship');
   });
 
@@ -65,5 +68,20 @@ void main() {
     );
     expect(SpotifyTrack.fromDocumentTitle('Spotify • Web Player'), isNull);
     expect(SpotifyTrack.decode('not json'), isNull);
+  });
+
+  test('Google and Facebook sign-in are recognised as blocked in-app', () {
+    expect(
+      isBlockedSocialSignIn(Uri.parse('https://accounts.google.com/o/oauth2')),
+      isTrue,
+    );
+    expect(
+      isBlockedSocialSignIn(Uri.parse('https://m.facebook.com/dialog/oauth')),
+      isTrue,
+    );
+    expect(
+      isBlockedSocialSignIn(Uri.parse('https://accounts.spotify.com/login')),
+      isFalse,
+    );
   });
 }

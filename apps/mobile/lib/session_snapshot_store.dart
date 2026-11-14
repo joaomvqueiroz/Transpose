@@ -102,7 +102,7 @@ class SessionSnapshotStore extends SessionSnapshotRepository {
           ? error.toString()
           : 'Não foi possível abrir a recuperação. Os dados existentes foram '
                 'preservados; a gravação automática está suspensa. Verifique '
-                'o armazenamento e reinicie o app para tentar novamente.';
+                'o armazenamento e reinicie a app para tentar novamente.';
       rethrow;
     }
   }

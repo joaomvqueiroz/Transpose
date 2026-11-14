@@ -9,6 +9,7 @@ import 'piano_reference_player.dart';
 import 'pitch_detector.dart';
 import 'studio_native_pages.dart';
 import 'studio_appearance.dart';
+import 'user_message.dart';
 
 /// Feedback follows the measured distance from the selected string, not a
 /// repeating decorative animation.
@@ -184,7 +185,10 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
         _consume,
         onError: (Object error) {
           if (mounted) {
-            setState(() => _error = 'Falha ao ouvir o microfone: $error');
+            setState(
+              () =>
+                  _error = 'Falha ao ouvir o microfone: ${userMessage(error)}',
+            );
           }
           unawaited(_stop());
         },
@@ -192,7 +196,10 @@ class _MicrophoneTunerToolState extends State<MicrophoneTunerTool>
       setState(() => _active = true);
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _error = 'Não foi possível iniciar o afinador: $error');
+        setState(
+          () => _error =
+              'Não foi possível iniciar o afinador: ${userMessage(error)}',
+        );
       }
     } finally {
       if (mounted) setState(() => _starting = false);

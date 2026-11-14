@@ -150,7 +150,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     } on Object {
       if (mounted) {
         setState(
-          () => _message = 'Não foi possível concluir a operação. Escolhe outro ficheiro ou tenta novamente.',
+          () => _message = 'Não foi possível concluir a operação. Escolha outro ficheiro ou tente novamente.',
         );
       }
     } finally {
@@ -290,7 +290,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         position.inMilliseconds <= _markerA!.inMilliseconds) {
       setState(
         () => _message =
-            'Marca A primeiro; B deve ficar pelo menos 1 ms depois de A.',
+            'Marque A primeiro; B deve ficar pelo menos 1 ms depois de A.',
       );
       return;
     }
@@ -419,7 +419,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           const SizedBox(height: 6),
                           Text(
                             _session.source == null
-                                ? 'Escolhe um ficheiro para começar'
+                                ? 'Escolha um ficheiro para começar'
                                 : 'Sem imagem de vídeo',
                             style: const TextStyle(color: _muted),
                           ),

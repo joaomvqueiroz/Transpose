@@ -2207,6 +2207,25 @@
     }
   }
 
+  // The 200 ms check alone could play up to ~0.2 s past B (more at higher
+  // speed). When B is closer than the next check, one timer returns right
+  // at B instead.
+  let exactLoopTimer = null;
+  function scheduleExactLoopReturn() {
+    const rate = Math.max(0.1, Number(video.playbackRate) || 1);
+    const remaining = (loopB - positionOf(video)) / rate;
+    if (!(remaining > 0) || remaining > 0.25 || exactLoopTimer !== null) return;
+    const element = video;
+    const target = loopB;
+    exactLoopTimer = setTimeout(() => {
+      exactLoopTimer = null;
+      if (element !== video || disposed || isAd || !loopWanted ||
+          loopB !== target || loopA === null || video.paused ||
+          pendingLoopReturn || !playbackReady()) return;
+      if (positionOf(video) >= loopB - 0.03) returnLoopToStart();
+    }, Math.max(0, remaining * 1000 - 10));
+  }
+
   function returnLoopToStart() {
     const pending = {
       element: video, videoId, source: sourceOf(video), epoch: loopEpoch,
@@ -2866,7 +2885,10 @@
       if (loopWanted && loopA !== null && loopB !== null && !video.paused &&
           playbackReady() && !pendingLoopReturn) {
         if (positionOf(video) >= loopB) returnLoopToStart();
-        else if (nearLoopStart()) cycleArmed = true;
+        else {
+          if (nearLoopStart()) cycleArmed = true;
+          scheduleExactLoopReturn();
+        }
       }
     }
     post();

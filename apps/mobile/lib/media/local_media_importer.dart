@@ -19,7 +19,7 @@ class LocalMediaImporter {
   Future<GeneratedLocalMedia> importGeneratedPreview(Uint8List bytes) async {
     if (bytes.isEmpty || bytes.length > 64 * 1024 * 1024) {
       throw const FileSystemException(
-        'Prévia WAV inválida ou demasiado grande.',
+        'Pré-visualização WAV inválida ou demasiado grande.',
       );
     }
     final root = await _mediaDirectory();

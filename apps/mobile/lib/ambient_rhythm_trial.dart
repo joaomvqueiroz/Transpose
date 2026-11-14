@@ -41,7 +41,13 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) _cancel();
+    // Only when the app leaves the screen: the microphone permission dialog
+    // and the notification shade make it "inactive" for a moment and used
+    // to cancel the first measurement silently.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _cancel();
+    }
   }
 
   void _cancel() {
@@ -69,7 +75,7 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
           widget.requestPermission ??
           () => (_recorder ??= AudioRecorder()).hasPermission();
       if (!await permission()) {
-        throw const FormatException('Autoriza o microfone para medir o ritmo.');
+        throw const FormatException('Autorize o microfone para medir o ritmo.');
       }
       if (!mounted || request != _request) return;
       await _channel.invokeMethod<void>('start', {'durationMs': 12000});
@@ -87,7 +93,7 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
           status?['quality'] != 'availableForReview' ||
           status?['routeChanged'] != false) {
         throw const FormatException(
-          'A captação não teve qualidade suficiente. Tenta num lugar mais silencioso.',
+          'A captação não teve qualidade suficiente. Tente num lugar mais silencioso.',
         );
       }
       final count = status?['featureCount'];
@@ -181,7 +187,7 @@ class _AmbientRhythmTrialState extends State<AmbientRhythmTrial>
         const Text('Ritmo pelo microfone · experimental'),
         const SizedBox(height: 5),
         Text(
-          'Ouve 10 segundos do ambiente. Usa o altifalante; auscultadores e ruído podem impedir a medição. Não guarda áudio.',
+          'Ouça 10 segundos do ambiente. Use o altifalante; auscultadores e ruído podem impedir a medição. Não guarda áudio.',
           style: TextStyle(
             fontSize: 11,
             color: widget.appearanceMode == StudioAppearanceMode.light

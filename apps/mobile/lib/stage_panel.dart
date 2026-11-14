@@ -154,7 +154,7 @@ class _StagePanelState extends State<StagePanel> {
                 IconButton(
                   key: const Key('visualStageLock'),
                   tooltip: _locked
-                      ? 'Mantenha pressionado para desbloquear'
+                      ? 'Mantenha premido para desbloquear'
                       : 'Bloquear controles do palco',
                   onPressed: () {
                     if (!_locked) setState(() => _locked = true);
@@ -171,7 +171,7 @@ class _StagePanelState extends State<StagePanel> {
             ),
             if (_locked)
               const Text(
-                'Controles bloqueados · mantenha o cadeado pressionado.',
+                'Controles bloqueados · mantenha o cadeado premido.',
                 style: TextStyle(color: studioCyan),
               ),
             if (_loading || _applying) const LinearProgressIndicator(),

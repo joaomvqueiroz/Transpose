@@ -95,8 +95,13 @@ class _BandPanelState extends State<BandPanel> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               TextButton.icon(
-                onPressed: () =>
-                    Clipboard.setData(ClipboardData(text: session.code!)),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: session.code!));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                    const SnackBar(content: Text('Código copiado.')),
+                  );
+                },
                 icon: const Icon(Icons.copy),
                 label: const Text('Copiar código'),
               ),

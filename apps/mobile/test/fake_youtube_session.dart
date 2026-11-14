@@ -26,6 +26,7 @@ class FakeYouTubeSession extends YouTubeBrowserSession {
   Future<void> setAppearanceMode(StudioAppearanceMode mode) async {
     appearanceModes.add(mode);
   }
+
   @override
   Future<void> search(String query) async => lastQuery = query;
   @override

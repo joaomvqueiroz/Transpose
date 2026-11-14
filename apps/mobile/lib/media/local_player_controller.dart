@@ -146,7 +146,7 @@ class LocalPlayerController extends ChangeNotifier {
               previousPosition > duration ? duration : previousPosition,
             );
           } on Object {
-            _message = 'A prévia falhou e não foi possível restaurar a faixa anterior.';
+            _message = 'A pré-visualização falhou e não foi possível restaurar a faixa anterior.';
           }
         }
         if (identical(_session.source, staged.source)) {
@@ -165,8 +165,7 @@ class LocalPlayerController extends ChangeNotifier {
           } on FileSystemException {
             // The old decoder was released before this source was loaded.
           }
-          _message =
-              'A prévia foi cancelada, mas a saída ainda está a ser libertada.';
+          _message = 'A pré-visualização foi cancelada, mas a saída ainda está a ser libertada.';
         } else {
           try {
             await staged.dispose();
@@ -182,8 +181,7 @@ class LocalPlayerController extends ChangeNotifier {
           _videoLoop = previousLoop;
           _attachCurrent();
         }
-        _message ??=
-            'Não foi possível abrir a prévia; a faixa anterior foi mantida.';
+        _message ??= 'Não foi possível abrir a pré-visualização; a faixa anterior foi mantida.';
       }
     });
     return committed;
@@ -319,7 +317,7 @@ class LocalPlayerController extends ChangeNotifier {
       return;
     }
     if (!value.isFinite || value < -12 || value > 12) {
-      _message = 'Escolhe um tom entre −12 e +12 semitons.';
+      _message = 'Escolha um tom entre −12 e +12 semitons.';
       return;
     }
     await _audio!.setParameters(semitones: value, speed: _speed);
@@ -329,7 +327,7 @@ class LocalPlayerController extends ChangeNotifier {
   Future<void> changeSpeed(double value) => _run(() async {
     if (!canSpeed) return;
     if (!value.isFinite || value < 0.5 || value > 2) {
-      _message = 'Escolhe uma velocidade entre 0,5× e 2×.';
+      _message = 'Escolha uma velocidade entre 0,5× e 2×.';
       return;
     }
     await _setParameters(pitch: _pitch, speed: value);
@@ -356,7 +354,7 @@ class LocalPlayerController extends ChangeNotifier {
     if (duration - a < const Duration(milliseconds: 250) ||
         (_markerB != null &&
             _markerB! - a < const Duration(milliseconds: 250))) {
-      _message = 'Deixa pelo menos 0,25 s entre A e B e antes do fim da faixa.';
+      _message = 'Deixe pelo menos 0,25 s entre A e B e antes do fim da faixa.';
       return;
     }
     if (loopEnabled) await _applyLoop(a, _markerB!);
@@ -367,7 +365,7 @@ class LocalPlayerController extends ChangeNotifier {
     if (!canLoop) return;
     final Duration b = position;
     if (_markerA == null || b - _markerA! < const Duration(milliseconds: 250)) {
-      _message = 'Marca A primeiro e coloca B pelo menos 0,25 s depois.';
+      _message = 'Marque A primeiro e coloque B pelo menos 0,25 s depois.';
       return;
     }
     if (loopEnabled) await _applyLoop(_markerA!, b);
@@ -397,7 +395,7 @@ class LocalPlayerController extends ChangeNotifier {
     final Duration? a = _markerA;
     final Duration? b = _markerB;
     if (a == null || b == null) {
-      _message = 'Marca os pontos A e B para ativar o loop.';
+      _message = 'Marque os pontos A e B para ativar o loop.';
       return;
     }
     await _applyLoop(a, b);
@@ -439,9 +437,19 @@ class LocalPlayerController extends ChangeNotifier {
     _resetValues();
   });
 
+  // What the last tick reported: while paused and unchanged the screen is
+  // not asked to redraw (it used to rebuild 4 times a second for nothing).
+  Duration? _tickPosition;
+  bool? _tickPlaying;
+
   void _tick() {
     if (_disposed) return;
-    _notify();
+    final Duration now = position;
+    if (playing || now != _tickPosition || playing != _tickPlaying) {
+      _tickPosition = now;
+      _tickPlaying = playing;
+      _notify();
+    }
     if (_pending > 0 ||
         _loopSeekPending ||
         !_videoLoop ||
@@ -474,7 +482,7 @@ class LocalPlayerController extends ChangeNotifier {
           try {
             await action();
           } on Object {
-            _message = 'Não foi possível concluir. Tenta novamente ou escolhe outro ficheiro.';
+            _message = 'Não foi possível concluir. Tente novamente ou escolha outro ficheiro.';
             if (_session.source == null) _detach();
           } finally {
             _notify();

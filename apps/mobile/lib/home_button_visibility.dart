@@ -71,9 +71,8 @@ final ValueNotifier<Color?> musicPlayerTint = ValueNotifier<Color?>(null);
 
 /// "rgb(r, g, b)" or "rgba(r, g, b, a)" from the page, as an opaque colour.
 Color? pageColorFromState(Object? raw) {
-  final match = RegExp(
-    r'rgba?\((\d+),\s*(\d+),\s*(\d+)',
-  ).firstMatch('${raw ?? ''}');
+  final match = RegExp(r'rgba?\((\d+),\s*(\d+),\s*(\d+)')
+      .firstMatch('${raw ?? ''}');
   if (match == null) return null;
   int part(int i) => int.parse(match.group(i)!).clamp(0, 255);
   return Color.fromARGB(255, part(1), part(2), part(3));
