@@ -82,6 +82,42 @@ class LocalMediaImporter {
     }
   }
 
+  /// Deletes copies of picked files that nothing refers to any more. Every
+  /// pick makes a full copy and none was ever removed, so the app's storage
+  /// only grew. A copy is kept while any of [keep] (saved presets, the
+  /// setlist, the song open now) mentions its folder, and for a day after
+  /// it was made. Returns how many copies were removed.
+  Future<int> removeUnused(
+    Iterable<String> keep, {
+    Duration grace = const Duration(days: 1),
+  }) async {
+    final Directory root;
+    try {
+      root = await _mediaDirectory();
+    } on Object {
+      return 0;
+    }
+    final List<String> kept = keep.where((k) => k.isNotEmpty).toList();
+    final DateTime cutoff = DateTime.now().subtract(grace);
+    int removed = 0;
+    await for (final FileSystemEntity entry in root.list()) {
+      if (entry is! Directory) continue;
+      final String name = entry.uri.pathSegments
+          .where((p) => p.isNotEmpty)
+          .last;
+      if (!name.startsWith('import-')) continue;
+      if (kept.any((k) => k.contains(name))) continue;
+      try {
+        if ((await entry.stat()).modified.isAfter(cutoff)) continue;
+        await entry.delete(recursive: true);
+        removed++;
+      } on Object {
+        // In use or already gone: tried again next time.
+      }
+    }
+    return removed;
+  }
+
   Future<LocalFileSource> importSample(ByteData data) async {
     final root = await _mediaDirectory();
     final sample = File(

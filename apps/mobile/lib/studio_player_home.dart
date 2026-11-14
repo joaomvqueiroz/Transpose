@@ -127,6 +127,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
   void initState() {
     super.initState();
     _applySystemBarsStyle();
+    _importCleanup = Timer(const Duration(seconds: 20), _removeUnusedImports);
     WidgetsBinding.instance.addObserver(this);
     pageAdjustRequests.addListener(_pageAdjust);
     BackgroundPlayback.listen(_backgroundAction);
@@ -168,6 +169,28 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     unawaited(_initializeStartPage());
     _lastForegroundWidgetState = _widgetSnapshot();
     _homeWidgets.schedule(_lastForegroundWidgetState!);
+  }
+
+  Timer? _importCleanup;
+
+  /// Copies of picked files that no saved preset or setlist entry uses any
+  /// more are removed (a while after start, out of the way).
+  Future<void> _removeUnusedImports() async {
+    try {
+      final List<PlayerPreset> saved = <PlayerPreset>[
+        ...await _presets.list(),
+        ...await _presets.list(setlist: true),
+      ];
+      if (!mounted) return;
+      await _player.local.removeUnusedImports(<String>[
+        for (final PlayerPreset preset in saved) ...[
+          preset.locator,
+          preset.sourceId,
+        ],
+      ]);
+    } on Object {
+      // Unreadable collections: nothing is removed.
+    }
   }
 
   /// Clock and battery icons dark on the light look, light otherwise. Also
@@ -862,6 +885,7 @@ class _StudioVisualHomeState extends State<StudioVisualHome>
     _bandSession.dispose();
     _miniControlsTimer?.cancel();
     _backgroundStopTimer?.cancel();
+    _importCleanup?.cancel();
     _homeWidgets.dispose();
     if (widget.playerController == null) _player.dispose();
     _scroll.dispose();

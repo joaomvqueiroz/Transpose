@@ -79,6 +79,11 @@ class LocalPlayerController extends ChangeNotifier {
   String get title => _session.source?.displayName ?? '';
   String get sourceId => _session.source?.id ?? '';
   String? get locator => _session.source?.locator.toString();
+
+  /// Removes copies of picked files no longer referred to by [keep] (the
+  /// file open now is always kept).
+  Future<int> removeUnusedImports(Iterable<String> keep) =>
+      _importer.removeUnused(<String>[...keep, ?locator]);
   Duration get position => _session.position ?? Duration.zero;
   Duration get duration => _session.duration ?? Duration.zero;
   double get pitch => _pitch;

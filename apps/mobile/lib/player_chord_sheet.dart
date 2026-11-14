@@ -175,10 +175,36 @@ int? playerChordPitchClass(String chord) {
   return (root + accidental + 12) % 12;
 }
 
+// The sheet is drawn again on every player update (several times a
+// second): the last result is reused while the text, colours and look are
+// the same, instead of re-reading every line each time.
+String? _spansText;
+Map<int, Color>? _spansColors;
+StudioAppearanceMode? _spansMode;
+List<InlineSpan> _spansResult = const <InlineSpan>[];
+
 List<InlineSpan> playerChordColorSpans(
   String text, {
   Map<int, Color> noteColors = const {},
   StudioAppearanceMode mode = StudioAppearanceMode.dark,
+}) {
+  if (text == _spansText &&
+      identical(noteColors, _spansColors) &&
+      mode == _spansMode) {
+    return _spansResult;
+  }
+  final spans = _buildChordColorSpans(text, noteColors: noteColors, mode: mode);
+  _spansText = text;
+  _spansColors = noteColors;
+  _spansMode = mode;
+  _spansResult = spans;
+  return spans;
+}
+
+List<InlineSpan> _buildChordColorSpans(
+  String text, {
+  required Map<int, Color> noteColors,
+  required StudioAppearanceMode mode,
 }) {
   final spans = <InlineSpan>[];
   for (final (index, line) in text.split('\n').indexed) {
@@ -242,6 +268,22 @@ bool _isChordLine(String line) {
 
 /// Preserve chord start columns when a sharp/bass changes token width.
 /// Explicit ChordPro [C] tokens may occur within lyrics; ordinary words may not.
+String? _transposeText;
+int? _transposeBy;
+String _transposeResult = '';
+
+/// [transposePlayerChordText], reusing the last result for the same text and
+/// semitones (the sheet is rebuilt on every player update).
+String _transposeCached(String text, int semitones) {
+  if (semitones == _transposeBy && text == _transposeText) {
+    return _transposeResult;
+  }
+  _transposeResult = transposePlayerChordText(text, semitones);
+  _transposeText = text;
+  _transposeBy = semitones;
+  return _transposeResult;
+}
+
 String transposePlayerChordText(String text, int semitones) => text
     .split('\n')
     .map((line) {
@@ -634,7 +676,7 @@ class PlayerChordSheetState extends State<PlayerChordSheet> {
                     !widget.model.busy &&
                     widget.model.canPitch));
         final original = _showExample ? _example : _sheet.notes;
-        final text = transposePlayerChordText(original, pitch);
+        final text = _transposeCached(original, pitch);
         if (widget.lyricsOnly) {
           return Container(
             key: const Key('playerChordSheet'),
