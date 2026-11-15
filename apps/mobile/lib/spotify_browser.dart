@@ -1094,7 +1094,10 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   /// hidden YouTube is where (not started, no result, play refused,
   /// playing). Shown as the studio's message line; Android shows nothing.
   String? _soundStep;
-  bool get _diagnoses => defaultTargetPlatform == TargetPlatform.iOS;
+  // Only in test builds: on the phone these lines ("Som: a abrir o vídeo
+  // do YouTube…") were unwanted noise under the controls.
+  bool get _diagnoses =>
+      kDebugMode || const bool.fromEnvironment('TRANSPONO_WEB_DEBUG');
   bool _shadowStarted = false;
   bool _dressing = false;
   String? _shadowStartError;
@@ -1188,6 +1191,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   // The video the copy opened: until the page reports it, what it reports
   // is still the previous video (often at its very end).
   String _shadowVideoId = '';
+  DateTime _shadowOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
   // Spotify is playing one of its own ads (its audio comes from its ad
   // server, not the song's stream).
   bool _spotifyAd = false;
@@ -1514,6 +1518,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
         _shadowSearchFor = null;
         _shadowLoaded = true;
         _shadowVideoId = watch.queryParameters['v'] ?? '';
+        _shadowOpenedAt = DateTime.now();
         _copyAligned = false;
         _soundWaitTicks = 0;
         _step('Som: a abrir o vídeo do YouTube…');
@@ -1559,10 +1564,19 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     // Still the previous video's state (the new one is loading): it sat at
     // its end, and was read as "the song ended", which skipped song after
     // song on Spotify.
+    // Only while that can be the case: on iPhone the page reported another
+    // id for the video it opened (a redirect), and the copy waited forever
+    // at «a abrir o vídeo do YouTube…».
     if (_shadowVideoId.isNotEmpty &&
         heard.videoId.isNotEmpty &&
         heard.videoId != _shadowVideoId) {
-      return;
+      final bool atItsEnd =
+          heard.duration > 5 && heard.duration - heard.position < 2;
+      final bool justOpened =
+          DateTime.now().difference(_shadowOpenedAt) <
+          const Duration(seconds: 6);
+      if (atItsEnd || justOpened) return;
+      _shadowVideoId = heard.videoId;
     }
     // YouTube resumes a video where it was last left (signed-in accounts):
     // the copy started minutes into the song while Spotify was at its
