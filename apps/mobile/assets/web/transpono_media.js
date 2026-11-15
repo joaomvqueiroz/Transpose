@@ -965,8 +965,11 @@
       !window.__transponoAdSkip) {
     window.__transponoAdSkip = true;
     const skipSelectors = '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, ' +
-      '.ytp-skip-ad-button, .ytp-ad-skip-button-container button';
-    const skipText = /^\s*(Ignorar|Skip)/i;
+      '.ytp-skip-ad-button, .ytp-ad-skip-button-container button, ' +
+      '.ytp-ad-skip-button-slot button, .ytp-skip-ad button, ' +
+      'button[id^="skip-button"], [class*="skip-ad-button"]';
+    // pt-PT «Ignorar» / «Saltar», pt-BR «Pular», English «Skip».
+    const skipText = /^\s*(Ignorar|Saltar|Pular|Skip)/i;
     const shown = el => {
       if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
       const box = el.getBoundingClientRect();

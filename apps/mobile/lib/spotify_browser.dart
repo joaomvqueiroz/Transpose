@@ -184,7 +184,18 @@ const String _snapshotScript = '''
     if (!duration) duration = clock(total);
     if (!state) state = playing ? 'playing' : 'paused';
   }
+  // Spotify's own ads play from its ad server (not the song's blob:
+  // stream), and the song bar names no song meanwhile.
+  let ad = false;
+  for (const audio of (window.__transponoMedia || [])) {
+    const src = audio.currentSrc || audio.src || '';
+    if (!audio.paused && /^https?:/.test(src)) ad = true;
+  }
+  const adText = /^(publicidade|anúncio|anuncio|advertisement|ad|spotify ad)\$/i;
+  if (bar && [...bar.querySelectorAll('span')].some(e => adText.test((e.textContent || '').trim()))) ad = true;
+  if (ad) { title = ''; artist = ''; }
   return JSON.stringify({
+    ad: ad,
     title: title,
     artist: artist,
     documentTitle: document.title || '',
@@ -618,6 +629,7 @@ const String _dressScript = '''
   if (share) adjust = true;
   let home = false;
 $_spotifyHomeButtonJs
+$_spotifySkipJs
 $_spotifyLibraryJs
 $_spotifyIosDressJs
   // Over the open player (song, cover, controls) there is no start-screen
@@ -724,32 +736,59 @@ String _muteScriptFor(bool mute) =>
 ''';
 
 /// Moves Spotify on to its next song: its own "next" button where the page
-/// shows one, or else its muted audio is taken to its end, and Spotify
-/// follows on by itself.
+/// shows one, or else through its open player ([_spotifySkipJs]).
 const String _nextScript = '''
 (() => {
   const button = document.querySelector('[data-testid="npv-skip-forward-button"]') ||
     document.querySelector('[data-testid="control-button-skip-forward"]');
   if (button && !button.disabled) { button.click(); return true; }
-  for (const audio of (window.__transponoMedia || [])) {
-    if (isFinite(audio.duration) && audio.duration > 3) {
-      audio.currentTime = audio.duration - 0.3;
-      return true;
-    }
-  }
-  return false;
+  return window.__transponoSpotifySkip ? window.__transponoSpotifySkip(true) : false;
 })()
 ''';
 
 /// Spotify's "previous": its own button, or else the song from the start.
 const String _previousScript = '''
 (() => {
-  const button = document.querySelector('[data-testid="npv-skip-back-button"]') ||
+  const button = document.querySelector('[data-testid="npv-skip-previous-button"]') ||
+    document.querySelector('[data-testid="npv-skip-back-button"]') ||
     document.querySelector('[data-testid="control-button-skip-back"]');
   if (button && !button.disabled) { button.click(); return true; }
+  if (window.__transponoSpotifySkip) return window.__transponoSpotifySkip(false);
   for (const audio of (window.__transponoMedia || [])) audio.currentTime = 0;
   return false;
 })()
+''';
+
+/// Spotify's mobile page shows next / previous only in its open player
+/// (tapping the floating song bar): the notification's, the lock screen's
+/// and the headphones' next and previous open it for a moment, press the
+/// button and close it again. Installed once by [_dressScript].
+const String _spotifySkipJs = r'''
+  if (!window.__transponoSpotifySkip) {
+    window.__transponoSpotifySkip = (forward) => {
+      const q = s => document.querySelector(s);
+      const find = () => forward
+        ? q('[data-testid="npv-skip-forward-button"]')
+        : (q('[data-testid="npv-skip-previous-button"]') || q('[data-testid="npv-skip-back-button"]'));
+      const bar = q('[data-testid="floating-now-playing-bar"]');
+      if (!bar) return false;
+      (bar.querySelector('[data-encore-id="type"], img') || bar).click();
+      let tries = 0;
+      const step = () => {
+        const button = find();
+        if (!button && ++tries < 25) { setTimeout(step, 100); return; }
+        if (button && !button.disabled) button.click();
+        setTimeout(() => {
+          const box = q('[data-testid="npv-container"]');
+          const close = box && (box.querySelector('button[aria-label="Fechar"]') ||
+            box.querySelector('button[aria-label="Close"]') || box.querySelector('button'));
+          if (close) close.click();
+        }, 300);
+      };
+      setTimeout(step, 100);
+      return true;
+    };
+  }
 ''';
 
 /// The page always believes it is on screen, so that neither Spotify nor
@@ -1037,7 +1076,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       return;
     }
     try {
-      final Object? answer = await _controller.runJavaScriptReturningResult(
+      final Object answer = await _controller.runJavaScriptReturningResult(
         _playOpenedScript(path),
       );
       if ('$answer'.contains('done') && _playOpenedPath == path) {
@@ -1146,6 +1185,15 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
           ..addListener(_notify))
       : null;
   String? _shadowTrackId;
+  // The video the copy opened: until the page reports it, what it reports
+  // is still the previous video (often at its very end).
+  String _shadowVideoId = '';
+  // Spotify is playing one of its own ads (its audio comes from its ad
+  // server, not the song's stream).
+  bool _spotifyAd = false;
+  // The copy was put at Spotify's place once after it opened.
+  bool _copyAligned = false;
+  bool _pausedForAd = false;
   String? _shadowSearchFor;
   int _shadowSearchTicks = 0;
   bool _shadowLoaded = false;
@@ -1194,8 +1242,8 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       loopA: heard.loopA,
       loopB: heard.loopB,
       loopEnabled: heard.loopEnabled,
-      isAd: heard.isAd,
-      adSkippable: heard.adSkippable,
+      isAd: heard.isAd || _spotifyAd,
+      adSkippable: heard.adSkippable && !_spotifyAd,
       loopCount: heard.loopCount,
       loopEpoch: heard.loopEpoch,
       loopEventsSupported: heard.loopEventsSupported,
@@ -1363,6 +1411,28 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   ) async {
     final shadow = _shadow;
     if (shadow == null || _disposed) return;
+    // Spotify's own ad: it plays as Spotify plays it (heard, never muted or
+    // skipped from here) and the YouTube copy waits, paused.
+    if (_spotifyAd) {
+      if (!_pausedForAd) {
+        _pausedForAd = true;
+        _step(null);
+        try {
+          await _controller.runJavaScript(_muteScriptFor(false));
+          await shadow.command('pause');
+        } on Object {
+          // Tried again with the next read.
+          _pausedForAd = false;
+        }
+      }
+      return;
+    }
+    if (_pausedForAd) {
+      _pausedForAd = false;
+      // Back to the song: the copy's place is set again by the usual
+      // steps (same song: play follows Spotify; a new one: a new search).
+      _shadowSince = DateTime.now();
+    }
     // Nothing to follow yet (the home page loading): no calls to the pages.
     if ((track == null || track.isEmpty) && !_shadowStarted) return;
     try {
@@ -1443,6 +1513,8 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
           watch.path == '/watch') {
         _shadowSearchFor = null;
         _shadowLoaded = true;
+        _shadowVideoId = watch.queryParameters['v'] ?? '';
+        _copyAligned = false;
         _soundWaitTicks = 0;
         _step('Som: a abrir o vídeo do YouTube…');
         try {
@@ -1484,7 +1556,40 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       _step(null);
       return;
     }
+    // Still the previous video's state (the new one is loading): it sat at
+    // its end, and was read as "the song ended", which skipped song after
+    // song on Spotify.
+    if (_shadowVideoId.isNotEmpty &&
+        heard.videoId.isNotEmpty &&
+        heard.videoId != _shadowVideoId) {
+      return;
+    }
+    // YouTube resumes a video where it was last left (signed-in accounts):
+    // the copy started minutes into the song while Spotify was at its
+    // start. Once, right after it opens, it goes to Spotify's place.
+    if (!_copyAligned && heard.duration > 5) {
+      _copyAligned = true;
+      if ((heard.position - spotifyPosition).abs() > 8 &&
+          spotifyPosition < heard.duration - 5) {
+        try {
+          await shadow.command('seekTo', spotifyPosition);
+        } on Object {
+          // The copy plays from where it is.
+        }
+        return;
+      }
+    }
     final double left = heard.duration - heard.position;
+    // The copy ended long before Spotify's song (a shorter version, a
+    // clip): Spotify is heard again for the rest, instead of skipping.
+    if (heard.duration > 5 &&
+        left < 1.2 &&
+        spotifyDuration > 10 &&
+        spotifyDuration - spotifyPosition > 20) {
+      _shadowLoaded = false;
+      _step('Som: a cópia do YouTube acabou antes; a tocar pelo Spotify.');
+      return;
+    }
     // The song ended on YouTube: Spotify moves to the next one.
     if (heard.duration > 5 && left < 1.2 && !_advancing) {
       _advancing = true;
@@ -1498,10 +1603,14 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     // Spotify would end first (another version of the song): hold it back
     // so that both end together.
     final double spotifyLeft = spotifyDuration - spotifyPosition;
+    // Only for a close version (a few seconds longer): with a much longer
+    // copy (a compilation, a long live video) Spotify was taken back to the
+    // start of the same song, over and over; it moves on instead.
     if (spotifyPlaying &&
         spotifyDuration > 10 &&
         spotifyLeft < 5 &&
-        left > spotifyLeft + 6) {
+        left > spotifyLeft + 6 &&
+        left < spotifyLeft + 30) {
       try {
         await _controller.runJavaScript(
           _holdScript((spotifyDuration - left).clamp(0, spotifyDuration)),
@@ -1631,6 +1740,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
           label.contains('pause') ||
           label.contains('pausa');
       _track = track;
+      _spotifyAd = values?['ad'] == true;
       _canGoBack = back;
       _tick++;
       // Every 600 ms (300 with the player open); every 1.2 s while the
@@ -1659,6 +1769,7 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
         pitchMessage: track == null ? '' : protectedMessage,
         playbackReady: track != null,
         keyStatus: 'unavailable',
+        isAd: _spotifyAd,
       );
       _notify();
     } on Object {

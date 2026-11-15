@@ -841,7 +841,7 @@ class _SpotifyLibraryScreenState extends State<SpotifyLibraryScreen> {
     // A chip changed during this read: its answer is about the old one.
     final SpotifyLibrarySegment asked = _filter;
     try {
-      final Object? raw = await _controller.runJavaScriptReturningResult(
+      final Object raw = await _controller.runJavaScriptReturningResult(
         'window.__tpWant=${jsonEncode(_filter.name)};$_desktopLibraryScript',
       );
       final Map<Object?, Object?>? values = _decode(raw);
