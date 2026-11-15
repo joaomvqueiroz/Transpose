@@ -1653,6 +1653,17 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
       }
     } else if (heard.playing) {
       _soundWaitTicks = 0;
+      // YouTube starts a video opened without a tap muted, and the session
+      // gives it its sound only when the page reports the id it opened. On
+      // iPhone it reported another one: the time ran with no sound at all
+      // (Spotify silent behind it). The copy's sound is turned on here.
+      if (heard.muted) {
+        try {
+          await shadow.command('unmute');
+        } on Object {
+          // Tried again at the next step.
+        }
+      }
       _step(
         heard.muted
             ? 'Som: o YouTube toca, mas sem som (mudo).'
