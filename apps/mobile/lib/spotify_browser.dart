@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:gecko_view/gecko_view.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -1103,7 +1104,48 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
   String? _shadowStartError;
   int _soundWaitTicks = 0;
 
+  static const String _copyProbeScript = r'''(() => {
+    const all = Array.from(document.querySelectorAll('video, audio'));
+    const player = document.getElementById('movie_player');
+    const real = player && (player.wrappedJSObject || player);
+    let yt = '';
+    try {
+      yt = real && real.isMuted
+        ? 'ytMuted=' + real.isMuted() + ' ytVol=' + real.getVolume() +
+          ' ytState=' + real.getPlayerState()
+        : 'sem api';
+    } catch (e) { yt = 'api: ' + e; }
+    return location.pathname + location.search.slice(0, 20) + ' | ' +
+      all.map((v) => v.tagName + ' paused=' + v.paused + ' muted=' + v.muted +
+        ' vol=' + v.volume + ' t=' + Math.round(v.currentTime) +
+        ' ready=' + v.readyState + ' rate=' + v.playbackRate).join(' ; ') +
+      ' | ' + yt + ' | visivel=' + document.visibilityState;
+  })()''';
+
+  static const MethodChannel _logChannel = MethodChannel(
+    'transpono/background',
+  );
+  String? _lastLogged;
+  DateTime _lastLoggedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// iPhone: a line in the phone's system log (read over USB), never on
+  /// screen. The same line again only every few seconds.
+  void _log(String text) {
+    if (defaultTargetPlatform != TargetPlatform.iOS || _disposed) return;
+    final DateTime now = DateTime.now();
+    if (text == _lastLogged &&
+        now.difference(_lastLoggedAt) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastLogged = text;
+    _lastLoggedAt = now;
+    unawaited(
+      _logChannel.invokeMethod<void>('log', text).catchError((Object _) {}),
+    );
+  }
+
   void _step(String? text) {
+    if (text != null) _log(text);
     if (!_diagnoses || _disposed) return;
     String? value = text;
     if (value != null && value.length > 160) {
@@ -1544,6 +1586,27 @@ class SpotifyStudioSession extends YouTubeBrowserSession {
     }
     if (!_shadowLoaded) return;
     final YouTubeMediaState heard = shadow.media;
+    if (_tick % 10 == 0) {
+      _log(
+        'estado: video=${heard.hasVideo} toca=${heard.playing} '
+        'mudo=${heard.muted} anuncio=${heard.isAd} '
+        'pos=${heard.position.toStringAsFixed(1)}/'
+        '${heard.duration.toStringAsFixed(1)} id=${heard.videoId} '
+        'aberto=$_shadowVideoId spotify=$spotifyPlaying '
+        '${spotifyPosition.toStringAsFixed(1)} erro=${shadow.error} '
+        'tom=${heard.pitchStatus} ${heard.pitchMessage}',
+      );
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        // The element itself, read straight from the page.
+        try {
+          final Object page = await shadow.controller
+              .runJavaScriptReturningResult(_copyProbeScript);
+          _log('pagina: $page');
+        } on Object catch (failure) {
+          _log('pagina: sem resposta ($failure)');
+        }
+      }
+    }
     if (!heard.hasVideo) {
       _soundWaitTicks++;
       if (_soundWaitTicks > 20) {

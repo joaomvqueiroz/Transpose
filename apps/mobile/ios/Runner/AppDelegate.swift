@@ -96,6 +96,11 @@ final class TransponoBackground: NSObject {
       case "stop":
         self.stop()
         result(nil)
+      case "log":
+        // The sound's steps, readable from a computer over USB (the
+        // phone's system log); nothing of it is shown in the app.
+        NSLog("TransponoSom: %@", call.arguments as? String ?? "")
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
